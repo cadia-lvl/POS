@@ -6,15 +6,23 @@ DATA_DIR=./data
 RAW_DIR="$DATA_DIR"/raw
 FORMAT_DIR="$DATA_DIR"/format
 
-FIRST_STEP=1
-LAST_STEP=1
+FIRST_STEP=2
+LAST_STEP=2
 if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     mkdir -p "$FORMAT_DIR"
     echo "Formatting folds"
     for FOLD in $FOLDS; do
         for SPLIT in $SPLITS; do
             for TAG_TYPE in $TAG_TYPES; do
-                python preprocess/format.py format-tags "$RAW_DIR"/IFD2_SETS/"$FOLD""$SPLIT".txt "$FORMAT_DIR"/IFD-"$FOLD""$SPLIT"."$TAG_TYPE" --tag_type "$TAG_TYPE"
+                IN_FILE="$RAW_DIR"/IFD2_SETS/"$FOLD""$SPLIT".txt
+                OUT_FILE="$FORMAT_DIR"/IFD-"$FOLD""$SPLIT"."$TAG_TYPE"
+                echo "$IN_FILE -> $OUT_FILE"
+                python preprocess/format.py format-tags "$IN_FILE" "$OUT_FILE" --tag_type "$TAG_TYPE"
+
+                IN_FILE="$RAW_DIR"/MIM-GOLD-1_0_SETS/MIM-GOLD-1_0_SETS/"$FOLD""$SPLIT".plain
+                OUT_FILE="$FORMAT_DIR"/GOLD-"$FOLD""$SPLIT"."$TAG_TYPE"
+                echo "$IN_FILE -> $OUT_FILE"
+                python preprocess/format.py format-tags "$IN_FILE" "$OUT_FILE" --tag_type "$TAG_TYPE"
             done
         done
     done

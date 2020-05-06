@@ -1,5 +1,4 @@
 #! /usr/bin/env python3
-
 """
     ABLTagger: Augmented BiDirectional LSTM Tagger
 
@@ -22,12 +21,15 @@
 """
 __license__ = "Apache 2.0"
 
-import random, sys, os
+import random
+import sys
+import os
 from itertools import cycle
 from datetime import datetime
 from time import time
 import argparse
 import csv
+from typing import List, Tuple
 
 from ABLTagger import ABLTagger, Embeddings, Vocab, Utils
 
@@ -97,7 +99,7 @@ def evaluate_tagging(tagger, test_data, morphlex_flag=False, coarse_flag=False):
                 if tagger.word_frequency[w] == 0:
                     unk_total += 1
 
-    filename = args.data_folder + format(args.dataset_fold, '02') + 'PM.txt__tagger_out'
+    filename = FILE_PREFIX + 'PM.txt__tagger_out'
     f = open(filename, "w")
     f.write(eval_out)
     f.close()
@@ -112,12 +114,9 @@ def write_results_to_file(epoch, evaluation, loss, learning_rate, morphlex_flag,
     if not os.path.exists('./evaluate/'):
         os.makedirs('./evaluate')
 
-    file_name = args.corpus + '_' + str(format(args.dataset_fold, '02')) + '_' + args.training_type + '_' + args.optimization + '_' + str(args.learning_rate)
+    file_name = args.corpus + '_' + str(format(args.dataset_fold, '02')) + '_' + args.optimization + '_' + str(args.learning_rate)
 
-    if morphlex_flag:
-        word_acc, sent_acc, train_acc, morphlex_acc, both_acc, known_acc, unknown_acc, word_counts = evaluation
-    else:
-        word_acc, sent_acc, known_acc, unknown_acc = evaluation
+    word_acc, sent_acc, known_acc, unknown_acc = evaluation
 
     with open('./evaluate/' + file_name, mode='a+') as results_file:
         results_writer = csv.writer(results_file, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
@@ -136,22 +135,22 @@ def write_results_to_file(epoch, evaluation, loss, learning_rate, morphlex_flag,
                                  (str(args.learning_rate_min) if args.optimization == 'CyclicalSGD' else ""),
                                  str(learning_rate),
                                  args.optimization,
-                                 args.training_type,
                                  ("X" if epoch == total_epochs else ""),
                                  str(args.learning_rate_decay),
-                                 str(morphlex_flag), args.coarse_type, str(num_words)])
+                                 str(morphlex_flag), str(num_words)])
 
-def tag_testset(test_data, tagger, coarse_flag = False):
-    filename = args.data_folder + format(args.dataset_fold, '02') + 'PM.txt__tagger_output'
+
+def tag_testset(test_data, tagger, coarse_flag=False):
+    filename = FILE_PREFIX + 'PM.txt__tagger_output'
     with open(filename, "w") as f:
         for sent in test_data:
             print(sent)
             if coarse_flag:
-                words, golds, coarse_tags = map(list, zip(*sent))
+                words, _, coarse_tags = map(list, zip(*sent))
                 f.write("\n".join([x[0] + "\t" + x[1] for x in tagger.tag_sent(words, coarse_tags)]) + '\n')
                 f.write("\n")
             else:
-                words, golds = map(list, zip(*sent))
+                words, _ = map(list, zip(*sent))
                 f.write("\n".join([x[0] + "\t" + x[1] for x in tagger.tag_sent(words)]) + '\n')
                 f.write("\n")
 
@@ -164,18 +163,25 @@ def tag_coarse(input, tagger):
 
     with open(output_file, "w") as f:
         tokens = []
-        tags = []
-        for i in input_text:
-            if i.strip() == '':
-                if tokens[0][0].isupper() and not tokens[0] in tagger.vw.w2i:
-                    tokens[0] = tokens[0][0] + tokens[0][1:]
-                f.write("\n".join([x[0] + "\t" + x[1] for x in tagger.tag_sent(tokens)]) + '\n')
+        for line in input_text:
+            line = line.strip()
+            # We read a blank line - sentence has been read.
+            if not line:
+                # WTF?
+                #if tokens[0][0].isupper() and not tokens[0] in tagger.vw.w2i:
+                #    tokens[0] = tokens[0][0] + tokens[0][1:]
+                for word, tag in tagger.tag_sent(tokens):
+                    f.write(f'{word}\t{tag}\n')
                 f.write("\n")
                 tokens = []
-                tags = []
             else:
-                tokens.append(i.split()[0])
-                tags.append(i.split()[1].strip())
+                token, _ = i.split()
+                tokens.append(token)
+    if len(tokens) != 0:
+        print("Gotcha!")
+        for word, tag in tagger.tag_sent(tokens):
+            f.write(f'{word}\t{tag}\n')
+        f.write("\n")
 
 
 def create_tagged_test_file(test_file, coarse_tagged_file, output_file):
@@ -202,7 +208,7 @@ def create_tagged_test_file(test_file, coarse_tagged_file, output_file):
     fixed_file.close()
 
 
-def train_and_evaluate_tagger(tagger, training_data, test_data, total_epochs, evaluate = True, morphlex=None, coarse=None):
+def train_and_evaluate_tagger(tagger, training_data, test_data, total_epochs, evaluate=True, morphlex=None, coarse=None):
     '''
     Train the tagger, report progress to console and write to file.
     '''
@@ -273,12 +279,10 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate_min', '-l_min', help="Learning rate min for Cyclical SGD", type=float, default=0.01)
     parser.add_argument('--dropout', '-d', help="Dropout rate", type=float, default=0.0)
     # EXTERNAL DATA
-    parser.add_argument('--data_folder', '-data', help="Folder containing training data", default='./data/')
-    parser.add_argument('--use_morphlex', '-morphlex', help="File with morphological lexicon embeddings in ./extra folder")
+    parser.add_argument('--data_folder', '-data', help="Folder containing training data", default='./data/format/')
+    parser.add_argument('--use_morphlex', '-morphlex', help="File with morphological lexicon embeddings in ./extra folder. Example file: ./extra/dmii.or", default='./extra/dmii.vectors')
     parser.add_argument('--load_characters', '-load_chars', help="File to load characters from", default='./extra/characters_training.txt')
     parser.add_argument('--load_coarse_tagset', '-load_coarse', help="Load embeddings file for coarse grained tagset", default='./extra/word_class_vectors.txt')
-    parser.add_argument('--coarse_type', '-coarse', help="Select type of coarse data", choices=['word_class'], default='word_class')
-    parser.add_argument('--training_type','-type', help='Select training type: coarse, fine or combined.', choices=['coarse', 'fine', 'combined'], default="combined")
     # TRAIN AND EVALUATE
     parser.add_argument('--corpus', '-c', help="Name of training corpus", default='otb')
     parser.add_argument('--dataset_fold', '-fold', help="select which dataset to use (1-10)", type=int, default=1)
@@ -303,97 +307,58 @@ if __name__ == '__main__':
             char_list.append(c)
     VocabCharacters = Vocab.from_corpus([char_list])
 
-    if args.use_morphlex is not None:
-        print("Building morphological lexicon embeddings...")
-        morphlex_embeddings = Embeddings('./extra/' + args.use_morphlex)
-        print("Morphological lexicon embeddings in place")
-    else:
-        morphlex_embeddings = None
+    morphlex_embeddings = Embeddings(args.use_morphlex)
 
-    training_file_ending_fine = "TM.txt"
-    test_file_ending_fine = "PM.txt"
+    training_file_ending_coarse = "TM.coarse"
+    test_file_ending_coarse = "PM.coarse"
+    training_file_ending_fine = "TM.fine"
+    test_file_ending_fine = "PM.fine"
 
-    if args.coarse_type:
-        training_file_ending_coarse = "TM_" + args.coarse_type + ".txt"
-        test_file_ending_coarse = "PM_" + args.coarse_type + ".txt"
+    TaggedToken = Tuple[str, str]
+    DbblTaggedToken = Tuple[str, str, str]
+    TaggedSentence = List[TaggedToken]
+    Corpus = List[TaggedSentence]
 
-    if args.training_type == 'fine':
-        total_epochs = args.epochs_fine_grained
-        train_file = args.data_folder + format(args.dataset_fold, '02') + training_file_ending_fine
-        test_file = args.data_folder + format(args.dataset_fold, '02') + test_file_ending_fine
-        train = list(Utils.read(train_file))
-        test = list(Utils.read(test_file))
+    # First train or load a coarse tagger without evaluation - then tag and finally run the fine tagger
+    FILE_PREFIX = f"{args.data_folder}IFD-{args.dataset_fold:02}"
 
-        words, word_frequency, tags_fine = Utils.create_vocabularies(train_file)
-        with open(args.data_folder + 'WORDS_' + format(args.dataset_fold, '02') + training_file_ending_fine, "w") as word_freq_file:
-            for i in words:
-                word_freq_file.write(i.strip() + '\t' + str(word_frequency[i]) + '\n')
-        with open(args.data_folder + 'TAGS_FINE_' + format(args.dataset_fold, '02') + training_file_ending_fine, "w") as tag_file_fine:
-            for i in tags_fine:
-                tag_file_fine.write(i.strip() + '\t')
-        VocabWords, WordFrequency = Utils.build_word_dict(list(Utils.read(args.data_folder + 'WORDS_' + format(args.dataset_fold, '02') + training_file_ending_fine)))
-        VocabTagsFine = Utils.build_vocab_tags(args.data_folder + 'TAGS_FINE_' + format(args.dataset_fold, '02') + training_file_ending_fine)
-        tagger = ABLTagger(VocabCharacters, VocabWords, VocabTagsFine, WordFrequency, morphlex_embeddings, None, args)
-        train_and_evaluate_tagger(tagger, train, test, args.epochs_fine_grained, True, args.use_morphlex)
+    train_file_coarse = FILE_PREFIX + training_file_ending_coarse
+    test_file_coarse = FILE_PREFIX + test_file_ending_coarse
+    train_coarse: Corpus = list(Utils.read(train_file_coarse))
+    test_coarse: Corpus = list(Utils.read(test_file_coarse))
 
-    elif args.training_type == 'coarse':
-        total_epochs = args.epochs_coarse_grained
-        train_file = args.data_folder + format(args.dataset_fold, '02') + training_file_ending_coarse
-        test_file = args.data_folder + format(args.dataset_fold, '02') + test_file_ending_coarse
-        train = list(Utils.read(train_file))
-        test = list(Utils.read(test_file))
+    train_file_fine = FILE_PREFIX + training_file_ending_fine
+    test_file_fine = FILE_PREFIX + test_file_ending_fine
+    train_fine: Corpus = list(Utils.read(train_file_fine))
 
-        words, word_frequency, tags_coarse = Utils.create_vocabularies(train_file)
-        with open(args.data_folder + 'WORDS_' + format(args.dataset_fold, '02') + training_file_ending_coarse, "w") as word_freq_file:
-            for i in words:
-                word_freq_file.write(i.strip() + '\t' + str(word_frequency[i]) + '\n')
-        with open(args.data_folder + 'TAGS_COARSE_' + args.coarse_type + '_' + format(args.dataset_fold, '02') + training_file_ending_coarse, "w") as tag_file_coarse:
-            for i in tags_coarse:
-                tag_file_coarse.write(i.strip() + '\t')
-        VocabWords, WordFrequency = Utils.build_word_dict(list(Utils.read(args.data_folder + 'WORDS_' + format(args.dataset_fold, '02') + training_file_ending_coarse)))
-        VocabTagsCoarse = Utils.build_vocab_tags(args.data_folder + 'TAGS_COARSE_' + args.coarse_type + '_' + format(args.dataset_fold, '02') + training_file_ending_coarse)
-        tagger = ABLTagger(VocabCharacters, VocabWords, VocabTagsCoarse, WordFrequency, morphlex_embeddings, None, args)
-        train_and_evaluate_tagger(tagger, train, test, args.epochs_coarse_grained, True, args.use_morphlex)
+    words, word_frequency, tags_coarse = Utils.create_vocabularies(train_file_coarse)
+    words, word_frequency, tags_fine = Utils.create_vocabularies(train_file_fine)
 
-    elif args.training_type == 'combined':
-        # First train or load a coarse tagger without evaluation - then tag and finally run the fine tagger
+    WORDS_FILE = f"{FILE_PREFIX}_WORDS{training_file_ending_coarse}"
+    with open(WORDS_FILE, "w") as word_freq_file:
+        for i in words:
+            word_freq_file.write(i.strip() + '\t' + str(word_frequency[i]) + '\n')
+    TAGS_COARSE_FILE = f"{FILE_PREFIX}_TAGS_COARSE{training_file_ending_coarse}"
+    with open(TAGS_COARSE_FILE, "w") as tag_file_coarse:
+        for i in tags_coarse:
+            tag_file_coarse.write(i.strip() + '\t')
+    TAGS_FINE_FILE = f"{FILE_PREFIX}_TAGS_FINE{training_file_ending_coarse}"
+    with open(TAGS_FINE_FILE, "w") as tag_file_fine:
+        for i in tags_fine:
+            tag_file_fine.write(i.strip() + '\t')
 
-        total_epochs_coarse = args.epochs_coarse_grained
-        total_epochs_fine = args.epochs_fine_grained
+    VocabWords, WordFrequency = Utils.build_word_dict(list(Utils.read(WORDS_FILE)))
+    VocabTagsCoarse = Utils.build_vocab_tags(TAGS_COARSE_FILE)
+    VocabTagsFine = Utils.build_vocab_tags(TAGS_FINE_FILE)
+    tagger_coarse = ABLTagger(VocabCharacters, VocabWords, VocabTagsCoarse, WordFrequency, morphlex_embeddings, None, args)
+    print("Training pre-tagger... this will take hours!")
+    train_and_evaluate_tagger(tagger_coarse, train_coarse, test_coarse, args.epochs_coarse_grained, False, args.use_morphlex)
+    tag_coarse(test_file_coarse, tagger_coarse)
 
-        train_file_coarse = args.data_folder + format(args.dataset_fold, '02') + training_file_ending_coarse
-        test_file_coarse = args.data_folder + format(args.dataset_fold, '02') + test_file_ending_coarse
-        train_coarse = list(Utils.read(train_file_coarse))
-        test_coarse = list(Utils.read(test_file_coarse))
+    temp_test_file = test_file_coarse + '__for_fine_grained'
+    create_tagged_test_file(test_file_fine, test_file_coarse + '__temp', temp_test_file)
+    coarse_embeddings = Embeddings(args.load_coarse_tagset)
+    test_fine = list(Utils.read(temp_test_file, 3))
 
-        train_file_fine = args.data_folder + format(args.dataset_fold, '02') + training_file_ending_fine
-        test_file_fine = args.data_folder + format(args.dataset_fold, '02') + test_file_ending_fine
-        train_fine = list(Utils.read(train_file_fine))
-
-        words, word_frequency, tags_coarse = Utils.create_vocabularies(train_file_coarse)
-        words, word_frequency, tags_fine = Utils.create_vocabularies(train_file_fine)
-        with open(args.data_folder + 'WORDS_' + format(args.dataset_fold, '02') + training_file_ending_coarse, "w") as word_freq_file:
-            for i in words:
-                word_freq_file.write(i.strip() + '\t' + str(word_frequency[i]) + '\n')
-        with open(args.data_folder + 'TAGS_COARSE_' + args.coarse_type + '_' + format(args.dataset_fold, '02') + training_file_ending_coarse, "w") as tag_file_coarse:
-            for i in tags_coarse:
-                tag_file_coarse.write(i.strip() + '\t')
-        with open(args.data_folder + 'TAGS_FINE_' + format(args.dataset_fold, '02') + training_file_ending_fine, "w") as tag_file_fine:
-            for i in tags_fine:
-                tag_file_fine.write(i.strip() + '\t')
-
-        VocabWords, WordFrequency = Utils.build_word_dict(list(Utils.read(args.data_folder + 'WORDS_' + format(args.dataset_fold, '02') + training_file_ending_coarse)))
-        VocabTagsCoarse = Utils.build_vocab_tags(args.data_folder + 'TAGS_COARSE_' + args.coarse_type + '_' + format(args.dataset_fold, '02') + training_file_ending_coarse)
-        VocabTagsFine = Utils.build_vocab_tags(args.data_folder + 'TAGS_FINE_' + format(args.dataset_fold, '02') + training_file_ending_fine)
-        tagger_coarse = ABLTagger(VocabCharacters, VocabWords, VocabTagsCoarse, WordFrequency, morphlex_embeddings, None, args)
-        print("Training pre-tagger... this will take hours!")
-        train_and_evaluate_tagger(tagger_coarse, train_coarse, test_coarse, args.epochs_coarse_grained, False, args.use_morphlex)
-        tag_coarse(test_file_coarse, tagger_coarse)
-
-        temp_test_file = test_file_coarse + '__for_fine_grained'
-        create_tagged_test_file(test_file_fine, test_file_coarse + '__temp', temp_test_file)
-        coarse_embeddings = Embeddings(args.load_coarse_tagset)
-        test_fine = list(Utils.read(temp_test_file, 3))
-
-        tagger_fine = ABLTagger(VocabCharacters, VocabWords, VocabTagsFine, WordFrequency, morphlex_embeddings, coarse_embeddings, args)
-        train_and_evaluate_tagger(tagger_fine, train_fine, test_fine, args.epochs_fine_grained, True, args.use_morphlex, True)
+    tagger_fine = ABLTagger(VocabCharacters, VocabWords, VocabTagsFine, WordFrequency, morphlex_embeddings, coarse_embeddings, args)
+    train_and_evaluate_tagger(tagger_fine, train_fine, test_fine, args.epochs_fine_grained, True, args.use_morphlex, True)

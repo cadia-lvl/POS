@@ -30,10 +30,9 @@ from collections import defaultdict, Counter
 from itertools import count
 
 import dynet_config
-dynet_config.set(mem=4096, random_seed=42)
+dynet_config.set(mem=32000, random_seed=42)
 random.seed(42)
 import dynet as dy
-import gc
 
 
 class Utils:
@@ -217,12 +216,10 @@ class ABLTagger():
         # MLP on top of biLSTM outputs, word/char out -> hidden -> num tags
         self.pH = self.model.add_parameters((self.dim.hidden, self.dim.hidden_input))  # hidden-dim, hidden-input-dim
         self.pO = self.model.add_parameters((self.vt.size(), self.dim.hidden))  # vocab-size, hidden-dim
-        gc.collect()
 
         # word-level LSTMs
         self.fwdRNN = dy.LSTMBuilder(1, self.dim.word_input, self.dim.word_output, self.model) # layers, input-dim, output-dim
         self.bwdRNN = dy.LSTMBuilder(1, self.dim.word_input, self.dim.word_output, self.model)
-        gc.collect()
 
         # char-level LSTMs
         self.cFwdRNN = dy.LSTMBuilder(1, self.dim.char_input, self.dim.char_output, self.model)

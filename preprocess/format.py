@@ -34,5 +34,21 @@ def format_tags(input, output, tag_type):
         output.write(f(line))
 
 
+@cli.command()
+@click.argument('inputs', nargs=-1)
+@click.argument('output', type=click.File('w+'))
+def gather_tags(inputs, output):
+    tags = set()
+    for input in inputs:
+        with open(input) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    _, tag = line.split()
+                    tags.add(tag)
+    for tag in sorted(list(tags)):
+        output.write(f'{tag}\n')
+
+
 if __name__ == '__main__':
     cli()
