@@ -29,12 +29,10 @@ import datetime
 
 import numpy as np
 import dynet as dy
-import dynet_config
 import csv
 
 import data
 
-dynet_config.set(mem=32000, random_seed=42)
 random.seed(42)
 
 

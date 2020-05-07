@@ -25,6 +25,9 @@ import sys
 import os
 import argparse
 
+import dynet_config
+dynet_config.set(mem=32000, random_seed=42)
+
 from ABLTagger import ABLTagger
 from data import Embeddings, Vocab, Corpus
 import data
