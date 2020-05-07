@@ -24,127 +24,18 @@ __license__ = "Apache 2.0"
 
 
 import random
-import numpy as np
-import sys
-from collections import defaultdict, Counter
-from itertools import count
+from time import time
+import datetime
 
+import numpy as np
+import dynet as dy
 import dynet_config
+import csv
+
+import data
+
 dynet_config.set(mem=32000, random_seed=42)
 random.seed(42)
-import dynet as dy
-
-
-class Utils:
-    @staticmethod
-    def build_word_dict(train_words):
-        words = []
-        word_frequency = Counter()
-        for lina in train_words:
-            for w, p in lina:
-                words.append(w)
-                word_frequency[w] += int(p)
-        return Vocab.from_corpus([words]), word_frequency
-
-    @staticmethod
-    def build_vocab_tags(tag_file):
-        train_tags = []
-        for tagline in open(tag_file):
-            tags = tagline.split('\t')
-            for t in tags:
-                train_tags.append(t)
-        return Vocab.from_corpus([train_tags])
-
-    @staticmethod
-    def create_vocabularies(training_file):
-        word_frequency = Counter()
-        words = []
-        tags = []
-        train = Utils.read(training_file)
-        for sent in train:
-            for w, p in sent:
-                words.append(w)
-                tags.append(p)
-                word_frequency[w] += 1
-
-        words = list(dict.fromkeys(words))
-        tags = list(dict.fromkeys(tags))
-        return words, word_frequency, tags
-
-    @staticmethod
-    def read(fname, cols=2):
-        sent = []
-        for line in open(fname):
-            line = line.strip().split()
-            if not line:
-                if sent: yield sent
-                sent = []
-            elif cols == 3:
-                w, p, t = line
-                sent.append((w, p, t))
-            else:
-                try:
-                    w, p = line
-                    sent.append((w, p))
-                except:
-                    print(line)
-                    sys.exit(1)
-        if sent: yield sent
-
-    @staticmethod
-    def save_args(arguments, filename):
-        arg_dict = arguments.__dict__
-        args_keys = arg_dict.keys()
-        with open(filename, "w") as arg_file:
-            for i in args_keys:
-                if i not in ('model', 'tag_type', 'training_type'):
-                    arg_file.write('--' + i + '\n' + str(arg_dict[i]) + '\n')
-
-
-class Vocab:
-    def __init__(self, w2i=None):
-        if w2i is None: w2i = defaultdict(count(0).__next__)
-        self.w2i = dict(w2i)
-        self.i2w = {i: w for w, i in w2i.items()}
-
-    @classmethod
-    def from_corpus(cls, corpus):
-        w2i = defaultdict(count(0).__next__)
-        for sentence in corpus:
-            [w2i[word] for word in sentence]
-        return Vocab(w2i)
-
-    def size(self): return len(self.w2i.keys())
-
-
-class Embeddings:
-    def __init__(self, emb_file):
-        self.vocab = {}
-        with open(emb_file) as f:
-            for i, l in enumerate(f):
-                pass
-        key_number = i + 1
-        vector_length = 0
-
-        with open(emb_file) as f:
-            f.readline()
-            for i, line in enumerate(f):
-                fields = line.strip().split(";")
-                vector_length = len(eval(fields[1]))
-                break
-
-        self.embeddings = np.zeros((key_number, vector_length))
-
-        with open(emb_file) as f:
-            f.readline()
-            for i, line in enumerate(f):
-                fields = line.strip().split(";")
-                self.vocab[fields[0]] = i
-                self.embeddings[i] = eval(fields[1])
-                if key_number > 100:
-                    if i % int(key_number/100) == 0:
-                        print(str(int((i*100)/key_number)) + '%   ', end='\r')
-            print('100%', end='\r')
 
 
 # Layer Dimensions for Combined emb. model
@@ -166,29 +57,35 @@ class CombinedDims:
 class ABLTagger():
     START_OF_WORD = "<w>"
     END_OF_WORD = "</w>"
-    
-    def __init__(self, vocab_chars, vocab_words, vocab_tags, word_freq, morphlex_embeddings=None, coarse_embeddings=None, hyperparams=None):
-        self.model = dy.Model()
-        self.trainer = None
-        self.word_frequency = word_freq
 
-        self.vw = vocab_words
-        self.vt = vocab_tags
-        self.vc = vocab_chars
+    def __init__(self,
+                 vocab_chars: data.VocabMap,
+                 vocab_words: data.VocabMap,
+                 vocab_tags: data.VocabMap,
+                 word_freq: data.Counter,
+                 morphlex_embeddings: data.Embeddings = None,
+                 coarse_features_embeddings: data.Embeddings = None,
+                 hyperparams=None):
+        self.hp = hyperparams
+        self.model = dy.Model()
+        self.trainer = dy.SimpleSGDTrainer(self.model, learning_rate=self.hp.learning_rate)
+        self.word_frequency: data.Counter = word_freq
+
+        self.vw: data.VocabMap = vocab_words
+        self.vt: data.VocabMap = vocab_tags
+        self.vc: data.VocabMap = vocab_chars
 
         self.morphlex_flag = False
-        self.coarse_flag = False
-        if coarse_embeddings is not None:
-            self.coarse_flag = True
-            self.coarse_embeddings = coarse_embeddings.embeddings
-            self.coarse = coarse_embeddings.vocab
+        # If flag is set True then the model expects the coarse tag to be present in input (x)
+        self.coarse_features_flag = False
+        if coarse_features_embeddings is not None:
+            self.coarse_features_flag = True
+            self.coarse_features_embeddings = coarse_features_embeddings.embeddings
+            self.coarse_features = coarse_features_embeddings.vocab
         if morphlex_embeddings is not None:
             self.morphlex_flag = True
             self.morphlex_embeddings = morphlex_embeddings.embeddings
             self.morphlex = morphlex_embeddings.vocab
-        if hyperparams is not None:
-            self.hp = hyperparams
-            self.set_trainer(self.hp.optimization)
 
         self.dim = CombinedDims()
         self.create_network()
@@ -200,7 +97,7 @@ class ABLTagger():
         if self.morphlex_flag:
             self.dim.word_input += self.dim.morphlex_lookup
 
-        if self.coarse_flag:
+        if self.coarse_features_flag:
             self.dim.word_input += self.dim.word_class_lookup
 
         self.WORDS_LOOKUP = self.model.add_lookup_parameters((self.vw.size(), self.dim.word_lookup))
@@ -209,33 +106,25 @@ class ABLTagger():
         if self.morphlex_flag:
             self.MORPHLEX_LOOKUP = self.model.add_lookup_parameters((len(self.morphlex_embeddings), self.dim.morphlex_lookup))
             self.MORPHLEX_LOOKUP.init_from_array(self.morphlex_embeddings)
-        if self.coarse_flag:
+        if self.coarse_features_flag:
             self.WORD_CLASS_LOOKUP = self.model.add_lookup_parameters((self.dim.word_class_lookup + 1, self.dim.word_class_lookup))
-            self.WORD_CLASS_LOOKUP.init_from_array(self.coarse_embeddings)
+            self.WORD_CLASS_LOOKUP.init_from_array(self.coarse_features_embeddings)
 
         # MLP on top of biLSTM outputs, word/char out -> hidden -> num tags
         self.pH = self.model.add_parameters((self.dim.hidden, self.dim.hidden_input))  # hidden-dim, hidden-input-dim
         self.pO = self.model.add_parameters((self.vt.size(), self.dim.hidden))  # vocab-size, hidden-dim
 
         # word-level LSTMs
-        self.fwdRNN = dy.LSTMBuilder(1, self.dim.word_input, self.dim.word_output, self.model) # layers, input-dim, output-dim
+        self.fwdRNN = dy.LSTMBuilder(1, self.dim.word_input, self.dim.word_output, self.model)  # layers, input-dim, output-dim
         self.bwdRNN = dy.LSTMBuilder(1, self.dim.word_input, self.dim.word_output, self.model)
 
         # char-level LSTMs
         self.cFwdRNN = dy.LSTMBuilder(1, self.dim.char_input, self.dim.char_output, self.model)
         self.cBwdRNN = dy.LSTMBuilder(1, self.dim.char_input, self.dim.char_output, self.model)
-
-    def set_trainer(self, optimization):
-        if optimization == 'MomentumSGD':
-            self.trainer = dy.MomentumSGDTrainer(self.model, learning_rate=self.hp.learning_rate)
-        if optimization == 'CyclicalSGD':
-            self.trainer = dy.CyclicalSGDTrainer(self.model, learning_rate_max=self.hp.learning_rate_max, learning_rate_min=self.hp.learning_rate_min)
-        if optimization == 'Adam':
-            self.trainer = dy.AdamTrainer(self.model)
-        if optimization == 'RMSProp':
-            self.trainer = dy.RMSPropTrainer(self.model)
-        else:
-            self.trainer = dy.SimpleSGDTrainer(self.model, learning_rate=self.hp.learning_rate)
+        self.fwdRNN.set_dropout(self.hp.dropout)
+        self.bwdRNN.set_dropout(self.hp.dropout)
+        self.cFwdRNN.set_dropout(self.hp.dropout)
+        self.cBwdRNN.set_dropout(self.hp.dropout)
 
     def dynamic_rep(self, w, cf_init, cb_init):
         if self.word_frequency[w] >= self.hp.words_min_freq:
@@ -262,32 +151,35 @@ class ABLTagger():
         else:
             return self.MORPHLEX_LOOKUP[self.morphlex[w]]
 
-    def coarse_rep(self, t):
-        if t not in self.coarse.keys():
+    def coarse_features_rep(self, t):
+        if t not in self.coarse_features.keys():
             return dy.zeros(self.dim.word_class_lookup)
         else:
-            return self.WORD_CLASS_LOOKUP[self.coarse[t]]
+            return self.WORD_CLASS_LOOKUP[self.coarse_features[t]]
 
     def word_and_char_rep(self, w, cf_init, cb_init, t='0'):
         wembs = self.word_rep(w)
         cembs = self.char_rep(w, cf_init, cb_init)
-        if self.coarse_flag:
-            coarse = self.coarse_rep(t)
+        if self.coarse_features_flag:
+            coarse_features = self.coarse_features_rep(t)
         if self.morphlex_flag:
             morphlex = self.morphlex_rep(w)
 
-        if self.coarse_flag and self.morphlex_flag:
-            return dy.concatenate([wembs, cembs, morphlex, coarse])
-        elif self.coarse_flag:
-            return dy.concatenate([wembs, cembs, coarse])
+        if self.coarse_features_flag and self.morphlex_flag:
+            return dy.concatenate([wembs, cembs, morphlex, coarse_features])
+        elif self.coarse_features_flag:
+            return dy.concatenate([wembs, cembs, coarse_features])
         elif self.morphlex_flag:
             return dy.concatenate([wembs, cembs, morphlex])
         else:
             return dy.concatenate([wembs, cembs])
 
-    def build_tagging_graph(self, words, tags):
-        dy.renew_cg()
-
+    def build_tagging_graph(self, x):
+        """
+        Graph is built per input. Each input should be a complete sentence
+        x is the input. Will be treated as (token, coarse_tag) if model should use coarse tag feature.
+        Otherwise (token) only.
+        """
         # Initialize the LSTMs
         f_init = self.fwdRNN.initial_state()
         b_init = self.bwdRNN.initial_state()
@@ -295,12 +187,10 @@ class ABLTagger():
         cf_init = self.cFwdRNN.initial_state()
         cb_init = self.cBwdRNN.initial_state()
 
-        # Get the word vectors, a 128-dim vector expression for each word.
-        #if self.coarse_flag:
-        if tags is not None:
-            wembs = [self.word_and_char_rep(w, cf_init, cb_init, t[0]) for w, t in zip(words, tags)]
+        if self.coarse_features_flag:
+            wembs = [self.word_and_char_rep(w, cf_init, cb_init, t) for w, t in zip(*x)]
         else:
-            wembs = [self.word_and_char_rep(w, cf_init, cb_init) for w in words]
+            wembs = [self.word_and_char_rep(w, cf_init, cb_init) for w in x]
 
         if self.hp.noise > 0:
             wembs = [dy.noise(we, self.hp.noise) for we in wembs]
@@ -315,42 +205,156 @@ class ABLTagger():
         # Feed each biLSTM state to an MLP
         return [self.pO * (dy.tanh(self.pH * x)) for x in bi_exps]
 
-    def sent_loss(self, sent):
-        words, tags = map(list, zip(*sent))
-        vecs = self.build_tagging_graph(words, tags)
-        errs = []
-        for v, t in zip(vecs, tags):
-            tid = self.vt.w2i[t]
-            err = dy.pickneglogsoftmax(v, tid)
-            errs.append(err)
-        return dy.esum(errs)
-
-    def tag_sent(self, words, in_tags=None):
-        vecs = self.build_tagging_graph(words, in_tags)
+    def tag_sent(self, x) -> data.List[str]:
+        """x is the input. Will be treated as (token, coarse_tag) if model should use coarse tag feature.
+        Otherwise (token) only."""
+        vecs = self.build_tagging_graph(x)
         vecs = [dy.softmax(v) for v in vecs]
         probs = [v.npvalue() for v in vecs]
         tags = []
         for prb in probs:
             tag = np.argmax(prb)
             tags.append(self.vt.i2w[tag])
-        return zip(words, tags)
+        return tags
 
-    def update_trainer(self):
-        self.trainer.update()
+    def train_and_evaluate_tagger(self,
+                                  training_data: data.DataPairs,
+                                  test_data: data.DataPairs,
+                                  total_epochs: int,
+                                  out_dir: str,
+                                  evaluate=True):
+        '''
+        Train the tagger, report progress to console and write to file.
+        '''
+        x_y = list(zip(*training_data))
+        x_y_test = list(zip(*test_data))
+        for epoch in range(start=1, stop=total_epochs + 1):
+            cum_loss = num_tagged = 0
+            batch = 0
 
-    def train(self, epochs, training_data):
-        self.setup(training_data)
+            random.shuffle(x_y)
+            # x,y is a single training sentence: (tokens, tags)
+            for x, y in zip(*x_y):
+                batch += 1
+                # Clear the graph
+                dy.renew_cg()
+                # y is put in the tagging graph, but only used as input if
+                # coarse_features_flag=True
+                vecs = self.build_tagging_graph(x)
+                errs = []
+                for v, t in zip(vecs, y):
+                    tid = self.vt.w2i[t]
+                    err = dy.pickneglogsoftmax(v, tid)
+                    errs.append(err)
+                loss = dy.esum(errs)
 
-        for _ in range(epochs):
-            random.shuffle(training_data)
-            for sent in training_data:
-                loss_exp = self.sent_loss(sent)
-                loss_exp.backward()
-                self.update_trainer()
+                cum_loss += loss.scalar_value()
+                num_tagged += len(x)
+                loss.backward()
+                self.trainer.update()
+
+                if batch % 10 == 0:
+                    print(f'{time()}: epoch={epoch}/{total_epochs}, avg_loss={cum_loss / num_tagged}')
+
+            # Evaluate
+            if evaluate:
+                evaluation = self.evaluate_tagging(x_y_test, file_out=f'{out_dir}/{"coarse" if self.coarse_features_flag else "fine"}eval_{epoch}_tags.txt')
+                print(evaluation)
+                write_results_to_file(file_out=f'{out_dir}/{"coarse" if self.coarse_features_flag else "fine"}eval_results.tsv',
+                                      epoch=epoch,
+                                      evaluation=evaluation,
+                                      loss=cum_loss / num_tagged,
+                                      learning_rate=self.trainer.learning_rate,
+                                      morphlex_flag=self.morphlex_flag,
+                                      total_epochs=total_epochs,
+                                      num_words=len(test_data))
+            # decay
+            if self.hp.learning_rate_decay:
+                self.trainer.learning_rate = self.trainer.learning_rate * (1 - self.hp.learning_rate_decay)
+
+        # Show hyperparameters used when we are done
+        print("\nHP opt={} epochs={} emb_noise={} ".format(self.hp.optimization, total_epochs, self.hp.noise))
+
+    def evaluate_tagging(self,
+                         test_data,
+                         file_out: str):
+        eval_out = ''
+        if self.morphlex_flag:
+            good = total = good_sent = total_sent = unk_good = morphlex_good = morphlex_total = train_good = train_total = both_good = both_total = unk_total = 0.0
+        else:
+            good = total = good_sent = total_sent = unk_good = unk_total = 0.0
+        for sent in test_data:
+            if self.coarse_features_flag:
+                words, golds, coarse_tags = map(list, zip(*sent))
+                tags = [t for t in self.tag_sent((words, coarse_tags))]
+            else:
+                words, golds = map(list, zip(*sent))
+                tags = [t for _, t in self.tag_sent(words)]
+            if tags == golds:
+                good_sent += 1
+            total_sent += 1
+            for go, gu, w in zip(golds, tags, words):
+                eval_out += f'{w}\t{go}\t{gu}\n'
+                total += 1
+                if self.morphlex_flag:
+                    if go == gu:
+                        good += 1
+                        if w in self.morphlex.keys():
+                            if self.word_frequency[w] == 0:
+                                morphlex_good += 1
+                            else:
+                                both_good += 1
+                        else:
+                            if self.word_frequency[w] == 0:
+                                unk_good += 1
+                            else:
+                                train_good += 1
+                    if w in self.morphlex.keys():
+                        if self.word_frequency[w] == 0:
+                            morphlex_total += 1
+                        else:
+                            both_total += 1
+                    else:
+                        if self.word_frequency[w] == 0:
+                            unk_total += 1
+                        else:
+                            train_total += 1
+                else:
+                    if go == gu:
+                        good += 1
+                        if self.word_frequency[w] == 0:
+                            unk_good += 1
+                    if self.word_frequency[w] == 0:
+                        unk_total += 1
+
+        with open(file_out, "w") as f:
+            f.write(eval_out)
+
+        if self.morphlex_flag:
+            eval_text = str(total) + "|" + str(train_total) + "|" + str(morphlex_total) + "|" + str(both_total) + "|" + str(unk_total)
+            return good / total, good_sent / total_sent, train_good / train_total, morphlex_good / morphlex_total, both_good / both_total, (good - unk_good) / (total - unk_total), unk_good / unk_total, eval_text
+        return good / total, good_sent / total_sent, (good - unk_good) / (total - unk_total), unk_good / unk_total
 
 
-    def save_trained_embeddings(self, emb_file):
-        self.model.save(emb_file)
+def write_results_to_file(file_out,
+                          epoch,
+                          evaluation,
+                          loss,
+                          learning_rate,
+                          morphlex_flag,
+                          total_epochs,
+                          num_words):
+    word_acc, sent_acc, known_acc, unknown_acc = evaluation
 
-    def load_model(self, emb_file):
-        self.model.populate(emb_file)
+    with open(file_out, mode='a+') as results_file:
+        results_writer = csv.writer(results_file, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        results_writer.writerow([datetime.datetime.now(),
+                                 str(epoch),
+                                 str(word_acc),
+                                 str(sent_acc),
+                                 str(known_acc),
+                                 str(unknown_acc),
+                                 str(loss),
+                                 str(learning_rate),
+                                 str(morphlex_flag),
+                                 str(num_words)])

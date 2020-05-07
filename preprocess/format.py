@@ -44,7 +44,10 @@ def gather_tags(inputs, output):
             for line in f:
                 line = line.strip()
                 if line:
-                    _, tag = line.split()
+                    try:
+                        _, tag = line.split()
+                    except ValueError:
+                        print(f"Unable to split line={line}")
                     tags.add(tag)
     for tag in sorted(list(tags)):
         output.write(f'{tag}\n')
