@@ -14,12 +14,12 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     for FOLD in $FOLDS; do
         for SPLIT in $SPLITS; do
             for TAG_TYPE in $TAG_TYPES; do
-                IN_FILE="$RAW_DIR"/IFD2_SETS/"$FOLD""$SPLIT".txt
+                IN_FILE="$RAW_DIR"/otb/"$FOLD""$SPLIT".plain
                 OUT_FILE="$FORMAT_DIR"/IFD-"$FOLD""$SPLIT".tsv
                 echo "$IN_FILE -> $OUT_FILE"
                 python preprocess/format.py format-tags "$IN_FILE" "$OUT_FILE" --tag_type "$TAG_TYPE"
 
-                IN_FILE="$RAW_DIR"/MIM-GOLD-1_0_SETS/MIM-GOLD-1_0_SETS/"$FOLD""$SPLIT".plain
+                IN_FILE="$RAW_DIR"/mim/"$FOLD""$SPLIT".plain
                 OUT_FILE="$FORMAT_DIR"/GOLD-"$FOLD""$SPLIT".tsv
                 echo "$IN_FILE -> $OUT_FILE"
                 python preprocess/format.py format-tags "$IN_FILE" "$OUT_FILE" --tag_type "$TAG_TYPE"
@@ -31,6 +31,7 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
 fi
 if ((FIRST_STEP <= 2 && LAST_STEP >= 2)); then
     echo "Running training and evaluation"
-    python evaluate.py --dataset_fold 1
-    python evaluate.py --dataset_fold 10
+
+    python evaluate.py --epochs_coarse_grained 1 --out_folder ./models/IFD-1 --dataset_fold 1
+    python evaluate.py --out_folder ./models/IFD-10 --dataset_fold 10
 fi

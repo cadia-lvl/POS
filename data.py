@@ -1,8 +1,7 @@
+import copy
 from dataclasses import dataclass
-from collections import Counter, defaultdict
-from itertools import count
-import typing
-from typing import List, Tuple, Set, Dict
+from collections import Counter
+from typing import List, Tuple, Set, Dict, Optional, Union
 
 from tqdm import tqdm
 import numpy as np
@@ -15,8 +14,26 @@ SentTags = Tuple[str, ...]
 Sent = Tuple[str, ...]
 Vocab = Set[str]
 DataPairs = Tuple[List[SentTokens], List[SentTags]]
+DataPairs_c = Tuple[Tuple[List[SentTokens], List[SentTags]], List[SentTags]]
+Data = Union[DataPairs, DataPairs_c]
 TaggedSentence = List[TaggedToken]
 Corpus = List[TaggedSentence]
+
+TrainW = Tuple[List[str], str, str]
+TrainSent = List[TrainW]
+TrainWidx = Tuple[List[int], int, int]
+TrainSentidx = List[TrainWidx]
+# For unkown words in testing
+UNK = '<unk>'
+UNK_ID = 0
+# To pad in batches
+PAD = '<pad>'
+PAD_ID = 1
+# For EOS and SOS in char BiLSTM
+EOS = '</s>'
+EOS_ID = 2
+SOS = '<s>'
+SOS_ID = 3
 
 
 def read_tsv(input) -> Corpus:
@@ -80,34 +97,35 @@ class VocabMap:
     w2i: Dict[str, int]
     i2w: Dict[int, str]
 
-    def __init__(self, vocab: Vocab, build_from: Dict[str, int] = None):
+    def __init__(self, vocab: Vocab, special_tokens: Optional[List[Tuple[str, int]]] = None):
         """
-        Builds a vocabulary mapping from the provided vocabulary, starting at index=0
-        build_from: If provided will use previously defined mappings and extend them with
-        new words in vocab starting at index=len(build_from)
+        Builds a vocabulary mapping from the provided vocabulary, starting at index=0.
+        If special_tokens is given, will add these tokens first and start from the next index of the highest index provided.
         """
-        if build_from is None:
-            build_from = dict()
-        # Find all missing words
-        missing_words = set(vocab) - set(build_from.keys())
-        # Copy the contents and set the counter accordingly
-        w2i_tmp: typing.DefaultDict[str, int] = defaultdict(count(len(build_from.keys())).__next__, build_from)
-        [w2i_tmp[v] for v in missing_words]
-        self.w2i = dict(w2i_tmp)
+        self.w2i = {}
+        next_idx = 0
+        if special_tokens:
+            for symbol, idx in special_tokens:
+                self.w2i[symbol] = idx
+                next_idx = max((idx + 1, next_idx))
+        for idx, symbol in enumerate(vocab, start=next_idx):
+            self.w2i[symbol] = idx
         self.i2w = {i: w for w, i in self.w2i.items()}
 
     def __len__(self):
         return len(self.w2i)
 
 
-def read_embedding(emb_file, from_vocab_map: VocabMap, add_all=False) -> Tuple[VocabMap, np.array]:
+def read_embedding(emb_file, filter_on: Optional[Set[str]] = None, special_tokens: Optional[List[Tuple[str, int]]] = None) -> Tuple[VocabMap, np.array]:
     """
-    Reads an embedding file and constructs an embedding using np.array().
-    from_vocab_map: Uses the same ids as given in the mapping
-    add_all: If set True will add all remaining tokens to the embedding.
+    Reads an embedding file and returns the read embedding (np.array) and the VocabMap based on the read file.
+    filter_on: If provided, will only return mappings for given words (if present in the file). If not provided, will read all the file.
+    First element will be all zeroes for UNK.
     Returns: The embeddings as np.array and VocabMap for the embedding.
     """
-    print(f'Embedding reading={emb_file}. Based on #tokens={len(from_vocab_map)}')
+    if special_tokens is None:
+        special_tokens = []
+    print(f'Embedding reading={emb_file}')
     # This can be huge
     embedding_dict: Dict[str, List[int]] = dict()
     with open(emb_file) as f:
@@ -115,31 +133,30 @@ def read_embedding(emb_file, from_vocab_map: VocabMap, add_all=False) -> Tuple[V
             key, vector = line.strip().split(";")
             # We stip out '[' and ']'
             embedding_dict[key] = [int(n) for n in vector[1:-1].split(',')]
-    # The embedding matrix only based on the vocabmap
+    # find out how long the embeddings are, we assume all have the same length.
     length_of_embeddings = len(list(embedding_dict.values())[0])
-    embeddings = np.zeros(shape=(len(from_vocab_map), length_of_embeddings))
-    # We go through the vocabmap in order
-    added_words = set()
-    for idx in range(len(from_vocab_map)):
-        word_in_vocab_map = from_vocab_map.i2w[idx]
-        # If the word is in the embedding dict we want to use that embedding
-        if word_in_vocab_map in embedding_dict:
-            added_words.add(word_in_vocab_map)
-            embeddings[idx] = embedding_dict[word_in_vocab_map]
-        else:
-            # We leave the embedding as zero
-            pass
-    # Should we add the rest of the words?
-    if add_all:
-        missing_words = set(embedding_dict.keys()) - added_words
-        embeddings_missing_from_vocab = np.zeros(shape=(len(missing_words), length_of_embeddings))
-        print(f'Embedding: adding missing words, len={len(missing_words)}')
-        for idx, missing_word in enumerate(missing_words):
-            added_words.add(missing_word)
-            embeddings_missing_from_vocab[idx] = embedding_dict[missing_word]
-        embeddings = np.concatenate([embeddings, embeddings_missing_from_vocab], axis=0)
+    # All special tokens are treated equall as zeros
+    for token, _ in special_tokens:
+        embedding_dict[token] = [0 for _ in range(length_of_embeddings)]
+    # UNK should not be in words_to_add, since the vocab_map will handle adding it.
+    words_to_add = set()
+    if filter_on is not None:
+        print(f'Filtering on #symbols={len(filter_on)}')
+        for filter_word in filter_on:
+            # If the word is present in the file we use it.
+            if filter_word in embedding_dict:
+                words_to_add.add(filter_word)
+    else:
+        words_to_add = set(embedding_dict.keys())
+    # + special tokens
+    embeddings = np.zeros(shape=(len(words_to_add) + len(special_tokens), length_of_embeddings))
+
+    vocab_map = VocabMap(words_to_add, special_tokens=special_tokens)
+    for symbol, idx in vocab_map.w2i.items():
+        embeddings[idx] = embedding_dict[symbol]
+
     print(f'Embedding: final shape={embeddings.shape}')
-    return VocabMap(added_words, build_from=from_vocab_map.w2i), embeddings
+    return vocab_map, embeddings
 
 
 class Embeddings:
@@ -147,3 +164,49 @@ class Embeddings:
     def __init__(self, vocabmap: VocabMap, embedding: np.array):
         self.vocab = vocabmap.w2i
         self.embeddings = embedding
+
+
+def unk_analysis(train: Vocab, test: Vocab):
+    print(f'Train len={len(train)}')
+    print(f'Test len={len(test)}')
+    print(f'Test not in train={len(test-train)}')
+
+
+def create_example_token(token: str) -> TrainW:
+    # ([SOS + characters + EOS], word, morph)
+    return ([SOS] + [c for c in token] + [EOS], token, token)
+
+
+def create_example_sent(example: SentTokens) -> List[TrainW]:
+    # We do not put SOS or EOS on words
+    return [create_example_token(tok) for tok in example]
+
+
+def create_examples(data: List[SentTokens]) -> List[TrainSent]:
+    return [create_example_sent(sent) for sent in data]
+
+
+def longest_token_in_sent(example: TrainSentidx) -> int:
+    return max(len(chars) for chars, _, _ in example)
+
+
+def pad_examples_(data: List[TrainSentidx], pad_idx: int = PAD_ID):
+    """ Pads characters and sentences in place.
+    """
+    longest_token_in_examples = max(longest_token_in_sent(sent) for sent in data)
+    longest_sent_in_examples = max(len(sent) for sent in data)
+    # print(longest_token_in_examples)
+    # print(longest_sent_in_examples)
+    padded = copy.deepcopy(data)
+    for train_sent in padded:
+        while len(train_sent) < longest_sent_in_examples:
+            empty_chars: List[int] = []
+            train_sent.append((list(empty_chars), pad_idx, pad_idx))
+        for chars, _, _ in train_sent:
+            while len(chars) < longest_token_in_examples:
+                chars.append(pad_idx)
+    return [[(*chars, w, m) for chars, w, m in sent] for sent in padded]
+
+
+def to_idx(data: List[TrainSent]):
+    pass

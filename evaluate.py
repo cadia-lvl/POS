@@ -22,12 +22,10 @@
 __license__ = "Apache 2.0"
 
 import sys
-import os
 import argparse
 
 import dynet_config
-dynet_config.set(mem=32000, random_seed=42)
-
+dynet_config.set(mem=33000, random_seed=42)
 from ABLTagger import ABLTagger
 from data import Embeddings, Vocab, Corpus
 import data
@@ -70,13 +68,10 @@ if __name__ == '__main__':
     with open(args.load_characters) as f:
         for line in f:
             line = line.strip()
-            for char in line:
+            for char in line.split():
                 char_vocab.add(char)
 
-    out_folder = f'{args.out_folder}/IFD-{args.dataset_fold}'
-    os.mkdir(out_folder)
-
-    morphlex_embeddings = Embeddings(args.use_morphlex)
+    out_folder = args.out_folder
 
     # First train or load a coarse tagger without evaluation - then tag and finally run the fine tagger
     training_corpus: Corpus = data.read_tsv(f'{args.data_folder}IFD-{args.dataset_fold:02}TM.tsv')
@@ -87,14 +82,18 @@ if __name__ == '__main__':
     coarse_train_tags = data.coarsify(train_tags)
     coarse_testing_tags = data.coarsify(test_tags)
 
-    tokens = data.get_vocab(train_tokens)
-
     char_vocap_map = data.VocabMap(char_vocab)
     token_vocab_map = data.VocabMap(data.get_vocab(train_tokens))
     tag_vocab_map = data.VocabMap(data.get_vocab(train_tags))
     coarse_tag_vocab_map = data.VocabMap(data.get_vocab(coarse_train_tags))
     token_freqs = data.get_tok_freq(train_tokens)
 
+    # We filter the morphlex embeddings based on the training and test set. This should not be done in production
+    filter_on = data.get_vocab(train_tokens)
+    filter_on.update(data.get_vocab(test_tokens))
+    m_vocab_map, embedding = data.read_embedding(args.use_morphlex, filter_on=filter_on)
+
+    morphlex_embeddings = Embeddings(m_vocab_map, embedding)
     print("Creating coarse tagger")
     tagger_coarse = ABLTagger(vocab_chars=char_vocap_map,
                               vocab_words=token_vocab_map,
@@ -108,11 +107,12 @@ if __name__ == '__main__':
                                             test_data=(test_tokens, coarse_testing_tags),
                                             total_epochs=args.epochs_coarse_grained,
                                             out_dir=out_folder,
-                                            evaluate=False)
-    train_coarse_tagged_tags = [tagger_coarse.tag_sent(sent) for sent in train_tokens]
-    test_coarse_tagged_tags = [tagger_coarse.tag_sent(sent) for sent in test_tokens]
+                                            evaluate=True)
+    train_coarse_tagged_tags: data.List[data.SentTags] = [tagger_coarse.tag_sent(sent) for sent in train_tokens]
+    test_coarse_tagged_tags: data.List[data.SentTags] = [tagger_coarse.tag_sent(sent) for sent in test_tokens]
 
-    coarse_embeddings = Embeddings(args.load_coarse_tagset)
+    coarse_tag_vocab_map, coarse_embedding = data.read_embedding(args.load_coarse_tagset)
+    coarse_embeddings = Embeddings(coarse_tag_vocab_map, coarse_embedding)
 
     tagger_fine = ABLTagger(vocab_chars=char_vocap_map,
                             vocab_words=token_vocab_map,

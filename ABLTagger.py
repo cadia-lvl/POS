@@ -1,5 +1,4 @@
-#! /usr/bin/env python3
-
+#!/usr/bin/env python
 """
     ABLTagger: Augmented BiDirectional LSTM Tagger
 
@@ -24,8 +23,8 @@ __license__ = "Apache 2.0"
 
 
 import random
-from time import time
 import datetime
+import gc
 
 import numpy as np
 import dynet as dy
@@ -39,17 +38,15 @@ random.seed(42)
 # Layer Dimensions for Combined emb. model
 class CombinedDims:
     def __init__(self):
-        self.hidden = 32
-        self.hidden_input = 128
-        self.char_input = 20
-        self.word_input = 256
-        self.tags_input = 30
-        self.char_output = 64
-        self.word_output = 64
-        self.word_lookup = 128
-        self.char_lookup = 20
-        self.morphlex_lookup = 65
-        self.word_class_lookup = 14
+        self.hidden = 32  # map each timestep from bi_main_lstm to this
+        self.hidden_input = 0  # This is computed during creation
+        self.word_input = 0  # This is computed during creation
+        self.char_output = 64  # characters-as-word representation size after char_lstm, char_bilstm = 2 * char_lstm
+        self.word_output = 64  # input representation size after main_lstm, bi_main_lstm = 2 * main_lstm
+        self.word_lookup = 128  # word embedding size
+        self.char_lookup = 20  # character embedding size
+        self.morphlex_lookup = 65  # morphological lexicon embedding size - read from file
+        self.word_class_lookup = 14  # coarse tag embeddings size - read from file
 
 
 class ABLTagger():
@@ -89,7 +86,7 @@ class ABLTagger():
         self.create_network()
 
     def create_network(self):
-        assert self.vw.size(), "Need to build the vocabulary (build_vocab) before creating the network."
+        assert len(self.vw), "Need to build the vocabulary (build_vocab) before creating the network."
 
         self.dim.word_input = self.dim.word_lookup + self.dim.char_output * 2
         if self.morphlex_flag:
@@ -97,28 +94,29 @@ class ABLTagger():
 
         if self.coarse_features_flag:
             self.dim.word_input += self.dim.word_class_lookup
-
-        self.WORDS_LOOKUP = self.model.add_lookup_parameters((self.vw.size(), self.dim.word_lookup))
-        self.CHARS_LOOKUP = self.model.add_lookup_parameters((self.vc.size(), self.dim.char_lookup))
+        self.dim.hidden_input = self.dim.word_output * 2  # * 2 because of bidirectional
+        self.WORDS_LOOKUP = self.model.add_lookup_parameters((len(self.vw), self.dim.word_lookup))
+        self.CHARS_LOOKUP = self.model.add_lookup_parameters((len(self.vc), self.dim.char_lookup))
 
         if self.morphlex_flag:
             self.MORPHLEX_LOOKUP = self.model.add_lookup_parameters((len(self.morphlex_embeddings), self.dim.morphlex_lookup))
             self.MORPHLEX_LOOKUP.init_from_array(self.morphlex_embeddings)
         if self.coarse_features_flag:
+            # TODO: Is this + 1 correct? We now read '0' from the file.
             self.WORD_CLASS_LOOKUP = self.model.add_lookup_parameters((self.dim.word_class_lookup + 1, self.dim.word_class_lookup))
             self.WORD_CLASS_LOOKUP.init_from_array(self.coarse_features_embeddings)
 
         # MLP on top of biLSTM outputs, word/char out -> hidden -> num tags
         self.pH = self.model.add_parameters((self.dim.hidden, self.dim.hidden_input))  # hidden-dim, hidden-input-dim
-        self.pO = self.model.add_parameters((self.vt.size(), self.dim.hidden))  # vocab-size, hidden-dim
+        self.pO = self.model.add_parameters((len(self.vt), self.dim.hidden))  # vocab-size, hidden-dim
 
         # word-level LSTMs
         self.fwdRNN = dy.LSTMBuilder(1, self.dim.word_input, self.dim.word_output, self.model)  # layers, input-dim, output-dim
         self.bwdRNN = dy.LSTMBuilder(1, self.dim.word_input, self.dim.word_output, self.model)
 
         # char-level LSTMs
-        self.cFwdRNN = dy.LSTMBuilder(1, self.dim.char_input, self.dim.char_output, self.model)
-        self.cBwdRNN = dy.LSTMBuilder(1, self.dim.char_input, self.dim.char_output, self.model)
+        self.cFwdRNN = dy.LSTMBuilder(1, self.dim.char_lookup, self.dim.char_output, self.model)
+        self.cBwdRNN = dy.LSTMBuilder(1, self.dim.char_lookup, self.dim.char_output, self.model)
         self.fwdRNN.set_dropout(self.hp.dropout)
         self.bwdRNN.set_dropout(self.hp.dropout)
         self.cFwdRNN.set_dropout(self.hp.dropout)
@@ -172,21 +170,28 @@ class ABLTagger():
         else:
             return dy.concatenate([wembs, cembs])
 
-    def build_tagging_graph(self, x):
+    def build_tagging_graph(self, x: data.Union[data.SentTokens, data.Tuple[data.SentTokens, data.SentTags]]):
         """
         Graph is built per input. Each input should be a complete sentence
         x is the input. Will be treated as (token, coarse_tag) if model should use coarse tag feature.
         Otherwise (token) only.
         """
+        # Clear the graph
+        dy.renew_cg()
+        # Shotgun debugging - running into memory issues. Let's force a gc
+        gc.collect()  # 27,2% mem (using 33GB for DyNet, 126GB total)
         # Initialize the LSTMs
         f_init = self.fwdRNN.initial_state()
         b_init = self.bwdRNN.initial_state()
 
         cf_init = self.cFwdRNN.initial_state()
         cb_init = self.cBwdRNN.initial_state()
-
-        if self.coarse_features_flag:
-            wembs = [self.word_and_char_rep(w, cf_init, cb_init, t) for w, t in zip(*x)]
+        # if self.coarse_features_flag:
+        if type(x) == data.Tuple:
+            try:
+                wembs = [self.word_and_char_rep(w, cf_init, cb_init, t) for w, t in zip(*x)]
+            except ValueError:
+                print(x)
         else:
             wembs = [self.word_and_char_rep(w, cf_init, cb_init) for w in x]
 
@@ -201,9 +206,9 @@ class ABLTagger():
         bi_exps = [dy.concatenate([f, b]) for f, b in zip(fw_exps, reversed(bw_exps))]
 
         # Feed each biLSTM state to an MLP
-        return [self.pO * (dy.tanh(self.pH * x)) for x in bi_exps]
+        return [self.pO * (dy.tanh(self.pH * bi_exp)) for bi_exp in bi_exps]
 
-    def tag_sent(self, x) -> data.List[str]:
+    def tag_sent(self, x) -> data.SentTags:
         """x is the input. Will be treated as (token, coarse_tag) if model should use coarse tag feature.
         Otherwise (token) only."""
         vecs = self.build_tagging_graph(x)
@@ -213,11 +218,11 @@ class ABLTagger():
         for prb in probs:
             tag = np.argmax(prb)
             tags.append(self.vt.i2w[tag])
-        return tags
+        return tuple(tags)
 
     def train_and_evaluate_tagger(self,
-                                  training_data: data.DataPairs,
-                                  test_data: data.DataPairs,
+                                  training_data: data.Data,
+                                  test_data: data.Data,
                                   total_epochs: int,
                                   out_dir: str,
                                   evaluate=True):
@@ -226,18 +231,14 @@ class ABLTagger():
         '''
         x_y = list(zip(*training_data))
         x_y_test = list(zip(*test_data))
-        for epoch in range(start=1, stop=total_epochs + 1):
+        for epoch in range(1, total_epochs + 1):
             cum_loss = num_tagged = 0
             batch = 0
 
             random.shuffle(x_y)
             # x,y is a single training sentence: (tokens, tags)
-            for x, y in zip(*x_y):
+            for x, y in x_y:
                 batch += 1
-                # Clear the graph
-                dy.renew_cg()
-                # y is put in the tagging graph, but only used as input if
-                # coarse_features_flag=True
                 vecs = self.build_tagging_graph(x)
                 errs = []
                 for v, t in zip(vecs, y):
@@ -252,13 +253,13 @@ class ABLTagger():
                 self.trainer.update()
 
                 if batch % 10 == 0:
-                    print(f'{time()}: epoch={epoch}/{total_epochs}, avg_loss={cum_loss / num_tagged}')
+                    print(f'{datetime.datetime.now()} epoch={epoch}/{total_epochs}, batch={batch}/{len(x_y)}, avg_loss={cum_loss / num_tagged}')
 
             # Evaluate
             if evaluate:
-                evaluation = self.evaluate_tagging(x_y_test, file_out=f'{out_dir}/{"coarse" if self.coarse_features_flag else "fine"}eval_{epoch}_tags.txt')
+                evaluation = self.evaluate_tagging(x_y_test, file_out=f'{out_dir}/{"fine" if self.coarse_features_flag else "coarse"}_eval_{epoch}_tags.txt')
                 print(evaluation)
-                write_results_to_file(file_out=f'{out_dir}/{"coarse" if self.coarse_features_flag else "fine"}eval_results.tsv',
+                write_results_to_file(file_out=f'{out_dir}/{"fine" if self.coarse_features_flag else "coarse"}_eval_results.tsv',
                                       epoch=epoch,
                                       evaluation=evaluation,
                                       loss=cum_loss / num_tagged,
@@ -271,67 +272,60 @@ class ABLTagger():
                 self.trainer.learning_rate = self.trainer.learning_rate * (1 - self.hp.learning_rate_decay)
 
         # Show hyperparameters used when we are done
-        print("\nHP opt={} epochs={} emb_noise={} ".format(self.hp.optimization, total_epochs, self.hp.noise))
+        print("\nHP={}".format(self.hp))
 
     def evaluate_tagging(self,
                          test_data,
                          file_out: str):
-        eval_out = ''
-        if self.morphlex_flag:
+        with open(file_out, "w") as f:
             good = total = good_sent = total_sent = unk_good = morphlex_good = morphlex_total = train_good = train_total = both_good = both_total = unk_total = 0.0
-        else:
-            good = total = good_sent = total_sent = unk_good = unk_total = 0.0
-        for sent in test_data:
-            if self.coarse_features_flag:
-                words, golds, coarse_tags = map(list, zip(*sent))
-                tags = [t for t in self.tag_sent((words, coarse_tags))]
-            else:
-                words, golds = map(list, zip(*sent))
-                tags = [t for _, t in self.tag_sent(words)]
-            if tags == golds:
-                good_sent += 1
-            total_sent += 1
-            for go, gu, w in zip(golds, tags, words):
-                eval_out += f'{w}\t{go}\t{gu}\n'
-                total += 1
-                if self.morphlex_flag:
-                    if go == gu:
-                        good += 1
+            for words, golds in test_data:
+                tags = [t for t in self.tag_sent(words)]
+                if tags == golds:
+                    good_sent += 1
+                total_sent += 1
+                for go, gu, w in zip(golds, tags, words):
+                    if self.coarse_features_flag:
+                        try:
+                            w, _ = w
+                        except ValueError:
+                            print(w)
+                    f.write(f'{w}\t{go}\t{gu}\n')
+                    total += 1
+                    if self.morphlex_flag:
+                        if go == gu:
+                            good += 1
+                            if w in self.morphlex.keys():
+                                if self.word_frequency[w] == 0:
+                                    morphlex_good += 1
+                                else:
+                                    both_good += 1
+                            else:
+                                if self.word_frequency[w] == 0:
+                                    unk_good += 1
+                                else:
+                                    train_good += 1
                         if w in self.morphlex.keys():
                             if self.word_frequency[w] == 0:
-                                morphlex_good += 1
+                                morphlex_total += 1
                             else:
-                                both_good += 1
+                                both_total += 1
                         else:
                             if self.word_frequency[w] == 0:
-                                unk_good += 1
+                                unk_total += 1
                             else:
-                                train_good += 1
-                    if w in self.morphlex.keys():
-                        if self.word_frequency[w] == 0:
-                            morphlex_total += 1
-                        else:
-                            both_total += 1
+                                train_total += 1
                     else:
+                        if go == gu:
+                            good += 1
+                            if self.word_frequency[w] == 0:
+                                unk_good += 1
                         if self.word_frequency[w] == 0:
                             unk_total += 1
-                        else:
-                            train_total += 1
-                else:
-                    if go == gu:
-                        good += 1
-                        if self.word_frequency[w] == 0:
-                            unk_good += 1
-                    if self.word_frequency[w] == 0:
-                        unk_total += 1
-
-        with open(file_out, "w") as f:
-            f.write(eval_out)
-
-        if self.morphlex_flag:
-            eval_text = str(total) + "|" + str(train_total) + "|" + str(morphlex_total) + "|" + str(both_total) + "|" + str(unk_total)
-            return good / total, good_sent / total_sent, train_good / train_total, morphlex_good / morphlex_total, both_good / both_total, (good - unk_good) / (total - unk_total), unk_good / unk_total, eval_text
-        return good / total, good_sent / total_sent, (good - unk_good) / (total - unk_total), unk_good / unk_total
+        eval_text = str(total) + "|" + str(train_total) + "|" + str(morphlex_total) + "|" + str(both_total) + "|" + str(unk_total)
+        # 59169.0      3503.0      0.0          4482.0          54687.0     0.0
+        print(total, total_sent, train_total, morphlex_total, both_total, unk_total)
+        return good / total, good_sent / total_sent, train_good / train_total, morphlex_good / morphlex_total, both_good / both_total, (good - unk_good) / (total - unk_total), unk_good / unk_total, eval_text
 
 
 def write_results_to_file(file_out,
@@ -342,7 +336,7 @@ def write_results_to_file(file_out,
                           morphlex_flag,
                           total_epochs,
                           num_words):
-    word_acc, sent_acc, known_acc, unknown_acc = evaluation
+    word_acc, sent_acc, train_acc, morphlex_acc, both_acc, known_acc, unknown_acc, _ = evaluation
 
     with open(file_out, mode='a+') as results_file:
         results_writer = csv.writer(results_file, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
@@ -350,6 +344,9 @@ def write_results_to_file(file_out,
                                  str(epoch),
                                  str(word_acc),
                                  str(sent_acc),
+                                 str(train_acc),
+                                 str(morphlex_acc),
+                                 str(both_acc),
                                  str(known_acc),
                                  str(unknown_acc),
                                  str(loss),
