@@ -1,13 +1,25 @@
 #!/usr/bin/env python
+import random
+import logging
+import time
+
 import click
 import torch
+import numpy as np
 
 import data
-from data import Corpus, Vocab, VocabMap
 from model import ABLTagger
 
-#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+log = logging.getLogger()
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 device = torch.device('cpu')
+SEED = 42
+if SEED:
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
+    torch.backends.cudnn.deterministic = True
+
 
 @click.group()
 def cli():
@@ -60,10 +72,10 @@ def train(training_files,
     """
     # Read train and test data
     training_corpus = []
-    print(training_files)
+    log.info(f'Reading training files={training_files}')
     for train_file in training_files:
         training_corpus.extend(data.read_tsv(train_file))
-    test_corpus: Corpus = data.read_tsv(test_file)
+    test_corpus: data.Corpus = data.read_tsv(test_file)
 
     # Extract tokens, tags, characters
     train_tokens, train_tags = data.tsv_to_pairs(training_corpus)
@@ -71,7 +83,7 @@ def train(training_files,
 
     # Prepare the coarse tags
     train_tags_coarse = data.coarsify(train_tags)
-    testing_tags_coarse = data.coarsify(test_tags)
+    test_tags_coarse = data.coarsify(test_tags)
 
     # Define the vocabularies and mappings
     chars = data.read_known_characters(known_chars_file)
@@ -81,6 +93,7 @@ def train(training_files,
     train_tag_vocab = data.get_vocab(train_tags)
     test_tag_vocab = data.get_vocab(test_tags)
 
+    # We need EOS and SOS for chars
     char_vocap_map = data.VocabMap(chars, special_tokens=[
         (data.UNK, data.UNK_ID),
         (data.PAD, data.PAD_ID),
@@ -91,73 +104,151 @@ def train(training_files,
         (data.UNK, data.UNK_ID),
         (data.PAD, data.PAD_ID),
     ])
-    tag_vocab_map = data.VocabMap(train_tag_vocab)
-    coarse_tag_vocab_map = data.VocabMap(data.get_vocab(train_tags_coarse))
+    # The tags will be padded, but we do not support UNK
+    tag_vocab_map = data.VocabMap(train_tag_vocab, special_tokens=[
+        (data.PAD, data.PAD_ID),
+    ])
+    coarse_tag_vocab_map = data.VocabMap(data.get_vocab(train_tags_coarse), special_tokens=[
+        (data.PAD, data.PAD_ID),
+    ])
+    log.info(f'Character vocab={len(char_vocap_map)}')
+    log.info(f'Word vocab={len(token_vocab_map)}')
+    log.info(f'Tag vocab={len(tag_vocab_map)}')
+    log.info(f'Tag (coarse) vocab={len(coarse_tag_vocab_map)}')
     token_freqs = data.get_tok_freq(train_tokens)
 
-    print('Token unk analysis')
+    log.info('Token unk analysis')
     data.unk_analysis(train_token_vocab, test_token_vocab)
-    print('Tag unk analysis')
+    log.info('Tag unk analysis')
     data.unk_analysis(train_tag_vocab, test_tag_vocab)
-    # We filter the morphlex embeddings based on the training and test set. This should not be done in production
+    # We filter the morphlex embeddings based on the training and test set for quicker training. This should not be done in production
     filter_on = data.get_vocab(train_tokens)
     filter_on.update(data.get_vocab(test_tokens))
+    # The morphlex embeddings are similar to the tokens, no EOS or SOS needed
     m_vocab_map, embedding = data.read_embedding(morphlex_embeddings_file, filter_on=filter_on, special_tokens=[
         (data.UNK, data.UNK_ID),
         (data.PAD, data.PAD_ID)
     ])
-    
-    # Create training examples: List[w, m, List[c]]
-    x: data.List[data.TrainSent] = data.create_examples(train_tokens[:10])
-    # print("examples", x)
-    x_idx: data.List[data.TrainSentidx] = []
-    for sent in x:
-        sent_idx = []
-        for chars, w, m in sent:
-            # TODO: add UNK
-            sent_idx.append((
-                [char_vocap_map.w2i[c] if c in char_vocap_map.w2i else data.UNK_ID for c in chars],
-                token_vocab_map.w2i[w] if w in token_vocab_map.w2i else data.UNK_ID,
-                m_vocab_map.w2i[m] if m in m_vocab_map.w2i else data.UNK_ID
-            ))
-        x_idx.append(sent_idx)
-    # print("examples idx", x_idx)
-    x_pad = data.pad_examples_(x_idx, pad_idx=data.PAD_ID)
-    # print("padded examples idx", x_pad)
-    x_tn = torch.tensor(x_pad, dtype=torch.long, device=device, requires_grad=False)
-    # print(x_tn)
-    print(x_tn.shape)
-    tagger = ABLTagger(
-        char_dim=len(char_vocap_map.w2i),
-        token_dim=len(token_vocab_map.w2i),
-        tags_dim=len(coarse_tag_vocab_map.w2i),
+
+    pos_model = ABLTagger(
+        char_dim=len(char_vocap_map),
+        token_dim=len(token_vocab_map),
+        tags_dim=len(coarse_tag_vocab_map),
         morph_lex_embeddings=torch.from_numpy(embedding).float(),
         c_tags_embeddings=None
     )
-    tagger(x_tn)
-    # net = ABLTagger(token_dim=len(token_vocab_map),
-    #                 char_dim=len(char_vocap_map),
-    #                 morph_lex_embeddings=morphlex_embeddings,
-    #                 c_tags_embeddings=)
-    criterion = None
-    optimizer = None
-    epochs = 0
-    for epoch in range(epochs):
-        for i, (x, y) in enumerate(training_data):
-            labels = labels.to(device)
-            
-            # Forward pass
-            outputs = model(x)
-            loss = criterion(outputs, labels)
-            
-            # Backward and optimize
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            if (i+1) % 100 == 0:
-                print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}' 
-                    .format(epoch+1, num_epochs, i+1, total_step, loss.item()))
+    log.info(
+        f'Trainable parameters={sum(p.numel() for p in pos_model.parameters() if p.requires_grad)}')
+    log.info(
+        f'Not trainable parameters={sum(p.numel() for p in pos_model.parameters() if not p.requires_grad)}')
+
+    # Move model to device, before optimizer
+    pos_model.to(device)
+    # We ignore targets which have beed padded
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID)
+    # lr as used in ABLTagger
+    optimizer = torch.optim.SGD(pos_model.parameters(), lr=0.13)
+    # learning rate decay as in ABLTagger
+    scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
+        optimizer, lr_lambda=lambda epoch: 0.95)
+
+    epochs = 5
+    batch_size = 32
+    best_validation_loss = 100
+    for epoch in range(1, epochs + 1):
+        # Time it
+        start = time.time()
+        log.info(
+            f'Epoch={epoch}/{epochs}, lr={list(param_group["lr"] for param_group in optimizer.param_groups)}')
+        train_iter = data.make_batches((train_tokens, train_tags_coarse),
+                                       batch_size=batch_size,
+                                       shuffle=True,
+                                       c_map=char_vocap_map,
+                                       w_map=token_vocab_map,
+                                       m_map=m_vocab_map,
+                                       t_map=coarse_tag_vocab_map,
+                                       device=device)
+        train_model(pos_model, train_iter, optimizer, criterion)
+        end = time.time()
+        log.info(
+            f'Training took={(end-start).strftime("{%Y-%m-%d %H:%M:%S}")}')
+        test_iter = data.make_batches((test_tokens, test_tags_coarse),
+                                      batch_size=10 * batch_size,
+                                      shuffle=False,
+                                      c_map=char_vocap_map,
+                                      w_map=token_vocab_map,
+                                      m_map=m_vocab_map,
+                                      t_map=coarse_tag_vocab_map,
+                                      device=device)
+        val_loss, val_acc = evaluate_model(pos_model, test_iter, criterion)
+        if val_loss < best_validation_loss:
+            best_validation_loss = val_loss
+            # torch.save(pos_model.state_dict(), 'model.pt')
+        scheduler.step()
+    # model.load_state_dict(torch.load('model.pt'))
+
+
+def train_model(model, train, optimizer, criterion):
+    epoch_loss = 0
+    epoch_acc = 0
+
+    model.train()
+    for i, (x, y) in enumerate(train, start=1):
+        optimizer.zero_grad()
+
+        y_pred = model(x)
+
+        y_pred = y_pred.view(-1, y_pred.shape[-1])
+        y = y.view(-1)
+
+        loss = criterion(y_pred, y)
+        acc = categorical_accuracy(y_pred, y)
+
+        loss.backward()
+        optimizer.step()
+
+        epoch_loss += loss.item()
+        epoch_acc += acc.item()
+        if i % 10 == 0:
+            log.info(f'batch={i}, acc={acc.item()}, loss={loss.item():.4f}')
+
+
+def evaluate_model(model, iterator, criterion):
+    epoch_loss = 0
+    epoch_acc = 0
+
+    model.eval()
+
+    with torch.no_grad():
+        num_elements = 0
+        for x, y in iterator:
+            y_pred = model(x)
+
+            y_pred = y_pred.view(-1, y_pred.shape[-1])
+            y = y.view(-1)
+
+            num_elements += y.shape[0]
+
+            loss = criterion(y_pred, y)
+            acc = categorical_accuracy(y_pred, y)
+
+            epoch_loss += loss.item()
+            epoch_acc += acc.item()
+
+    return epoch_loss / num_elements, epoch_acc / num_elements
+
+
+def categorical_accuracy(preds, y):
+    """
+    Returns accuracy per batch, i.e. if you get 8/10 right, this returns 0.8, NOT 8
+    """
+    max_preds = preds.argmax(
+        dim=1, keepdim=True)  # get the index of the max probability
+    non_pad_elements = (y != data.PAD_ID).nonzero()
+    correct = max_preds[non_pad_elements].squeeze(1).eq(y[non_pad_elements])
+    return correct.sum() / torch.FloatTensor([y[non_pad_elements].shape[0]])
+
 
 if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
     cli()

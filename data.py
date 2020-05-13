@@ -2,33 +2,41 @@ import copy
 from dataclasses import dataclass
 from collections import Counter
 from typing import List, Tuple, Set, Dict, Optional, Union
+import logging
 
 from tqdm import tqdm
 import numpy as np
+import torch
+import random
 
-TaggedToken = Tuple[str, str]
+log = logging.getLogger()
 # When iterating over Sent-x, whole sentences are yielded
 SentTokens = Tuple[str, ...]
 SentTags = Tuple[str, ...]
 # Either tokens or tags, we don't care
-Sent = Tuple[str, ...]
+Sent = Union[SentTags, SentTokens]
 Vocab = Set[str]
 DataPairs = Tuple[List[SentTokens], List[SentTags]]
 DataPairs_c = Tuple[Tuple[List[SentTokens], List[SentTags]], List[SentTags]]
 Data = Union[DataPairs, DataPairs_c]
+# TODO: Remove
+TaggedToken = Tuple[str, str]
 TaggedSentence = List[TaggedToken]
 Corpus = List[TaggedSentence]
 
-TrainW = Tuple[List[str], str, str]
-TrainSent = List[TrainW]
-TrainWidx = Tuple[List[int], int, int]
-TrainSentidx = List[TrainWidx]
-# For unkown words in testing
-UNK = '<unk>'
-UNK_ID = 0
+x_i_j = Tuple[List[str], str, str]
+x_i = List[x_i_j]
+X = List[x_i]
+y_i_j = str
+y_i = List[y_i_j]
+Y = List[y_i]
+
 # To pad in batches
 PAD = '<pad>'
-PAD_ID = 1
+PAD_ID = 0
+# For unkown words in testing
+UNK = '<unk>'
+UNK_ID = 1
 # For EOS and SOS in char BiLSTM
 EOS = '</s>'
 EOS_ID = 2
@@ -125,7 +133,7 @@ def read_embedding(emb_file, filter_on: Optional[Set[str]] = None, special_token
     """
     if special_tokens is None:
         special_tokens = []
-    print(f'Embedding reading={emb_file}')
+    log.info(f'Embedding reading={emb_file}')
     # This can be huge
     embedding_dict: Dict[str, List[int]] = dict()
     with open(emb_file) as f:
@@ -141,7 +149,7 @@ def read_embedding(emb_file, filter_on: Optional[Set[str]] = None, special_token
     # UNK should not be in words_to_add, since the vocab_map will handle adding it.
     words_to_add = set()
     if filter_on is not None:
-        print(f'Filtering on #symbols={len(filter_on)}')
+        log.info(f'Filtering on #symbols={len(filter_on)}')
         for filter_word in filter_on:
             # If the word is present in the file we use it.
             if filter_word in embedding_dict:
@@ -149,13 +157,14 @@ def read_embedding(emb_file, filter_on: Optional[Set[str]] = None, special_token
     else:
         words_to_add = set(embedding_dict.keys())
     # + special tokens
-    embeddings = np.zeros(shape=(len(words_to_add) + len(special_tokens), length_of_embeddings))
+    embeddings = np.zeros(
+        shape=(len(words_to_add) + len(special_tokens), length_of_embeddings))
 
     vocab_map = VocabMap(words_to_add, special_tokens=special_tokens)
     for symbol, idx in vocab_map.w2i.items():
         embeddings[idx] = embedding_dict[symbol]
 
-    print(f'Embedding: final shape={embeddings.shape}')
+    log.info(f'Embedding: final shape={embeddings.shape}')
     return vocab_map, embeddings
 
 
@@ -167,46 +176,107 @@ class Embeddings:
 
 
 def unk_analysis(train: Vocab, test: Vocab):
-    print(f'Train len={len(train)}')
-    print(f'Test len={len(test)}')
-    print(f'Test not in train={len(test-train)}')
+    log.info(f'Train len={len(train)}')
+    log.info(f'Test len={len(test)}')
+    log.info(f'Test not in train={len(test-train)}')
 
 
-def create_example_token(token: str) -> TrainW:
+def _make_x_i_j(token: str) -> x_i_j:
     # ([SOS + characters + EOS], word, morph)
-    return ([SOS] + [c for c in token] + [EOS], token, token)
+    return ([SOS] + [c for c in token] + [EOS], token, token)  # type: ignore
 
 
-def create_example_sent(example: SentTokens) -> List[TrainW]:
+def _make_x_i(example: SentTokens) -> x_i:
     # We do not put SOS or EOS on words
-    return [create_example_token(tok) for tok in example]
+    return [_make_x_i_j(tok) for tok in example]
 
 
-def create_examples(data: List[SentTokens]) -> List[TrainSent]:
-    return [create_example_sent(sent) for sent in data]
+def make_x(sentences: List[SentTokens]) -> X:
+    return [_make_x_i(sent) for sent in sentences]
 
 
-def longest_token_in_sent(example: TrainSentidx) -> int:
-    return max(len(chars) for chars, _, _ in example)
+def make_y(sentences: List[SentTags]) -> Y:
+    return [[tag for tag in sent] for sent in sentences]
 
 
-def pad_examples_(data: List[TrainSentidx], pad_idx: int = PAD_ID):
-    """ Pads characters and sentences in place.
-    """
-    longest_token_in_examples = max(longest_token_in_sent(sent) for sent in data)
-    longest_sent_in_examples = max(len(sent) for sent in data)
-    # print(longest_token_in_examples)
-    # print(longest_sent_in_examples)
-    padded = copy.deepcopy(data)
-    for train_sent in padded:
-        while len(train_sent) < longest_sent_in_examples:
-            empty_chars: List[int] = []
-            train_sent.append((list(empty_chars), pad_idx, pad_idx))
-        for chars, _, _ in train_sent:
+def pad_x(x: X) -> X:
+    """ Pads characters and sentences in place. Input should be strings since we need the length of a token"""
+    longest_token_in_examples = max(
+        (max(
+            (len(chars) for chars, _, _ in x_i)
+        ) for x_i in x)
+    )
+    longest_sent_in_examples = max(len(x_i) for x_i in x)
+    log.debug("Longest token in batch", longest_token_in_examples)
+    log.debug("Longest sent in batch", longest_sent_in_examples)
+    x_pad = copy.deepcopy(x)
+    for x_i_pad in x_pad:
+        # Pad sentence-wise
+        while len(x_i_pad) < longest_sent_in_examples:
+            empty_chars: List[str] = []
+            x_i_pad.append((list(empty_chars), PAD, PAD))
+        # Pad character-wise
+        for chars, _, _ in x_i_pad:
             while len(chars) < longest_token_in_examples:
-                chars.append(pad_idx)
-    return [[(*chars, w, m) for chars, w, m in sent] for sent in padded]
+                chars.append(PAD)
+    return x_pad
 
 
-def to_idx(data: List[TrainSent]):
-    pass
+def pad_y(y: Y) -> Y:
+    longest_sent_in_examples = max((len(y_i) for y_i in y))
+    y_pad = copy.deepcopy(y)
+    for y_i_pad in y_pad:
+        # Pad sentence-wise
+        while len(y_i_pad) < longest_sent_in_examples:
+            y_i_pad.append(PAD)
+    return y_pad
+
+
+def to_idx_x(x: X, c_map: VocabMap, w_map: VocabMap, m_map: VocabMap) -> torch.Tensor:
+    x_idx = []
+    for x_i in x:
+        x_i_idx = []
+        for chars, w, m in x_i:
+            x_i_idx.append((
+                [c_map.w2i[c]
+                    if c in c_map.w2i else UNK_ID for c in chars],
+                w_map.w2i[w] if w in w_map.w2i else UNK_ID,
+                m_map.w2i[m] if m in m_map.w2i else UNK_ID
+            ))
+        x_idx.append(x_i_idx)
+    # Break the list up and return (b, s, f)
+    return torch.tensor([[(*chars, w, m) for chars, w, m in x_i_idx] for x_i_idx in x_idx])
+
+
+def to_idx_y(y: Y, t_map: VocabMap) -> torch.Tensor:
+    # UNK is not supported. We should raise an exception if tag is not present in mapping
+    return torch.tensor([[t_map.w2i[t] for t in y_i] for y_i in y])
+
+
+def make_batches(data: Tuple[List[SentTokens], List[SentTags]],
+                 batch_size=32,
+                 shuffle=True,
+                 c_map=None,
+                 w_map=None,
+                 m_map=None,
+                 t_map=None,
+                 device=None):
+    if shuffle:
+        x_y = list(zip(*data))
+        random.shuffle(x_y)
+        data = tuple(map(list, zip(*x_y)))  # type: ignore
+
+    # Correct format
+    x = make_x(data[0])
+    y = make_y(data[1])
+
+    # Make batches
+    length = len(x)
+    for ndx in range(0, length, batch_size):
+        # First pad, then map to index
+        yield (to_idx_x(pad_x(x[ndx:min(ndx + batch_size, length)]),
+                        c_map=c_map,
+                        w_map=w_map,
+                        m_map=m_map).to(device),
+               to_idx_y(pad_y(y[ndx:min(ndx + batch_size, length)]),
+                        t_map=t_map).to(device))
