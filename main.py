@@ -10,16 +10,6 @@ import numpy as np
 import data
 from model import ABLTagger
 
-log = logging.getLogger()
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-device = torch.device('cpu')
-SEED = 42
-if SEED:
-    random.seed(SEED)
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
-    torch.backends.cudnn.deterministic = True
-
 
 @click.group()
 def cli():
@@ -141,9 +131,11 @@ def train(training_files,
         f'Trainable parameters={sum(p.numel() for p in pos_model.parameters() if p.requires_grad)}')
     log.info(
         f'Not trainable parameters={sum(p.numel() for p in pos_model.parameters() if not p.requires_grad)}')
-
+    # Make the model data parallel
+    pos_model = torch.nn.DataParallel(pos_model)
     # Move model to device, before optimizer
     pos_model.to(device)
+    log.info(pos_model)
     # We ignore targets which have beed padded
     criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID)
     # lr as used in ABLTagger
@@ -152,7 +144,7 @@ def train(training_files,
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
         optimizer, lr_lambda=lambda epoch: 0.95)
 
-    epochs = 5
+    epochs = 1
     batch_size = 32
     best_validation_loss = 100
     for epoch in range(1, epochs + 1):
@@ -170,10 +162,10 @@ def train(training_files,
                                        device=device)
         train_model(pos_model, train_iter, optimizer, criterion)
         end = time.time()
-        log.info(
-            f'Training took={(end-start).strftime("{%Y-%m-%d %H:%M:%S}")}')
+        log.info(f'Training took={end-start}s')
+        # We just run the validation using same batch size, to keep PAD to minimum
         test_iter = data.make_batches((test_tokens, test_tags_coarse),
-                                      batch_size=10 * batch_size,
+                                      batch_size=batch_size,
                                       shuffle=False,
                                       c_map=char_vocap_map,
                                       w_map=token_vocab_map,
@@ -181,6 +173,7 @@ def train(training_files,
                                       t_map=coarse_tag_vocab_map,
                                       device=device)
         val_loss, val_acc = evaluate_model(pos_model, test_iter, criterion)
+        log.info(f'Validation loss={val_loss}, acc={val_acc}')
         if val_loss < best_validation_loss:
             best_validation_loss = val_loss
             # torch.save(pos_model.state_dict(), 'model.pt')
@@ -214,28 +207,25 @@ def train_model(model, train, optimizer, criterion):
 
 
 def evaluate_model(model, iterator, criterion):
-    epoch_loss = 0
-    epoch_acc = 0
-
     model.eval()
-
     with torch.no_grad():
-        num_elements = 0
+        y_pred_total = None
+        y_total = None
         for x, y in iterator:
             y_pred = model(x)
-
             y_pred = y_pred.view(-1, y_pred.shape[-1])
             y = y.view(-1)
+            try:
+                y_pred_total = torch.cat([y_pred_total, y_pred], dim=0)
+                y_total = torch.cat([y_total, y], dim=0)
+            except TypeError:
+                y_pred_total = y_pred
+                y_total = y
 
-            num_elements += y.shape[0]
+        loss = criterion(y_pred_total, y_total).item()
+        acc = categorical_accuracy(y_pred_total, y_total).item()
 
-            loss = criterion(y_pred, y)
-            acc = categorical_accuracy(y_pred, y)
-
-            epoch_loss += loss.item()
-            epoch_acc += acc.item()
-
-    return epoch_loss / num_elements, epoch_acc / num_elements
+    return loss, acc
 
 
 def categorical_accuracy(preds, y):
@@ -244,6 +234,7 @@ def categorical_accuracy(preds, y):
     """
     max_preds = preds.argmax(
         dim=1, keepdim=True)  # get the index of the max probability
+    # nonzero to map to idexes again
     non_pad_elements = (y != data.PAD_ID).nonzero()
     correct = max_preds[non_pad_elements].squeeze(1).eq(y[non_pad_elements])
     return correct.sum() / torch.FloatTensor([y[non_pad_elements].shape[0]])
@@ -251,4 +242,26 @@ def categorical_accuracy(preds, y):
 
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
+    log = logging.getLogger()
+
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
+        # --gres=gpu:titanx:2
+        log.info(f'Using {torch.cuda.device_count()} GPUs')
+    else:
+        device = torch.device('cpu')
+        threads = 1
+        # Set the number of threads to use for CPU
+        torch.set_num_threads(threads)
+        log.info(f'Using {threads} CPU threads')
+
+    # Set the seed on all platforms
+    SEED = 42
+    if SEED:
+        random.seed(SEED)
+        np.random.seed(SEED)
+        torch.manual_seed(SEED)
+        torch.backends.cudnn.deterministic = True  # type: ignore
+
     cli()

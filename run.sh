@@ -32,6 +32,6 @@ fi
 if ((FIRST_STEP <= 2 && LAST_STEP >= 2)); then
     echo "Running training and evaluation"
 
-    python evaluate.py --epochs_coarse_grained 1 --out_folder ./models/IFD-1 --dataset_fold 1
+    python evaluate.py --out_folder ./models/IFD-1 --dataset_fold 1
     python evaluate.py --out_folder ./models/IFD-10 --dataset_fold 10
 fi

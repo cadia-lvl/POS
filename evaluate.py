@@ -19,40 +19,54 @@
     limitations under the License.
 
 """
-__license__ = "Apache 2.0"
-
-import sys
 import argparse
+import sys
 
+import data
+from data import Embeddings, Vocab, Corpus
 import dynet_config
 dynet_config.set(mem=33000, random_seed=42)
-from ABLTagger import ABLTagger
-from data import Embeddings, Vocab, Corpus
-import data
+__license__ = "Apache 2.0"
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # HYPERPARAMETERS
     parser.add_argument('--optimization', '-o', help="Which optimization algorithm",
                         choices=['SimpleSGD', 'MomentumSGD', 'CyclicalSGD', 'Adam', 'RMSProp'], default='SimpleSGD')
-    parser.add_argument('--learning_rate', '-lr', help="Learning rate", type=float, default=0.13)
-    parser.add_argument('--learning_rate_decay', '-lrd', help="Learning rate decay", type=float, default=0.05)
-    parser.add_argument('--learning_rate_max', '-l_max', help="Learning rate max for Cyclical SGD", type=float, default=0.1)
-    parser.add_argument('--learning_rate_min', '-l_min', help="Learning rate min for Cyclical SGD", type=float, default=0.01)
-    parser.add_argument('--dropout', '-d', help="Dropout rate", type=float, default=0.0)
+    parser.add_argument('--learning_rate', '-lr',
+                        help="Learning rate", type=float, default=0.13)
+    parser.add_argument('--learning_rate_decay', '-lrd',
+                        help="Learning rate decay", type=float, default=0.05)
+    parser.add_argument('--learning_rate_max', '-l_max',
+                        help="Learning rate max for Cyclical SGD", type=float, default=0.1)
+    parser.add_argument('--learning_rate_min', '-l_min',
+                        help="Learning rate min for Cyclical SGD", type=float, default=0.01)
+    parser.add_argument('--dropout', '-d',
+                        help="Dropout rate", type=float, default=0.0)
     # EXTERNAL DATA
-    parser.add_argument('--data_folder', '-data', help="Folder containing training data", default='./data/format/')
-    parser.add_argument('--out_folder', '-out-data', help="Folder containing results", default='./models')
-    parser.add_argument('--use_morphlex', '-morphlex', help="File with morphological lexicon embeddings in ./extra folder. Example file: ./extra/dmii.or", default='./extra/dmii.vectors')
-    parser.add_argument('--load_characters', '-load_chars', help="File to load characters from", default='./extra/characters_training.txt')
-    parser.add_argument('--load_coarse_tagset', '-load_coarse', help="Load embeddings file for coarse grained tagset", default='./extra/word_class_vectors.txt')
+    parser.add_argument('--data_folder', '-data',
+                        help="Folder containing training data", default='./data/format/')
+    parser.add_argument('--out_folder', '-out-data',
+                        help="Folder containing results", default='./models')
+    parser.add_argument('--use_morphlex', '-morphlex',
+                        help="File with morphological lexicon embeddings in ./extra folder. Example file: ./extra/dmii.or", default='./extra/dmii.vectors')
+    parser.add_argument('--load_characters', '-load_chars',
+                        help="File to load characters from", default='./extra/characters_training.txt')
+    parser.add_argument('--load_coarse_tagset', '-load_coarse',
+                        help="Load embeddings file for coarse grained tagset", default='./extra/word_class_vectors.txt')
     # TRAIN AND EVALUATE
-    parser.add_argument('--corpus', '-c', help="Name of training corpus", default='otb')
-    parser.add_argument('--dataset_fold', '-fold', help="select which dataset to use (1-10)", type=int, default=1)
-    parser.add_argument('--epochs_coarse_grained', '-ecg', help="How many epochs for coarse grained training? (12 is default)", type=int, default=12)
-    parser.add_argument('--epochs_fine_grained', '-efg', help="How many epochs for fine grained training? (20 is default)", type=int, default=20)
-    parser.add_argument('--noise', '-n', help="Noise in embeddings", type=float, default=0.1)
+    parser.add_argument(
+        '--corpus', '-c', help="Name of training corpus", default='otb')
+    parser.add_argument('--dataset_fold', '-fold',
+                        help="select which dataset to use (1-10)", type=int, default=1)
+    parser.add_argument('--epochs_coarse_grained', '-ecg',
+                        help="How many epochs for coarse grained training? (12 is default)", type=int, default=12)
+    parser.add_argument('--epochs_fine_grained', '-efg',
+                        help="How many epochs for fine grained training? (20 is default)", type=int, default=20)
+    parser.add_argument(
+        '--noise', '-n', help="Noise in embeddings", type=float, default=0.1)
     args = parser.parse_args()
 
     if len(sys.argv) < 2:
@@ -74,8 +88,10 @@ if __name__ == '__main__':
     out_folder = args.out_folder
 
     # First train or load a coarse tagger without evaluation - then tag and finally run the fine tagger
-    training_corpus: Corpus = data.read_tsv(f'{args.data_folder}IFD-{args.dataset_fold:02}TM.tsv')
-    test_corpus: Corpus = data.read_tsv(f'{args.data_folder}IFD-{args.dataset_fold:02}PM.tsv')
+    training_corpus: Corpus = data.read_tsv(
+        f'{args.data_folder}IFD-{args.dataset_fold:02}TM.tsv')
+    test_corpus: Corpus = data.read_tsv(
+        f'{args.data_folder}IFD-{args.dataset_fold:02}PM.tsv')
 
     train_tokens, train_tags = data.tsv_to_pairs(training_corpus)
     test_tokens, test_tags = data.tsv_to_pairs(test_corpus)
@@ -91,10 +107,12 @@ if __name__ == '__main__':
     # We filter the morphlex embeddings based on the training and test set. This should not be done in production
     filter_on = data.get_vocab(train_tokens)
     filter_on.update(data.get_vocab(test_tokens))
-    m_vocab_map, embedding = data.read_embedding(args.use_morphlex, filter_on=filter_on)
+    m_vocab_map, embedding = data.read_embedding(
+        args.use_morphlex, filter_on=filter_on)
 
     morphlex_embeddings = Embeddings(m_vocab_map, embedding)
     print("Creating coarse tagger")
+    from ABLTagger import ABLTagger
     tagger_coarse = ABLTagger(vocab_chars=char_vocap_map,
                               vocab_words=token_vocab_map,
                               vocab_tags=coarse_tag_vocab_map,
@@ -103,15 +121,20 @@ if __name__ == '__main__':
                               coarse_features_embeddings=None,
                               hyperparams=args)
     print("Starting training and evaluating")
-    tagger_coarse.train_and_evaluate_tagger(training_data=(train_tokens, coarse_train_tags),
-                                            test_data=(test_tokens, coarse_testing_tags),
+    x_y = list(zip(train_tokens, coarse_train_tags))
+    x_y_test = list(zip(test_tokens, coarse_testing_tags))
+    tagger_coarse.train_and_evaluate_tagger(x_y=x_y,
+                                            x_y_test=x_y_test,
                                             total_epochs=args.epochs_coarse_grained,
                                             out_dir=out_folder,
                                             evaluate=True)
-    train_coarse_tagged_tags: data.List[data.SentTags] = [tagger_coarse.tag_sent(sent) for sent in train_tokens]
-    test_coarse_tagged_tags: data.List[data.SentTags] = [tagger_coarse.tag_sent(sent) for sent in test_tokens]
+    train_coarse_tagged_tags: data.List[data.SentTags] = [
+        tagger_coarse.tag_sent(sent) for sent in train_tokens]
+    test_coarse_tagged_tags: data.List[data.SentTags] = [
+        tagger_coarse.tag_sent(sent) for sent in test_tokens]
 
-    coarse_tag_vocab_map, coarse_embedding = data.read_embedding(args.load_coarse_tagset)
+    coarse_tag_vocab_map, coarse_embedding = data.read_embedding(
+        args.load_coarse_tagset)
     coarse_embeddings = Embeddings(coarse_tag_vocab_map, coarse_embedding)
 
     tagger_fine = ABLTagger(vocab_chars=char_vocap_map,
@@ -121,8 +144,12 @@ if __name__ == '__main__':
                             morphlex_embeddings=morphlex_embeddings,
                             coarse_features_embeddings=coarse_embeddings,
                             hyperparams=args)
-    tagger_fine.train_and_evaluate_tagger(training_data=((train_tokens, train_coarse_tagged_tags), train_tags),
-                                          test_data=((test_tokens, test_coarse_tagged_tags), test_tags),
+    x = list(zip(train_tokens, train_coarse_tagged_tags))
+    x_y = list(zip(x, train_tags))
+    x_test = list(zip(test_tokens, test_coarse_tagged_tags))
+    x_y_test = list(zip(x, test_tags))
+    tagger_fine.train_and_evaluate_tagger(x_y=x_y,
+                                          x_y_test=x_y_test,
                                           total_epochs=args.epochs_fine_grained,
                                           out_dir=out_folder,
                                           evaluate=True)

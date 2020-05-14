@@ -67,6 +67,7 @@ class ABLTagger(nn.Module):
         m = input[:, :, -1]
         # (b, seq, chars, f)
         char_embs = self.character_embedding(chars)
+        self.char_bilstm.flatten_parameters()
         # We process a single word at a time (many chars) in the LSTM
         # [(b, 1, f) for s in seq],
         chars_as_word = torch.cat(
@@ -79,6 +80,7 @@ class ABLTagger(nn.Module):
         m_embs = self.morph_lex_embedding(m)
         main_in = torch.cat((chars_as_word, w_embs, m_embs), dim=2)
         # (b, seq, f)
+        self.bilstm.flatten_parameters()
         main_out = self.bilstm(main_in)[0]
         # We map each word to our targets
         # [(b, 1, f) for s in seq]:
