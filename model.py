@@ -34,8 +34,10 @@ class ABLTagger(nn.Module):
             self.c_tags_embedding.weight.data = c_tags_embeddings
             self.c_tags_embedding.weight.requires_grad = False
 
-        self.token_embedding = nn.Embedding(token_dim, emb_token_dim)
-        self.character_embedding = nn.Embedding(char_dim, emb_char_dim)
+        self.token_embedding = nn.Embedding(
+            token_dim, emb_token_dim, padding_idx=data.PAD_ID)
+        self.character_embedding = nn.Embedding(
+            char_dim, emb_char_dim, padding_idx=data.PAD_ID)
 
         # The character BiLSTM
         self.char_bilstm = nn.LSTM(input_size=emb_char_dim,
