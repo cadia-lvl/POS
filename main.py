@@ -176,6 +176,10 @@ def train(training_files,
                   for tok_sent, tag_sent in zip(train_tokens, train_tags_coarse_tagged)]
     fine_test = [[(tok, tag) for tok, tag in zip(tok_sent, tag_sent)]
                  for tok_sent, tag_sent in zip(test_tokens, test_tags_coarse_tagged)]
+    optimizer = torch.optim.SGD(fine_tagger.parameters(), lr=0.13)
+    # learning rate decay as in ABLTagger
+    scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
+        optimizer, lr_lambda=lambda epoch: 0.95)
     run_epochs(model=fine_tagger,
                mapper=fine_mapper,
                optimizer=optimizer,
@@ -202,10 +206,15 @@ def tag_sents(sentences: data.In,
     tags = []
     for i, x in enumerate(iter, start=1):
         pred = model(x)
-        # (seq, tags)
-        pred = pred.view(-1, pred.shape[-1])
-        # seq
-        idxs = pred.argmax(dim=1).tolist()
+        # (b, seq, tags)
+        for b in range(pred.shape[0]):
+            # (seq, f)
+            sent_pred = pred[b, :, :].view(-1, pred.shape[-1])
+            # x = (b, seq, f), the last few elements in f word/token, morph and maybe c_tag
+            num_non_pads = torch.sum((x[b, :, -1] != data.PAD_ID)).item()
+            # We use the fact that padding is placed BEHIND those features
+            sent_pred = sent_pred[:num_non_pads, :]
+            idxs = sent_pred.argmax(dim=1).tolist()
         tags.append(tuple(mapper.t_map.i2w[idx] for idx in idxs))
 
     end = time.time()
@@ -316,8 +325,7 @@ if __name__ == '__main__':
     log = logging.getLogger()
 
     if torch.cuda.is_available():
-        # TODO: remove :0
-        device = torch.device('cuda:0')
+        device = torch.device('cuda')
         # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
         # --gres=gpu:titanx:2
         log.info(f'Using {torch.cuda.device_count()} GPUs')
