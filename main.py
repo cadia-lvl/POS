@@ -218,10 +218,10 @@ def tag_sents(sentences: data.In,
             # We use the fact that padding is placed BEHIND those features
             sent_pred = sent_pred[:num_non_pads, :]  # type: ignore
             idxs = sent_pred.argmax(dim=1).tolist()
-        tags.append(tuple(mapper.t_map.i2w[idx] for idx in idxs))
+            tags.append(tuple(mapper.t_map.i2w[idx] for idx in idxs))
 
     end = time.time()
-    log.info(f'Tagging took={end-start}s')
+    log.info(f'Tagging took={end-start} seconds')
     return tags
 
 
@@ -248,7 +248,7 @@ def run_epochs(model: torch.nn.Module,
                                            device=device)
         train_model(model, train_iter, optimizer, criterion)
         end = time.time()
-        log.info(f'Training took={end-start}s')
+        log.info(f'Training took={end-start} seconds')
         # We just run the validation using same batch size, to keep PAD to minimum
         test_iter = mapper.in_x_y_batches(x=test[0],
                                           y=test[1],
