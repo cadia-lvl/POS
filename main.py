@@ -148,10 +148,12 @@ def train(training_files,
                batch_size=batch_size)
     train_tags_coarse_tagged = tag_sents(sentences=train_tokens,
                                          model=coarse_tagger,
+                                         batch_size=batch_size,
                                          device=device,
                                          mapper=coarse_mapper)
     test_tags_coarse_tagged = tag_sents(sentences=test_tokens,
                                         model=coarse_tagger,
+                                        batch_size=batch_size,
                                         device=device,
                                         mapper=coarse_mapper)
     log.info('Creating fine tagger')
@@ -195,13 +197,14 @@ def train(training_files,
 def tag_sents(sentences: data.In,
               model: torch.nn.Module,
               device,
+              batch_size: int,
               mapper: data.DataVocabMap) -> List[data.SentTags]:
     model.eval()
     start = time.time()
     log.info(f'Tagging sentences len={len(sentences)}')
     iter = mapper.in_x_batches(x=sentences,
                                # Batch size to 1 to avoid dealing with PAD
-                               batch_size=1,
+                               batch_size=batch_size,
                                device=device)
     tags = []
     for i, x in enumerate(iter, start=1):
@@ -213,7 +216,7 @@ def tag_sents(sentences: data.In,
             # x = (b, seq, f), the last few elements in f word/token, morph and maybe c_tag
             num_non_pads = torch.sum((x[b, :, -1] != data.PAD_ID)).item()
             # We use the fact that padding is placed BEHIND those features
-            sent_pred = sent_pred[:num_non_pads, :]
+            sent_pred = sent_pred[:num_non_pads, :]  # type: ignore
             idxs = sent_pred.argmax(dim=1).tolist()
         tags.append(tuple(mapper.t_map.i2w[idx] for idx in idxs))
 
