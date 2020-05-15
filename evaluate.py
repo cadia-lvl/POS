@@ -78,12 +78,12 @@ if __name__ == '__main__':
         sys.exit(0)
     args = parser.parse_args()
 
-    char_vocab: Vocab = set()
+    chars: Vocab = set()
     with open(args.load_characters) as f:
         for line in f:
             line = line.strip()
             for char in line.split():
-                char_vocab.add(char)
+                chars.add(char)
 
     out_folder = args.out_folder
 
@@ -93,36 +93,44 @@ if __name__ == '__main__':
     test_corpus: Corpus = data.read_tsv(
         f'{args.data_folder}IFD-{args.dataset_fold:02}PM.tsv')
 
+    # Extract tokens, tags
     train_tokens, train_tags = data.tsv_to_pairs(training_corpus)
     test_tokens, test_tags = data.tsv_to_pairs(test_corpus)
-    coarse_train_tags = data.coarsify(train_tags)
-    coarse_testing_tags = data.coarsify(test_tags)
 
-    char_vocap_map = data.VocabMap(char_vocab)
-    token_vocab_map = data.VocabMap(data.get_vocab(train_tokens))
-    tag_vocab_map = data.VocabMap(data.get_vocab(train_tags))
-    coarse_tag_vocab_map = data.VocabMap(data.get_vocab(coarse_train_tags))
-    token_freqs = data.get_tok_freq(train_tokens)
+    # Prepare the coarse tags
+    train_tags_coarse = data.coarsify(train_tags)
+    test_tags_coarse = data.coarsify(test_tags)
 
-    # We filter the morphlex embeddings based on the training and test set. This should not be done in production
+    # Define the vocabularies and mappings
+    coarse_mapper = data.DataVocabMap(
+        tokens=train_tokens, tags=train_tags_coarse, chars=chars)
+    fine_mapper = data.DataVocabMap(
+        tokens=train_tokens, tags=train_tags, chars=chars, c_tags=train_tags_coarse)
+
+    # We filter the morphlex embeddings based on the training and test set for quicker training. This should not be done in production
     filter_on = data.get_vocab(train_tokens)
     filter_on.update(data.get_vocab(test_tokens))
-    m_vocab_map, embedding = data.read_embedding(
-        args.use_morphlex, filter_on=filter_on)
+    # The morphlex embeddings are similar to the tokens, no EOS or SOS needed
+    m_vocab_map, embedding = data.read_embedding(args.use_morphlex, filter_on=filter_on, special_tokens=[
+        (data.UNK, data.UNK_ID),
+        (data.PAD, data.PAD_ID)
+    ])
+    coarse_mapper.add_morph_map(m_vocab_map)
+    fine_mapper.add_morph_map(m_vocab_map)
 
     morphlex_embeddings = Embeddings(m_vocab_map, embedding)
     print("Creating coarse tagger")
     from ABLTagger import ABLTagger
-    tagger_coarse = ABLTagger(vocab_chars=char_vocap_map,
-                              vocab_words=token_vocab_map,
-                              vocab_tags=coarse_tag_vocab_map,
-                              word_freq=token_freqs,
+    tagger_coarse = ABLTagger(vocab_chars=coarse_mapper.c_map,
+                              vocab_words=coarse_mapper.w_map,
+                              vocab_tags=coarse_mapper.t_map,
+                              word_freq=coarse_mapper.t_freq,
                               morphlex_embeddings=morphlex_embeddings,
                               coarse_features_embeddings=None,
                               hyperparams=args)
     print("Starting training and evaluating")
-    x_y = list(zip(train_tokens, coarse_train_tags))
-    x_y_test = list(zip(test_tokens, coarse_testing_tags))
+    x_y = list(zip(train_tokens, train_tags_coarse))
+    x_y_test = list(zip(test_tokens, train_tags_coarse))
     tagger_coarse.train_and_evaluate_tagger(x_y=x_y,
                                             x_y_test=x_y_test,
                                             total_epochs=args.epochs_coarse_grained,
@@ -137,17 +145,17 @@ if __name__ == '__main__':
         args.load_coarse_tagset)
     coarse_embeddings = Embeddings(coarse_tag_vocab_map, coarse_embedding)
 
-    tagger_fine = ABLTagger(vocab_chars=char_vocap_map,
-                            vocab_words=token_vocab_map,
-                            vocab_tags=tag_vocab_map,
-                            word_freq=token_freqs,
+    tagger_fine = ABLTagger(vocab_chars=fine_mapper.c_map,
+                            vocab_words=fine_mapper.w_map,
+                            vocab_tags=fine_mapper.t_map,
+                            word_freq=fine_mapper.t_freq,
                             morphlex_embeddings=morphlex_embeddings,
                             coarse_features_embeddings=coarse_embeddings,
                             hyperparams=args)
     x = list(zip(train_tokens, train_coarse_tagged_tags))
-    x_y = list(zip(x, train_tags))
+    x_y = list(zip(x, train_tags))  # type: ignore
     x_test = list(zip(test_tokens, test_coarse_tagged_tags))
-    x_y_test = list(zip(x, test_tags))
+    x_y_test = list(zip(x, test_tags))  # type: ignore
     tagger_fine.train_and_evaluate_tagger(x_y=x_y,
                                           x_y_test=x_y_test,
                                           total_epochs=args.epochs_fine_grained,

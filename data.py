@@ -1,7 +1,7 @@
 import copy
 from dataclasses import dataclass
 from collections import Counter
-from typing import List, Tuple, Set, Dict, Optional, Union
+from typing import List, Tuple, Set, Dict, Optional, Union, Iterable
 import logging
 
 from tqdm import tqdm
@@ -19,17 +19,16 @@ Vocab = Set[str]
 DataPairs = Tuple[List[SentTokens], List[SentTags]]
 DataPairs_c = Tuple[Tuple[List[SentTokens], List[SentTags]], List[SentTags]]
 Data = Union[DataPairs, DataPairs_c]
-# TODO: Remove
-TaggedToken = Tuple[str, str]
-TaggedSentence = List[TaggedToken]
-Corpus = List[TaggedSentence]
 
-x_i_j = Tuple[List[str], str, str]
-x_i = List[x_i_j]
-X = List[x_i]
-y_i_j = str
-y_i = List[y_i_j]
-Y = List[y_i]
+TaggedToken = Tuple[str, str]
+Token = str
+In_Tok = Union[Token, TaggedToken]
+In_Sent = List[In_Tok]
+In = List[In_Sent]
+
+SentTokTag = List[TaggedToken]
+Corpus = List[SentTokTag]
+
 
 # To pad in batches
 PAD = '<pad>'
@@ -44,10 +43,18 @@ SOS = '<s>'
 SOS_ID = 3
 
 
+def write_tsv(output, corpus: Corpus):
+    with open(output, 'w+') as f:
+        for sent in corpus:
+            for word, tag in sent:
+                f.write(f'{word}\t{tag}\n')
+            f.write('\n')
+
+
 def read_tsv(input) -> Corpus:
     corpus = []
     with open(input) as f:
-        tokens: TaggedSentence = []
+        tokens: SentTokTag = []
         for line in f:
             line = line.strip()
             # We read a blank line - sentence has been read.
@@ -61,14 +68,6 @@ def read_tsv(input) -> Corpus:
     if len(tokens) != 0:
         corpus.append(tokens)
     return corpus
-
-
-def write_tsv(output, corpus: Corpus):
-    with open(output, 'w+') as f:
-        for sent in corpus:
-            for word, tag in sent:
-                f.write(f'{word}\t{tag}\n')
-            f.write('\n')
 
 
 def tsv_to_pairs(corpus: Corpus) -> DataPairs:
@@ -175,108 +174,181 @@ class Embeddings:
         self.embeddings = embedding
 
 
+x_i_j = Tuple[List[str], str, str]
+# For coarse tags, slightly hacky
+x_i_j_c = Tuple[List[str], str, str, str]
+x_i = List[Union[x_i_j]]
+X = List[x_i]
+y_i_j = str
+y_i = List[y_i_j]
+Y = List[y_i]
+@dataclass()
+class DataVocabMap:
+    c_map: VocabMap  # characters
+    w_map: VocabMap  # words "tokens"
+    m_map: VocabMap  # morphlex
+    t_map: VocabMap  # tags - the target
+    # Additional feature maps, words/tokens, morphlex and c_tags, in that order
+    f_maps: List[VocabMap]
+    c_t_map: VocabMap  # coarse-tags - optional input
+    t_freq: Counter
+
+    def __init__(self, tokens: List[SentTokens], tags: List[SentTags], chars: Vocab, c_tags: List[SentTags] = None):
+        """
+        Here we create all the necessary vocabulary mappings for the batch function.
+        """
+        # We need EOS and SOS for chars
+        self.c_map = VocabMap(chars, special_tokens=[
+            (UNK, UNK_ID),
+            (PAD, PAD_ID),
+            (EOS, EOS_ID),
+            (SOS, SOS_ID)
+        ])
+        self.w_map = VocabMap(get_vocab(tokens), special_tokens=[
+            (UNK, UNK_ID),
+            (PAD, PAD_ID),
+        ])
+        # The tags will be padded, but we do not support UNK
+        self.t_map = VocabMap(get_vocab(tags), special_tokens=[
+            (PAD, PAD_ID),
+        ])
+        log.info(f'Character vocab={len(self.c_map)}')
+        log.info(f'Word vocab={len(self.w_map)}')
+        log.info(f'Tag vocab={len(self.t_map)}')
+        # Add the mappings to a list for idx mapping later
+        self.x_maps = [self.w_map]
+        # The tags will be padded, but we do not support UNK
+        if c_tags:
+            self.c_t_map = VocabMap(get_vocab(c_tags), special_tokens=[
+                (PAD, PAD_ID),
+            ])
+            log.info(f'Coarse tag vocab={len(self.c_t_map)}')
+        self.t_freq = get_tok_freq(tokens)
+
+    def add_morph_map(self, m_map):
+        """
+        Adds the m_map to the object and the c_t_map if defined (to maintain order). Do not call twice.
+        """
+        self.m_map = m_map
+        self.x_maps.append(self.m_map)
+        # We add the c_tag map last
+        if hasattr(self, 'c_t_map'):
+            self.x_maps.append(self.c_t_map)
+
+    @classmethod
+    def make_x(cls, sentences: In) -> X:
+        return [
+            [
+                # ([SOS + characters + EOS], word, morph)
+                ([SOS] + [c for c in tok] + [EOS], tok, tok)  # type: ignore
+                if type(tok) == str else
+                # ([SOS + characters + EOS], word, morph, c_tag)
+                ([SOS] + [c for c in tok[0]] + [EOS], tok[0], tok[0], tok[1])
+                for tok in sent]
+            for sent in sentences]
+
+    @classmethod
+    def make_y(cls, sentences: List[SentTags]) -> Y:
+        return [[tag for tag in sent] for sent in sentences]
+
+    @classmethod
+    def empty_sent(_) -> Union[x_i_j, x_i_j_c]:
+        return ([], PAD, PAD)
+
+    @classmethod
+    def pad_x(cls, x: X) -> X:
+        """ Pads characters and sentences in place. Input should be strings since we need the length of a token"""
+        cls.empty_sent()
+        longest_token_in_examples = max(
+            (max(
+                # Avoid tuple unpacking
+                (len(x_i_js[0]) for x_i_js in x_is)
+            ) for x_is in x)
+        )
+        longest_sent_in_examples = max(len(x_i) for x_i in x)
+        log.debug("Longest token in batch", longest_token_in_examples)
+        log.debug("Longest sent in batch", longest_sent_in_examples)
+        x_pad = copy.deepcopy(x)
+        for x_i_pad in x_pad:
+            # Pad sentence-wise
+            while len(x_i_pad) < longest_sent_in_examples:
+                x_i_pad.append(cls.empty_sent())  # type: ignore
+            # Pad character-wise
+            for x_i_js_pad in x_i_pad:
+                while len(x_i_js_pad[0]) < longest_token_in_examples:
+                    x_i_js_pad[0].append(PAD)
+        return x_pad
+
+    @classmethod
+    def pad_y(cls, y: Y) -> Y:
+        longest_sent_in_examples = max((len(y_i) for y_i in y))
+        y_pad = copy.deepcopy(y)
+        for y_i_pad in y_pad:
+            # Pad sentence-wise
+            while len(y_i_pad) < longest_sent_in_examples:
+                y_i_pad.append(PAD)
+        return y_pad
+
+    def to_idx_x(self, x: X) -> torch.Tensor:
+        """
+        Maps the input to idices, breaks up character list and returns a tensor. Uses f_map for additinal features.
+        Input needs to be padded, otherwise the character break up will mess things up.
+        """
+        x_idx = []
+        for x_is in x:
+            x_i_idx: List[Tuple[int, ...]] = []
+            for x_i_js in x_is:
+                chars = x_i_js[0]
+                chars_idx = [self.c_map.w2i[c]
+                             if c in self.c_map.w2i else UNK_ID for c in chars]
+                # for x_maps, 0 = word/token, 1 = morphlex, 2 = c_tags (optional)
+                rest = x_i_js[1:]
+                rest_idx = [self.x_maps[i].w2i[rest[i]] if rest[i] in self.x_maps[i].w2i else UNK_ID
+                            for i in range(len(rest))]
+                features = chars_idx + rest_idx
+                x_i_idx.append(tuple(features))
+            x_idx.append(x_i_idx)
+        # Break the list up and return (b, s, f)
+        return torch.tensor(x_idx)
+
+    def to_idx_y(self, y: Y) -> torch.Tensor:
+        # UNK is not supported. We should raise an exception if tag is not present in mapping
+        return torch.tensor([[self.t_map.w2i[t] for t in y_i] for y_i in y])
+
+    def in_x_y_batches(self,
+                       x: In,
+                       y: List[SentTags],
+                       batch_size=32,
+                       shuffle=True,
+                       device=None) -> Iterable[Tuple[torch.Tensor, torch.Tensor]]:
+        if shuffle:
+            x_y = list(zip(x, y))
+            random.shuffle(x_y)
+            x, y = tuple(map(list, zip(*x_y)))  # type: ignore
+
+        # Correct format
+        x_f = self.make_x(x)
+        y_f = self.make_y(y)
+
+        # Make batches
+        length = len(x_f)
+        for ndx in range(0, length, batch_size):
+            # First pad, then map to index
+            yield (self.to_idx_x(self.pad_x(x_f[ndx:min(ndx + batch_size, length)])).to(device),
+                   self.to_idx_y(self.pad_y(y_f[ndx:min(ndx + batch_size, length)])).to(device))
+
+    def in_x_batches(self,
+                     x: In,
+                     batch_size=32,
+                     device=None) -> Iterable[torch.Tensor]:
+        x_f = self.make_x(x)
+        length = len(x_f)
+        for ndx in range(0, length, batch_size):
+            # First pad, then map to index
+            yield self.to_idx_x(self.pad_x(x_f[ndx:min(ndx + batch_size, length)])).to(device)
+
+
 def unk_analysis(train: Vocab, test: Vocab):
     log.info(f'Train len={len(train)}')
     log.info(f'Test len={len(test)}')
     log.info(f'Test not in train={len(test-train)}')
-
-
-def _make_x_i_j(token: str) -> x_i_j:
-    # ([SOS + characters + EOS], word, morph)
-    return ([SOS] + [c for c in token] + [EOS], token, token)  # type: ignore
-
-
-def _make_x_i(example: SentTokens) -> x_i:
-    # We do not put SOS or EOS on words
-    return [_make_x_i_j(tok) for tok in example]
-
-
-def make_x(sentences: List[SentTokens]) -> X:
-    return [_make_x_i(sent) for sent in sentences]
-
-
-def make_y(sentences: List[SentTags]) -> Y:
-    return [[tag for tag in sent] for sent in sentences]
-
-
-def pad_x(x: X) -> X:
-    """ Pads characters and sentences in place. Input should be strings since we need the length of a token"""
-    longest_token_in_examples = max(
-        (max(
-            (len(chars) for chars, _, _ in x_i)
-        ) for x_i in x)
-    )
-    longest_sent_in_examples = max(len(x_i) for x_i in x)
-    log.debug("Longest token in batch", longest_token_in_examples)
-    log.debug("Longest sent in batch", longest_sent_in_examples)
-    x_pad = copy.deepcopy(x)
-    for x_i_pad in x_pad:
-        # Pad sentence-wise
-        while len(x_i_pad) < longest_sent_in_examples:
-            empty_chars: List[str] = []
-            x_i_pad.append((list(empty_chars), PAD, PAD))
-        # Pad character-wise
-        for chars, _, _ in x_i_pad:
-            while len(chars) < longest_token_in_examples:
-                chars.append(PAD)
-    return x_pad
-
-
-def pad_y(y: Y) -> Y:
-    longest_sent_in_examples = max((len(y_i) for y_i in y))
-    y_pad = copy.deepcopy(y)
-    for y_i_pad in y_pad:
-        # Pad sentence-wise
-        while len(y_i_pad) < longest_sent_in_examples:
-            y_i_pad.append(PAD)
-    return y_pad
-
-
-def to_idx_x(x: X, c_map: VocabMap, w_map: VocabMap, m_map: VocabMap) -> torch.Tensor:
-    x_idx = []
-    for x_i in x:
-        x_i_idx = []
-        for chars, w, m in x_i:
-            x_i_idx.append((
-                [c_map.w2i[c]
-                    if c in c_map.w2i else UNK_ID for c in chars],
-                w_map.w2i[w] if w in w_map.w2i else UNK_ID,
-                m_map.w2i[m] if m in m_map.w2i else UNK_ID
-            ))
-        x_idx.append(x_i_idx)
-    # Break the list up and return (b, s, f)
-    return torch.tensor([[(*chars, w, m) for chars, w, m in x_i_idx] for x_i_idx in x_idx])
-
-
-def to_idx_y(y: Y, t_map: VocabMap) -> torch.Tensor:
-    # UNK is not supported. We should raise an exception if tag is not present in mapping
-    return torch.tensor([[t_map.w2i[t] for t in y_i] for y_i in y])
-
-
-def make_batches(data: Tuple[List[SentTokens], List[SentTags]],
-                 batch_size=32,
-                 shuffle=True,
-                 c_map=None,
-                 w_map=None,
-                 m_map=None,
-                 t_map=None,
-                 device=None):
-    if shuffle:
-        x_y = list(zip(*data))
-        random.shuffle(x_y)
-        data = tuple(map(list, zip(*x_y)))  # type: ignore
-
-    # Correct format
-    x = make_x(data[0])
-    y = make_y(data[1])
-
-    # Make batches
-    length = len(x)
-    for ndx in range(0, length, batch_size):
-        # First pad, then map to index
-        yield (to_idx_x(pad_x(x[ndx:min(ndx + batch_size, length)]),
-                        c_map=c_map,
-                        w_map=w_map,
-                        m_map=m_map).to(device),
-               to_idx_y(pad_y(y[ndx:min(ndx + batch_size, length)]),
-                        t_map=t_map).to(device))

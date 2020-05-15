@@ -2,10 +2,12 @@
 import random
 import logging
 import time
+from typing import Any, List, Tuple
 
 import click
 import torch
 import numpy as np
+# import wandb
 
 import data
 from model import ABLTagger
@@ -49,11 +51,13 @@ def gather_tags(inputs, output, coarse):
               default='./extra/dmii.vectors',
               help='A file which contains the morphological embeddings.'
               )
+@click.option('--coarse_epochs', default=12)
 def train(training_files,
           test_file,
           output_dir,
           known_chars_file,
-          morphlex_embeddings_file):
+          morphlex_embeddings_file,
+          coarse_epochs):
     """
     training_files: Files to use for training (supports multiple files = globbing).
     All training files should be .tsv, with two columns, the token and tag.
@@ -66,8 +70,10 @@ def train(training_files,
     for train_file in training_files:
         training_corpus.extend(data.read_tsv(train_file))
     test_corpus: data.Corpus = data.read_tsv(test_file)
+    # Read the supported characters
+    chars = data.read_known_characters(known_chars_file)
 
-    # Extract tokens, tags, characters
+    # Extract tokens, tags
     train_tokens, train_tags = data.tsv_to_pairs(training_corpus)
     test_tokens, test_tags = data.tsv_to_pairs(test_corpus)
 
@@ -76,41 +82,11 @@ def train(training_files,
     test_tags_coarse = data.coarsify(test_tags)
 
     # Define the vocabularies and mappings
-    chars = data.read_known_characters(known_chars_file)
+    coarse_mapper = data.DataVocabMap(
+        tokens=train_tokens, tags=train_tags_coarse, chars=chars)
+    fine_mapper = data.DataVocabMap(
+        tokens=train_tokens, tags=train_tags, chars=chars, c_tags=train_tags_coarse)
 
-    train_token_vocab = data.get_vocab(train_tokens)
-    test_token_vocab = data.get_vocab(test_tokens)
-    train_tag_vocab = data.get_vocab(train_tags)
-    test_tag_vocab = data.get_vocab(test_tags)
-
-    # We need EOS and SOS for chars
-    char_vocap_map = data.VocabMap(chars, special_tokens=[
-        (data.UNK, data.UNK_ID),
-        (data.PAD, data.PAD_ID),
-        (data.EOS, data.EOS_ID),
-        (data.SOS, data.SOS_ID)
-    ])
-    token_vocab_map = data.VocabMap(train_token_vocab, special_tokens=[
-        (data.UNK, data.UNK_ID),
-        (data.PAD, data.PAD_ID),
-    ])
-    # The tags will be padded, but we do not support UNK
-    tag_vocab_map = data.VocabMap(train_tag_vocab, special_tokens=[
-        (data.PAD, data.PAD_ID),
-    ])
-    coarse_tag_vocab_map = data.VocabMap(data.get_vocab(train_tags_coarse), special_tokens=[
-        (data.PAD, data.PAD_ID),
-    ])
-    log.info(f'Character vocab={len(char_vocap_map)}')
-    log.info(f'Word vocab={len(token_vocab_map)}')
-    log.info(f'Tag vocab={len(tag_vocab_map)}')
-    log.info(f'Tag (coarse) vocab={len(coarse_tag_vocab_map)}')
-    token_freqs = data.get_tok_freq(train_tokens)
-
-    log.info('Token unk analysis')
-    data.unk_analysis(train_token_vocab, test_token_vocab)
-    log.info('Tag unk analysis')
-    data.unk_analysis(train_tag_vocab, test_tag_vocab)
     # We filter the morphlex embeddings based on the training and test set for quicker training. This should not be done in production
     filter_on = data.get_vocab(train_tokens)
     filter_on.update(data.get_vocab(test_tokens))
@@ -119,11 +95,13 @@ def train(training_files,
         (data.UNK, data.UNK_ID),
         (data.PAD, data.PAD_ID)
     ])
+    coarse_mapper.add_morph_map(m_vocab_map)
+    fine_mapper.add_morph_map(m_vocab_map)
 
     pos_model = ABLTagger(
-        char_dim=len(char_vocap_map),
-        token_dim=len(token_vocab_map),
-        tags_dim=len(coarse_tag_vocab_map),
+        char_dim=len(coarse_mapper.c_map),
+        token_dim=len(coarse_mapper.w_map),
+        tags_dim=len(coarse_mapper.t_map),
         morph_lex_embeddings=torch.from_numpy(embedding).float(),
         c_tags_embeddings=None
     )
@@ -144,35 +122,70 @@ def train(training_files,
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
         optimizer, lr_lambda=lambda epoch: 0.95)
 
-    epochs = 1
-    batch_size = 32
+    run_epochs(model=pos_model,
+               mapper=coarse_mapper,
+               optimizer=optimizer,
+               criterion=criterion,
+               scheduler=scheduler,
+               device=device,
+               train=(train_tokens, train_tags_coarse),
+               test=(test_tokens, test_tags_coarse),
+               epochs=coarse_epochs,
+               batch_size=32)
+
+
+def tag_sents(sentences: data.In,
+              model: torch.nn.Module,
+              device,
+              mapper: data.DataVocabMap) -> List[data.SentTags]:
+    model.eval()
+    start = time.time()
+    log.info(f'Tagging sentences len={len(sentences)}')
+    iter = mapper.in_x_batches(x=sentences,
+                               batch_size=1,
+                               device=device)
+    tags = []
+    for i, x in enumerate(iter, start=1):
+        log.info(f'Running batch nr={i}')
+        pred = model(x)
+        log.info(pred.shape)
+
+    end = time.time()
+    log.info(f'Tagging took={end-start}s')
+    return tags
+
+
+def run_epochs(model: torch.nn.Module,
+               mapper: data.DataVocabMap,
+               optimizer,
+               criterion,
+               scheduler: torch.optim.lr_scheduler._LRScheduler,
+               device: torch.device,
+               train: Tuple[List[Any], List[Any]],
+               test: Tuple[List[Any], List[Any]],
+               epochs: int,
+               batch_size: int):
     best_validation_loss = 100
     for epoch in range(1, epochs + 1):
         # Time it
         start = time.time()
         log.info(
             f'Epoch={epoch}/{epochs}, lr={list(param_group["lr"] for param_group in optimizer.param_groups)}')
-        train_iter = data.make_batches((train_tokens, train_tags_coarse),
-                                       batch_size=batch_size,
-                                       shuffle=True,
-                                       c_map=char_vocap_map,
-                                       w_map=token_vocab_map,
-                                       m_map=m_vocab_map,
-                                       t_map=coarse_tag_vocab_map,
-                                       device=device)
-        train_model(pos_model, train_iter, optimizer, criterion)
+        train_iter = mapper.in_x_y_batches(x=train[0],
+                                           y=train[1],
+                                           batch_size=batch_size,
+                                           shuffle=True,
+                                           device=device)
+        train_model(model, train_iter, optimizer, criterion)
         end = time.time()
         log.info(f'Training took={end-start}s')
         # We just run the validation using same batch size, to keep PAD to minimum
-        test_iter = data.make_batches((test_tokens, test_tags_coarse),
-                                      batch_size=batch_size,
-                                      shuffle=False,
-                                      c_map=char_vocap_map,
-                                      w_map=token_vocab_map,
-                                      m_map=m_vocab_map,
-                                      t_map=coarse_tag_vocab_map,
-                                      device=device)
-        val_loss, val_acc = evaluate_model(pos_model, test_iter, criterion)
+        test_iter = mapper.in_x_y_batches(x=test[0],
+                                          y=test[1],
+                                          batch_size=batch_size,
+                                          shuffle=False,
+                                          device=device)
+        val_loss, val_acc = evaluate_model(model, test_iter, criterion)
         log.info(f'Validation loss={val_loss}, acc={val_acc}')
         if val_loss < best_validation_loss:
             best_validation_loss = val_loss
