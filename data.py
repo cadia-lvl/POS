@@ -210,6 +210,8 @@ class DataVocabMap:
         ])
         # The tags will be padded, but we do not support UNK
         self.t_map = VocabMap(get_vocab(tags), special_tokens=[
+            # TODO: remove UNK when we can express all tags
+            (UNK, UNK_ID),
             (PAD, PAD_ID),
         ])
         log.info(f'Character vocab={len(self.c_map)}')
@@ -269,7 +271,7 @@ class DataVocabMap:
             if len(x_i_pad[0]) == 3:
                 empty_rest = (PAD, PAD)
             else:
-                empty_rest = (PAD, PAD, PAD)
+                empty_rest = (PAD, PAD, PAD)  # type: ignore
             while len(x_i_pad) < longest_sent_in_examples:
                 x_i_pad.append((list(), *empty_rest))
             # Pad character-wise
@@ -311,8 +313,9 @@ class DataVocabMap:
         return torch.tensor(x_idx)
 
     def to_idx_y(self, y: Y) -> torch.Tensor:
-        # UNK is not supported. We should raise an exception if tag is not present in mapping
-        return torch.tensor([[self.t_map.w2i[t] for t in y_i] for y_i in y])
+        # TODO: Remove UNK when we can express all the tags
+        # UNK is temproary supported.
+        return torch.tensor([[self.t_map.w2i[t] if t in self.t_map.w2i else UNK_ID for t in y_i] for y_i in y])
 
     def in_x_y_batches(self,
                        x: In,
