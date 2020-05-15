@@ -52,12 +52,18 @@ def gather_tags(inputs, output, coarse):
               help='A file which contains the morphological embeddings.'
               )
 @click.option('--coarse_epochs', default=12)
+@click.option('--fine_epochs', default=20)
+@click.option('--batch_size', default=32)
+@click.option('--debug', is_flag=True)
 def train(training_files,
           test_file,
           output_dir,
           known_chars_file,
           morphlex_embeddings_file,
-          coarse_epochs):
+          coarse_epochs,
+          fine_epochs,
+          batch_size,
+          debug):
     """
     training_files: Files to use for training (supports multiple files = globbing).
     All training files should be .tsv, with two columns, the token and tag.
@@ -98,7 +104,8 @@ def train(training_files,
     coarse_mapper.add_morph_map(m_vocab_map)
     fine_mapper.add_morph_map(m_vocab_map)
 
-    pos_model = ABLTagger(
+    log.info('Creating coarse tagger')
+    coarse_tagger = ABLTagger(
         char_dim=len(coarse_mapper.c_map),
         token_dim=len(coarse_mapper.w_map),
         tags_dim=len(coarse_mapper.t_map),
@@ -106,23 +113,30 @@ def train(training_files,
         c_tags_embeddings=None
     )
     log.info(
-        f'Trainable parameters={sum(p.numel() for p in pos_model.parameters() if p.requires_grad)}')
+        f'Trainable parameters={sum(p.numel() for p in coarse_tagger.parameters() if p.requires_grad)}')
     log.info(
-        f'Not trainable parameters={sum(p.numel() for p in pos_model.parameters() if not p.requires_grad)}')
+        f'Not trainable parameters={sum(p.numel() for p in coarse_tagger.parameters() if not p.requires_grad)}')
     # Make the model data parallel
-    pos_model = torch.nn.DataParallel(pos_model)
+    coarse_tagger = torch.nn.DataParallel(coarse_tagger)
     # Move model to device, before optimizer
-    pos_model.to(device)
-    log.info(pos_model)
+    coarse_tagger.to(device)
+    log.info(coarse_tagger)
     # We ignore targets which have beed padded
     criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID)
     # lr as used in ABLTagger
-    optimizer = torch.optim.SGD(pos_model.parameters(), lr=0.13)
+    optimizer = torch.optim.SGD(coarse_tagger.parameters(), lr=0.13)
     # learning rate decay as in ABLTagger
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
         optimizer, lr_lambda=lambda epoch: 0.95)
+    if debug:
+        train_tokens = train_tokens[:batch_size]
+        train_tags_coarse = train_tags_coarse[:batch_size]
+        train_tags = train_tags[:batch_size]
+        test_tokens = test_tokens[:batch_size]
+        test_tags_coarse = test_tags_coarse[:batch_size]
+        test_tags = test_tags[:batch_size]
 
-    run_epochs(model=pos_model,
+    run_epochs(model=coarse_tagger,
                mapper=coarse_mapper,
                optimizer=optimizer,
                criterion=criterion,
@@ -131,7 +145,47 @@ def train(training_files,
                train=(train_tokens, train_tags_coarse),
                test=(test_tokens, test_tags_coarse),
                epochs=coarse_epochs,
-               batch_size=32)
+               batch_size=batch_size)
+    train_tags_coarse_tagged = tag_sents(sentences=train_tokens,
+                                         model=coarse_tagger,
+                                         device=device,
+                                         mapper=coarse_mapper)
+    test_tags_coarse_tagged = tag_sents(sentences=test_tokens,
+                                        model=coarse_tagger,
+                                        device=device,
+                                        mapper=coarse_mapper)
+    log.info('Creating fine tagger')
+    fine_tagger = ABLTagger(
+        char_dim=len(fine_mapper.c_map),
+        token_dim=len(fine_mapper.w_map),
+        tags_dim=len(fine_mapper.t_map),
+        morph_lex_embeddings=torch.from_numpy(embedding).float(),
+        c_tags_embeddings=torch.cat([torch.zeros(1, len(fine_mapper.c_t_map)),
+                                     torch.diag(torch.ones(len(fine_mapper.c_t_map)))])
+    )
+    log.info(
+        f'Trainable parameters={sum(p.numel() for p in fine_tagger.parameters() if p.requires_grad)}')
+    log.info(
+        f'Not trainable parameters={sum(p.numel() for p in fine_tagger.parameters() if not p.requires_grad)}')
+    # Make the model data parallel
+    fine_tagger = torch.nn.DataParallel(fine_tagger)
+    # Move model to device, before optimizer
+    fine_tagger.to(device)
+    log.info(fine_tagger)
+    fine_train = [[(tok, tag) for tok, tag in zip(tok_sent, tag_sent)]
+                  for tok_sent, tag_sent in zip(train_tokens, train_tags_coarse_tagged)]
+    fine_test = [[(tok, tag) for tok, tag in zip(tok_sent, tag_sent)]
+                 for tok_sent, tag_sent in zip(test_tokens, test_tags_coarse_tagged)]
+    run_epochs(model=fine_tagger,
+               mapper=fine_mapper,
+               optimizer=optimizer,
+               criterion=criterion,
+               scheduler=scheduler,
+               device=device,
+               train=(fine_train, train_tags),
+               test=(fine_test, test_tags),
+               epochs=fine_epochs,
+               batch_size=batch_size)
 
 
 def tag_sents(sentences: data.In,
@@ -142,13 +196,17 @@ def tag_sents(sentences: data.In,
     start = time.time()
     log.info(f'Tagging sentences len={len(sentences)}')
     iter = mapper.in_x_batches(x=sentences,
+                               # Batch size to 1 to avoid dealing with PAD
                                batch_size=1,
                                device=device)
     tags = []
     for i, x in enumerate(iter, start=1):
-        log.info(f'Running batch nr={i}')
         pred = model(x)
-        log.info(pred.shape)
+        # (seq, tags)
+        pred = pred.view(-1, pred.shape[-1])
+        # seq
+        idxs = pred.argmax(dim=1).tolist()
+        tags.append(tuple(mapper.t_map.i2w[idx] for idx in idxs))
 
     end = time.time()
     log.info(f'Tagging took={end-start}s')
@@ -165,7 +223,7 @@ def run_epochs(model: torch.nn.Module,
                test: Tuple[List[Any], List[Any]],
                epochs: int,
                batch_size: int):
-    best_validation_loss = 100
+    best_validation_loss = batch_size
     for epoch in range(1, epochs + 1):
         # Time it
         start = time.time()
@@ -186,7 +244,7 @@ def run_epochs(model: torch.nn.Module,
                                           shuffle=False,
                                           device=device)
         val_loss, val_acc = evaluate_model(model, test_iter, criterion)
-        log.info(f'Validation loss={val_loss}, acc={val_acc}')
+        log.info(f'Validation acc={val_acc}, loss={val_loss}')
         if val_loss < best_validation_loss:
             best_validation_loss = val_loss
             # torch.save(pos_model.state_dict(), 'model.pt')
@@ -258,7 +316,8 @@ if __name__ == '__main__':
     log = logging.getLogger()
 
     if torch.cuda.is_available():
-        device = torch.device('cuda')
+        # TODO: remove :0
+        device = torch.device('cuda:0')
         # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
         # --gres=gpu:titanx:2
         log.info(f'Using {torch.cuda.device_count()} GPUs')

@@ -252,13 +252,8 @@ class DataVocabMap:
         return [[tag for tag in sent] for sent in sentences]
 
     @classmethod
-    def empty_sent(_) -> Union[x_i_j, x_i_j_c]:
-        return ([], PAD, PAD)
-
-    @classmethod
     def pad_x(cls, x: X) -> X:
         """ Pads characters and sentences in place. Input should be strings since we need the length of a token"""
-        cls.empty_sent()
         longest_token_in_examples = max(
             (max(
                 # Avoid tuple unpacking
@@ -271,8 +266,12 @@ class DataVocabMap:
         x_pad = copy.deepcopy(x)
         for x_i_pad in x_pad:
             # Pad sentence-wise
+            if len(x_i_pad[0]) == 3:
+                empty_rest = (PAD, PAD)
+            else:
+                empty_rest = (PAD, PAD, PAD)
             while len(x_i_pad) < longest_sent_in_examples:
-                x_i_pad.append(cls.empty_sent())  # type: ignore
+                x_i_pad.append((list(), *empty_rest))
             # Pad character-wise
             for x_i_js_pad in x_i_pad:
                 while len(x_i_js_pad[0]) < longest_token_in_examples:
