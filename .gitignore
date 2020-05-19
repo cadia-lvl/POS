@@ -1,6 +1,9 @@
-.mypy_cache/*
-.vscode/*
-__pycache__/*
+.mypy_cache/
+.vscode/
+/__pycache__/
+pos/__pycache__/
 data/raw/*
 data/format/*
 models/*
+out/*
+slurm-*
