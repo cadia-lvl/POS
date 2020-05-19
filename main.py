@@ -80,6 +80,7 @@ def train(training_files,
     # We create a folder for this run specifically
     output_dir = pathlib.Path(output_dir).joinpath(
         datetime.datetime.now().strftime("%Y-%m-%d|%H:%M:%S"))
+    output_dir.mkdir()
     hyperparameters = {
         'training_files': training_files,
         'test_file': test_file,
@@ -94,14 +95,14 @@ def train(training_files,
         'hidden_dim': 32,  # The main LSTM time-steps will be mapped to this dim
     }
     with output_dir.joinpath('hyperparamters.json').open(mode='+w') as f:
-        json.dump(hyperparameters, f)
+        json.dump(hyperparameters, f, indent=4)
     # Read train and test data
     train_tokens, train_tags = [], []
     log.info(f'Reading training files={training_files}')
     for train_file in training_files:
         toks, tags, _ = data.read_tsv(train_file)
-        train_tokens.append(toks)
-        train_tags.append(tags)
+        train_tokens.extend(toks)
+        train_tags.extend(tags)
     test_tokens, test_tags, _ = data.read_tsv(test_file)
     # Read the supported characters
     chars = data.read_known_characters(known_chars_file)
@@ -194,7 +195,7 @@ def train(training_files,
                                         mapper=coarse_mapper)
 
     data.write_tsv(str(output_dir.joinpath('coarse_predictions.tsv')),
-                   (test_tokens, test_tags, test_tags_coarse_tagged))
+                   (test_tokens, test_tags_coarse, test_tags_coarse_tagged))
     del coarse_tagger
     torch.cuda.empty_cache()
     log.info('Creating fine tagger')

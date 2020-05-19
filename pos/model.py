@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-import data
+from . import data
 
 
 class ABLTagger(nn.Module):
