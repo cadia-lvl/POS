@@ -22,8 +22,8 @@
 import argparse
 import sys
 
-import data
-from data import Embeddings, Corpus
+import pos.data as data
+from pos.data import Embeddings
 import dynet_config
 dynet_config.set(mem=33000, random_seed=42)
 __license__ = "Apache 2.0"
@@ -51,7 +51,7 @@ if __name__ == '__main__':
     parser.add_argument('--out_folder', '-out-data',
                         help="Folder containing results", default='./models')
     parser.add_argument('--use_morphlex', '-morphlex',
-                        help="File with morphological lexicon embeddings in ./extra folder. Example file: ./extra/dmii.or", default='./extra/dmii.vectors')
+                        help="File with morphological lexicon embeddings in ./extra folder. Example file: ./extra/dmii.or", default='./data/extra/dmii.vectors')
     parser.add_argument('--load_characters', '-load_chars',
                         help="File to load characters from", default='./extra/characters_training.txt')
     parser.add_argument('--load_coarse_tagset', '-load_coarse',
@@ -82,16 +82,11 @@ if __name__ == '__main__':
 
     out_folder = args.out_folder
 
-    # First train or load a coarse tagger without evaluation - then tag and finally run the fine tagger
-    training_corpus: Corpus = data.read_tsv(
+    # Read train and test data
+    train_tokens, train_tags, _ = data.read_tsv(
         f'{args.data_folder}IFD-{args.dataset_fold:02}TM.tsv')
-    test_corpus: Corpus = data.read_tsv(
+    test_tokens, test_tags, _ = data.read_tsv(
         f'{args.data_folder}IFD-{args.dataset_fold:02}PM.tsv')
-
-    # Extract tokens, tags
-    train_tokens, train_tags = data.tsv_to_pairs(training_corpus)
-    test_tokens, test_tags = data.tsv_to_pairs(test_corpus)
-
     # Prepare the coarse tags
     train_tags_coarse = data.coarsify(train_tags)
     test_tags_coarse = data.coarsify(test_tags)

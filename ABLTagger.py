@@ -30,7 +30,7 @@ import numpy as np
 import dynet as dy
 import csv
 
-import data
+import pos.data as data
 
 random.seed(42)
 

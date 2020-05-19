@@ -1,7 +1,9 @@
 #!/usr/bin/env python
+import pathlib
 import random
 import logging
-import time
+import datetime
+import json
 from typing import Any, List, Tuple
 
 import click
@@ -9,8 +11,8 @@ import torch
 import numpy as np
 # import wandb
 
-import data
-from model import ABLTagger
+from pos import data
+from pos.model import ABLTagger
 
 
 @click.group()
@@ -40,7 +42,8 @@ def gather_tags(inputs, output, coarse):
                 )
 @click.argument('test_file'
                 )
-@click.argument('output_dir'
+@click.argument('output_dir',
+                default='./out'
                 )
 @click.option('--known_chars_file',
               default='./extra/characters_training.txt',
@@ -74,19 +77,35 @@ def train(training_files,
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
+    # We create a folder for this run specifically
+    output_dir = pathlib.Path(output_dir).joinpath(
+        datetime.datetime.now().strftime("%Y-%m-%d|%H:%M:%S"))
+    hyperparameters = {
+        'training_files': training_files,
+        'test_file': test_file,
+        'coarse_epochs': coarse_epochs,
+        'fine_epochs': fine_epochs,
+        'batch_size': batch_size,
+        'lstm_dropout': 0.1,
+        'emb_char_dim': 20,  # The characters are mapped to this dim
+        'char_lstm_dim': 64,  # The character LSTM will output with this dim
+        'emb_token_dim': 128,  # The tokens are mapped to this dim
+        'main_lstm_dim': 64,  # The main LSTM dim will output with this dim
+        'hidden_dim': 32,  # The main LSTM time-steps will be mapped to this dim
+    }
+    with output_dir.joinpath('hyperparamters.json').open(mode='+w') as f:
+        json.dump(hyperparameters, f)
     # Read train and test data
-    training_corpus = []
+    train_tokens, train_tags = [], []
     log.info(f'Reading training files={training_files}')
     for train_file in training_files:
-        training_corpus.extend(data.read_tsv(train_file))
-    test_corpus: data.Corpus = data.read_tsv(test_file)
+        toks, tags, _ = data.read_tsv(train_file)
+        train_tokens.append(toks)
+        train_tags.append(tags)
+    test_tokens, test_tags, _ = data.read_tsv(test_file)
     # Read the supported characters
     chars = data.read_known_characters(known_chars_file)
     c_tags = data.read_known_characters(c_tags_file)
-
-    # Extract tokens, tags
-    train_tokens, train_tags = data.tsv_to_pairs(training_corpus)
-    test_tokens, test_tags = data.tsv_to_pairs(test_corpus)
 
     # Prepare the coarse tags
     train_tags_coarse = data.coarsify(train_tags)
@@ -116,7 +135,17 @@ def train(training_files,
         tags_dim=len(coarse_mapper.t_map),
         morph_lex_embeddings=torch.from_numpy(embedding).float().to(device),
         c_tags_embeddings=None,
-        lstm_dropouts=0.1
+        lstm_dropouts=hyperparameters['lstm_dropout'],
+        # The characters are mapped to this dim
+        emb_char_dim=hyperparameters['emb_char_dim'],
+        # The character LSTM will output with this dim
+        char_lstm_dim=hyperparameters['char_lstm_dim'],
+        # The tokens are mapped to this dim
+        emb_token_dim=hyperparameters['emb_token_dim'],
+        # The main LSTM dim will output with this dim
+        main_lstm_dim=hyperparameters['main_lstm_dim'],
+        # The main LSTM time-steps will be mapped to this dim
+        hidden_dim=hyperparameters['hidden_dim'],
     )
     log.info(
         f'Trainable parameters={sum(p.numel() for p in coarse_tagger.parameters() if p.requires_grad)}')
@@ -163,6 +192,9 @@ def train(training_files,
                                         batch_size=batch_size,
                                         device=device,
                                         mapper=coarse_mapper)
+
+    data.write_tsv(str(output_dir.joinpath('coarse_predictions.tsv')),
+                   (test_tokens, test_tags, test_tags_coarse_tagged))
     del coarse_tagger
     torch.cuda.empty_cache()
     log.info('Creating fine tagger')
@@ -173,7 +205,17 @@ def train(training_files,
         morph_lex_embeddings=torch.from_numpy(embedding).float().to(device),
         c_tags_embeddings=torch.diag(torch.ones(
             len(fine_mapper.c_t_map))).to(device),
-        lstm_dropouts=0.1
+        lstm_dropouts=hyperparameters['lstm_dropout'],
+        # The characters are mapped to this dim
+        emb_char_dim=hyperparameters['emb_char_dim'],
+        # The character LSTM will output with this dim
+        char_lstm_dim=hyperparameters['char_lstm_dim'],
+        # The tokens are mapped to this dim
+        emb_token_dim=hyperparameters['emb_token_dim'],
+        # The main LSTM dim will output with this dim
+        main_lstm_dim=hyperparameters['main_lstm_dim'],
+        # The main LSTM time-steps will be mapped to this dim
+        hidden_dim=hyperparameters['hidden_dim'],
     )
     log.info(
         f'Trainable parameters={sum(p.numel() for p in fine_tagger.parameters() if p.requires_grad)}')
@@ -204,6 +246,13 @@ def train(training_files,
                test=(fine_test, test_tags),
                epochs=fine_epochs,
                batch_size=batch_size)
+    test_tags_tagged = tag_sents(sentences=fine_test,
+                                 model=fine_tagger,
+                                 batch_size=batch_size,
+                                 device=device,
+                                 mapper=fine_mapper)
+    data.write_tsv(str(output_dir.joinpath('fine_predictions.tsv')),
+                   (test_tokens, test_tags, test_tags_tagged))
 
 
 def tag_sents(sentences: data.In,
@@ -212,8 +261,8 @@ def tag_sents(sentences: data.In,
               batch_size: int,
               mapper: data.DataVocabMap) -> List[data.SentTags]:
     model.eval()
+    start = datetime.datetime.now()
     with torch.no_grad():
-        start = time.time()
         log.info(f'Tagging sentences len={len(sentences)}')
         iter = mapper.in_x_batches(x=sentences,
                                    # Batch size to 1 to avoid dealing with PAD
@@ -232,8 +281,7 @@ def tag_sents(sentences: data.In,
                 sent_pred = sent_pred[:num_non_pads, :]  # type: ignore
                 idxs = sent_pred.argmax(dim=1).tolist()
                 tags.append(tuple(mapper.t_map.i2w[idx] for idx in idxs))
-
-    end = time.time()
+    end = datetime.datetime.now()
     log.info(f'Tagging took={end-start} seconds')
     return tags
 
@@ -251,7 +299,7 @@ def run_epochs(model: torch.nn.Module,
     best_validation_loss = 100
     for epoch in range(1, epochs + 1):
         # Time it
-        start = time.time()
+        start = datetime.datetime.now()
         log.info(
             f'Epoch={epoch}/{epochs}, lr={list(param_group["lr"] for param_group in optimizer.param_groups)}')
         train_iter = mapper.in_x_y_batches(x=train[0],
@@ -261,7 +309,7 @@ def run_epochs(model: torch.nn.Module,
                                            device=device)
         train_model(model, train_iter, optimizer, criterion,
                     log_prepend=f'Epoch={epoch}/{epochs}, ')
-        end = time.time()
+        end = datetime.datetime.now()
         log.info(f'Training took={end-start} seconds')
         # We just run the validation using same batch size, to keep PAD to minimum
         test_iter = mapper.in_x_y_batches(x=test[0],

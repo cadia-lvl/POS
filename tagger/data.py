@@ -16,6 +16,7 @@ SentTags = Tuple[str, ...]
 # Either tokens or tags, we don't care
 Sent = Union[SentTags, SentTokens]
 Vocab = Set[str]
+DataSent = List[Sent]
 DataPairs = Tuple[List[SentTokens], List[SentTags]]
 DataPairs_c = Tuple[Tuple[List[SentTokens], List[SentTags]], List[SentTags]]
 Data = Union[DataPairs, DataPairs_c]
@@ -43,43 +44,45 @@ SOS = '<s>'
 SOS_ID = 3
 
 
-def write_tsv(output, corpus: Corpus):
+def write_tsv(output, data: Tuple[DataSent, ...]):
     with open(output, 'w+') as f:
-        for sent in corpus:
-            for word, tag in sent:
-                f.write(f'{word}\t{tag}\n')
+        for sent_tok_tags in zip(*data):
+            for tok_tags in zip(*sent_tok_tags):
+                f.write('\t'.join(tok_tags) + '\n')
             f.write('\n')
 
 
-def read_tsv(input) -> Corpus:
-    corpus = []
+def read_tsv(input) -> Tuple[DataSent, DataSent, DataSent]:
+    tokens = []
+    tags = []
+    model_tags = []
     with open(input) as f:
-        tokens: SentTokTag = []
+        sent_tokens: List[str] = []
+        sent_tags: List[str] = []
+        sent_model_tags: List[str] = []
         for line in f:
             line = line.strip()
             # We read a blank line - sentence has been read.
             if not line:
-                corpus.append(tokens)
-                tokens = []
+                tokens.append(tuple(sent_tokens))
+                tags.append(tuple(sent_tags))
+                model_tags.append(tuple(sent_model_tags))
+                sent_tokens = []
+                sent_tags = []
+                sent_model_tags = []
             else:
-                word, tag = line.split()
-                tokens.append((word, tag))
+                tok_tags = line.split()
+                sent_tokens.append(tok_tags[0])
+                sent_tags.append(tok_tags[1])
+                if len(tok_tags) == 3:
+                    sent_model_tags.append(tok_tags[2])
+
     # The file does not neccessarily end with a blank line
-    if len(tokens) != 0:
-        corpus.append(tokens)
-    return corpus
-
-
-def tsv_to_pairs(corpus: Corpus) -> DataPairs:
-    tokens, tags = [], []
-    for tagged_sentence in corpus:
-        sent_tokens, sent_tags = [], []
-        for token, tag in tagged_sentence:
-            sent_tokens.append(token)
-            sent_tags.append(tag)
+    if len(sent_tokens) != 0:
         tokens.append(tuple(sent_tokens))
         tags.append(tuple(sent_tags))
-    return tokens, tags
+        model_tags.append(tuple(sent_model_tags))
+    return tokens, tags, model_tags
 
 
 def get_vocab(sentences: List[Sent]) -> Vocab:
