@@ -4,6 +4,7 @@ import random
 import logging
 import datetime
 import json
+import pprint
 from typing import Any, List, Tuple
 
 import click
@@ -13,11 +14,16 @@ import numpy as np
 
 from pos import data
 from pos.model import ABLTagger
+from pos import evaluate
+
+DEBUG = False
 
 
 @click.group()
-def cli():
-    pass
+@click.option('--debug/--no-debug', default=False)
+def cli(debug):
+    global DEBUG
+    DEBUG = debug
 
 
 @cli.command()
@@ -34,6 +40,20 @@ def gather_tags(inputs, output, coarse):
     tags = data.get_vocab(tags)
     for tag in sorted(list(tags)):
         output.write(f'{tag}\n')
+
+
+@cli.command()
+@click.argument('input')
+@click.option('--report_type', type=click.Choice(['accuracy', 'errors']), help='Type of reporting to do')
+@click.option('--count', default=10, help='The number of outputs for top-k')
+def report(input, report_type, count):
+    examples = evaluate.analyse_examples(
+        evaluate.flatten_data(data.read_tsv(input)))
+    if report_type == 'accuracy':
+        log.info(evaluate.calculate_accuracy(examples))
+    elif report_type == 'errors':
+        errors = evaluate.all_errors(examples)
+        log.info(pprint.pformat(errors.most_common(count)))
 
 
 @cli.command()
@@ -60,7 +80,6 @@ def gather_tags(inputs, output, coarse):
 @click.option('--coarse_epochs', default=12)
 @click.option('--fine_epochs', default=20)
 @click.option('--batch_size', default=32)
-@click.option('--debug', is_flag=True)
 def train(training_files,
           test_file,
           output_dir,
@@ -69,8 +88,7 @@ def train(training_files,
           morphlex_embeddings_file,
           coarse_epochs,
           fine_epochs,
-          batch_size,
-          debug):
+          batch_size):
     """
     training_files: Files to use for training (supports multiple files = globbing).
     All training files should be .tsv, with two columns, the token and tag.
@@ -79,7 +97,7 @@ def train(training_files,
     """
     # We create a folder for this run specifically
     output_dir = pathlib.Path(output_dir).joinpath(
-        datetime.datetime.now().strftime("%Y-%m-%d|%H:%M:%S"))
+        datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     output_dir.mkdir()
     hyperparameters = {
         'training_files': training_files,
@@ -88,6 +106,7 @@ def train(training_files,
         'fine_epochs': fine_epochs,
         'batch_size': batch_size,
         'lstm_dropout': 0.1,
+        'input_dropouts': 0.1,
         'emb_char_dim': 20,  # The characters are mapped to this dim
         'char_lstm_dim': 64,  # The character LSTM will output with this dim
         'emb_token_dim': 128,  # The tokens are mapped to this dim
@@ -129,6 +148,26 @@ def train(training_files,
     coarse_mapper.add_morph_map(m_vocab_map)
     fine_mapper.add_morph_map(m_vocab_map)
 
+    if DEBUG or not torch.cuda.is_available():
+        device = torch.device('cpu')
+        threads = 1
+        # Set the number of threads to use for CPU
+        torch.set_num_threads(threads)
+        log.info(f'Using {threads} CPU threads')
+    else:
+        device = torch.device('cuda')
+        # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
+        # --gres=gpu:titanx:2
+        log.info(f'Using {torch.cuda.device_count()} GPUs')
+
+    # Set the seed on all platforms
+    SEED = 42
+    if SEED:
+        random.seed(SEED)
+        np.random.seed(SEED)
+        torch.manual_seed(SEED)
+        torch.backends.cudnn.deterministic = True  # type: ignore
+
     log.info('Creating coarse tagger')
     coarse_tagger = ABLTagger(
         char_dim=len(coarse_mapper.c_map),
@@ -137,6 +176,7 @@ def train(training_files,
         morph_lex_embeddings=torch.from_numpy(embedding).float().to(device),
         c_tags_embeddings=None,
         lstm_dropouts=hyperparameters['lstm_dropout'],
+        input_dropouts=hyperparameters['input_dropouts'],
         # The characters are mapped to this dim
         emb_char_dim=hyperparameters['emb_char_dim'],
         # The character LSTM will output with this dim
@@ -165,7 +205,7 @@ def train(training_files,
     # learning rate decay as in ABLTagger
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
         optimizer, lr_lambda=lambda epoch: 0.95)
-    if debug:
+    if DEBUG:
         train_tokens = train_tokens[:batch_size]
         train_tags_coarse = train_tags_coarse[:batch_size]
         train_tags = train_tags[:batch_size]
@@ -207,6 +247,7 @@ def train(training_files,
         c_tags_embeddings=torch.diag(torch.ones(
             len(fine_mapper.c_t_map))).to(device),
         lstm_dropouts=hyperparameters['lstm_dropout'],
+        input_dropouts=hyperparameters['input_dropouts'],
         # The characters are mapped to this dim
         emb_char_dim=hyperparameters['emb_char_dim'],
         # The character LSTM will output with this dim
@@ -396,25 +437,4 @@ def categorical_accuracy(preds, y):
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
     log = logging.getLogger()
-
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
-        # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
-        # --gres=gpu:titanx:2
-        log.info(f'Using {torch.cuda.device_count()} GPUs')
-    else:
-        device = torch.device('cpu')
-        threads = 1
-        # Set the number of threads to use for CPU
-        torch.set_num_threads(threads)
-        log.info(f'Using {threads} CPU threads')
-
-    # Set the seed on all platforms
-    SEED = 42
-    if SEED:
-        random.seed(SEED)
-        np.random.seed(SEED)
-        torch.manual_seed(SEED)
-        torch.backends.cudnn.deterministic = True  # type: ignore
-
     cli()
