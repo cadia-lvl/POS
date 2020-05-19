@@ -52,8 +52,8 @@ class CombinedDims:
 
 
 class ABLTagger():
-    START_OF_WORD = "<w>"
-    END_OF_WORD = "</w>"
+    START_OF_WORD = data.SOS
+    END_OF_WORD = data.EOS
 
     def __init__(self,
                  vocab_chars: data.VocabMap,
@@ -111,7 +111,7 @@ class ABLTagger():
         if self.coarse_features_flag:
             # TODO: Is this + 1 correct? We now read '0' from the file.
             self.WORD_CLASS_LOOKUP = self.model.add_lookup_parameters(
-                (self.dim.word_class_lookup + 1, self.dim.word_class_lookup))
+                (self.coarse_features_embeddings.shape[0], self.coarse_features_embeddings.shape[1]))
             self.WORD_CLASS_LOOKUP.init_from_array(
                 self.coarse_features_embeddings)
 
@@ -138,22 +138,19 @@ class ABLTagger():
         self.cFwdRNN.set_dropout(self.hp.dropout)
         self.cBwdRNN.set_dropout(self.hp.dropout)
 
-    def dynamic_rep(self, w, cf_init, cb_init):
-        if self.word_frequency[w] >= self.hp.words_min_freq:
-            return self.word_rep(w)
-        else:
-            return self.char_rep(w, cf_init, cb_init)
-
     def char_rep(self, w, cf_init, cb_init):
         char_ids = [self.vc.w2i[self.START_OF_WORD]] + [self.vc.w2i[c]
                                                         if c in self.vc.w2i else -1 for c in w] + [self.vc.w2i[self.END_OF_WORD]]
         char_embs = [self.CHARS_LOOKUP[cid]
                      if cid != - 1 else dy.zeros(self.dim.char_lookup) for cid in char_ids]
+        # unknown char is treated as -1 idx which is mapped to zeroes().
+        # PAD is treated like any other char
         fw_exps = cf_init.transduce(char_embs)
         bw_exps = cb_init.transduce(reversed(char_embs))
         return dy.concatenate([fw_exps[-1], bw_exps[-1]])
 
     def word_rep(self, w):
+        # unknown word is treated as zeroes().
         if self.word_frequency[w] == 0:
             return dy.zeros(self.dim.word_lookup)
         w_index = self.vw.w2i[w]
@@ -211,6 +208,7 @@ class ABLTagger():
                     w, cf_init, cb_init, t) for w, t in zip(*x)]
             except ValueError:
                 print("Value error in tagging_graph", x)
+                raise
         else:
             wembs = [self.word_and_char_rep(w, cf_init, cb_init) for w in x]
 

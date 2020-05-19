@@ -23,7 +23,7 @@ import argparse
 import sys
 
 import data
-from data import Embeddings, Vocab, Corpus
+from data import Embeddings, Corpus
 import dynet_config
 dynet_config.set(mem=33000, random_seed=42)
 __license__ = "Apache 2.0"
@@ -78,12 +78,7 @@ if __name__ == '__main__':
         sys.exit(0)
     args = parser.parse_args()
 
-    chars: Vocab = set()
-    with open(args.load_characters) as f:
-        for line in f:
-            line = line.strip()
-            for char in line.split():
-                chars.add(char)
+    chars = data.read_known_characters(args.load_characters)
 
     out_folder = args.out_folder
 
@@ -101,12 +96,19 @@ if __name__ == '__main__':
     train_tags_coarse = data.coarsify(train_tags)
     test_tags_coarse = data.coarsify(test_tags)
 
+    # Read the coarse tagset as defined in the old days
+    coarse_tag_vocab_map, coarse_embedding = data.read_embedding(
+        args.load_coarse_tagset)
+
     # Define the vocabularies and mappings
     coarse_mapper = data.DataVocabMap(
-        tokens=train_tokens, tags=train_tags_coarse, chars=chars)
+        tokens=train_tokens, tags=data.get_vocab(train_tags_coarse), chars=chars)
+    # We overwrite the tag map with the read coarse tag map
+    coarse_mapper.t_map = coarse_tag_vocab_map
     fine_mapper = data.DataVocabMap(
-        tokens=train_tokens, tags=train_tags, chars=chars, c_tags=train_tags_coarse)
-
+        tokens=train_tokens, tags=data.get_vocab(train_tags), chars=chars, c_tags=data.get_vocab(train_tags_coarse))
+    # We overwrite the coarse_tag map with the read coarse tag map
+    fine_mapper.t_map = coarse_tag_vocab_map
     # We filter the morphlex embeddings based on the training and test set for quicker training. This should not be done in production
     filter_on = data.get_vocab(train_tokens)
     filter_on.update(data.get_vocab(test_tokens))
@@ -115,6 +117,7 @@ if __name__ == '__main__':
         (data.UNK, data.UNK_ID),
         (data.PAD, data.PAD_ID)
     ])
+    # Now we add the morphlex map
     coarse_mapper.add_morph_map(m_vocab_map)
     fine_mapper.add_morph_map(m_vocab_map)
 
@@ -123,7 +126,7 @@ if __name__ == '__main__':
     from ABLTagger import ABLTagger
     tagger_coarse = ABLTagger(vocab_chars=coarse_mapper.c_map,
                               vocab_words=coarse_mapper.w_map,
-                              vocab_tags=coarse_mapper.t_map,
+                              vocab_tags=coarse_mapper.t_map,  # coarse tags
                               word_freq=coarse_mapper.t_freq,
                               morphlex_embeddings=morphlex_embeddings,
                               coarse_features_embeddings=None,
@@ -141,13 +144,11 @@ if __name__ == '__main__':
     test_coarse_tagged_tags: data.List[data.SentTags] = [
         tagger_coarse.tag_sent(sent) for sent in test_tokens]
 
-    coarse_tag_vocab_map, coarse_embedding = data.read_embedding(
-        args.load_coarse_tagset)
     coarse_embeddings = Embeddings(coarse_tag_vocab_map, coarse_embedding)
 
     tagger_fine = ABLTagger(vocab_chars=fine_mapper.c_map,
                             vocab_words=fine_mapper.w_map,
-                            vocab_tags=fine_mapper.t_map,
+                            vocab_tags=fine_mapper.t_map,  # fine tags
                             word_freq=fine_mapper.t_freq,
                             morphlex_embeddings=morphlex_embeddings,
                             coarse_features_embeddings=coarse_embeddings,
