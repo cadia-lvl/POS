@@ -47,10 +47,11 @@ class ABLTagger(nn.Module):
                                    batch_first=True,
                                    bidirectional=True)
         # 2 * char-bilstm + token emb + morph_lex + coarse tags
-        main_bilstm_dim = (2 * char_lstm_dim
-                           + emb_token_dim
-                           + self.morph_lex_embedding.weight.data.shape[1] if self.morph_lex_embedding is not None else 0
-                           + self.c_tags_embedding.weight.data.shape[1] if self.c_tags_embedding is not None else 0)
+        main_bilstm_dim = 0
+        main_bilstm_dim += 2 * char_lstm_dim
+        main_bilstm_dim += emb_token_dim
+        main_bilstm_dim += self.morph_lex_embedding.weight.data.shape[1] if morph_lex_embeddings is not None else 0
+        main_bilstm_dim += self.c_tags_embedding.weight.data.shape[1] if c_tags_embeddings is not None else 0
         self.bilstm = nn.LSTM(input_size=main_bilstm_dim,
                               hidden_size=main_lstm_dim,
                               num_layers=1,
@@ -63,10 +64,18 @@ class ABLTagger(nn.Module):
     def forward(self, input):
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # (b, seq, chars)
-        chars = input[:, :, :-2]
-        # (b, seq, 1)
-        w = input[:, :, -2]
-        m = input[:, :, -1]
+        if hasattr(self, 'c_tags_embedding'):
+            chars = input[:, :, :-3]
+            # (b, seq, 1)
+            w = input[:, :, -3]
+            m = input[:, :, -2]
+            c_tag = input[:, :, -1]
+            c_tag_embs = self.c_tags_embedding(c_tag)
+        else:
+            chars = input[:, :, :-2]
+            # (b, seq, 1)
+            w = input[:, :, -2]
+            m = input[:, :, -1]
         # (b, seq, chars, f)
         char_embs = self.character_embedding(chars)
         self.char_bilstm.flatten_parameters()
@@ -80,7 +89,11 @@ class ABLTagger(nn.Module):
 
         w_embs = self.token_embedding(w)
         m_embs = self.morph_lex_embedding(m)
-        main_in = torch.cat((chars_as_word, w_embs, m_embs), dim=2)
+        if hasattr(self, 'c_tags_embedding'):
+            main_in = torch.cat(
+                (chars_as_word, w_embs, m_embs, c_tag_embs), dim=2)
+        else:
+            main_in = torch.cat((chars_as_word, w_embs, m_embs), dim=2)
         # (b, seq, f)
         self.bilstm.flatten_parameters()
         main_out = self.bilstm(main_in)[0]

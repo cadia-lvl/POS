@@ -193,7 +193,7 @@ class DataVocabMap:
     c_t_map: VocabMap  # coarse-tags - optional input
     t_freq: Counter
 
-    def __init__(self, tokens: List[SentTokens], tags: List[SentTags], chars: Vocab, c_tags: List[SentTags] = None):
+    def __init__(self, tokens: List[SentTokens], tags: Vocab, chars: Vocab, c_tags: Vocab = None, unk_to_tags=False):
         """
         Here we create all the necessary vocabulary mappings for the batch function.
         """
@@ -208,20 +208,21 @@ class DataVocabMap:
             (UNK, UNK_ID),
             (PAD, PAD_ID),
         ])
-        # The tags will be padded, but we do not support UNK
-        self.t_map = VocabMap(get_vocab(tags), special_tokens=[
-            # TODO: remove UNK when we can express all tags
-            (UNK, UNK_ID),
+        special_tokens = [
             (PAD, PAD_ID),
-        ])
+        ]
+        if unk_to_tags:
+            # TODO: We do not want UNK in coarse tagging, but in fine tagging we want it.
+            special_tokens.append((UNK, UNK_ID))
+        self.t_map = VocabMap(tags, special_tokens=special_tokens)
         log.info(f'Character vocab={len(self.c_map)}')
         log.info(f'Word vocab={len(self.w_map)}')
         log.info(f'Tag vocab={len(self.t_map)}')
         # Add the mappings to a list for idx mapping later
         self.x_maps = [self.w_map]
-        # The tags will be padded, but we do not support UNK
         if c_tags:
-            self.c_t_map = VocabMap(get_vocab(c_tags), special_tokens=[
+            # The c_tags will be padded, but we do not support UNK
+            self.c_t_map = VocabMap(c_tags, special_tokens=[
                 (PAD, PAD_ID),
             ])
             log.info(f'Coarse tag vocab={len(self.c_t_map)}')

@@ -47,6 +47,9 @@ def gather_tags(inputs, output, coarse):
               help='A file which contains the characters the model should know. '
               + 'File should be a single line, the line is split() to retrieve characters.'
               )
+@click.option('--c_tags_file',
+              default='./extra/word_class_vocab.txt',
+              )
 @click.option('--morphlex_embeddings_file',
               default='./extra/dmii.vectors',
               help='A file which contains the morphological embeddings.'
@@ -59,6 +62,7 @@ def train(training_files,
           test_file,
           output_dir,
           known_chars_file,
+          c_tags_file,
           morphlex_embeddings_file,
           coarse_epochs,
           fine_epochs,
@@ -78,6 +82,7 @@ def train(training_files,
     test_corpus: data.Corpus = data.read_tsv(test_file)
     # Read the supported characters
     chars = data.read_known_characters(known_chars_file)
+    c_tags = data.read_known_characters(c_tags_file)
 
     # Extract tokens, tags
     train_tokens, train_tags = data.tsv_to_pairs(training_corpus)
@@ -89,9 +94,9 @@ def train(training_files,
 
     # Define the vocabularies and mappings
     coarse_mapper = data.DataVocabMap(
-        tokens=train_tokens, tags=train_tags_coarse, chars=chars)
+        tokens=train_tokens, tags=c_tags, chars=chars, unk_to_tags=False)
     fine_mapper = data.DataVocabMap(
-        tokens=train_tokens, tags=train_tags, chars=chars, c_tags=train_tags_coarse)
+        tokens=train_tokens, tags=data.get_vocab(train_tags), chars=chars, c_tags=c_tags, unk_to_tags=True)
 
     # We filter the morphlex embeddings based on the training and test set for quicker training. This should not be done in production
     filter_on = data.get_vocab(train_tokens)
@@ -109,15 +114,17 @@ def train(training_files,
         char_dim=len(coarse_mapper.c_map),
         token_dim=len(coarse_mapper.w_map),
         tags_dim=len(coarse_mapper.t_map),
-        morph_lex_embeddings=torch.from_numpy(embedding).float(),
-        c_tags_embeddings=None
+        morph_lex_embeddings=torch.from_numpy(embedding).float().to(device),
+        c_tags_embeddings=None,
+        lstm_dropouts=0.1
     )
     log.info(
         f'Trainable parameters={sum(p.numel() for p in coarse_tagger.parameters() if p.requires_grad)}')
     log.info(
         f'Not trainable parameters={sum(p.numel() for p in coarse_tagger.parameters() if not p.requires_grad)}')
-    # Make the model data parallel
-    coarse_tagger = torch.nn.DataParallel(coarse_tagger)
+    if 'cuda' in str(device):
+        # Make the model data parallel
+        coarse_tagger = torch.nn.DataParallel(coarse_tagger)
     # Move model to device, before optimizer
     coarse_tagger.to(device)
     log.info(coarse_tagger)
@@ -156,21 +163,25 @@ def train(training_files,
                                         batch_size=batch_size,
                                         device=device,
                                         mapper=coarse_mapper)
+    del coarse_tagger
+    torch.cuda.empty_cache()
     log.info('Creating fine tagger')
     fine_tagger = ABLTagger(
         char_dim=len(fine_mapper.c_map),
         token_dim=len(fine_mapper.w_map),
         tags_dim=len(fine_mapper.t_map),
-        morph_lex_embeddings=torch.from_numpy(embedding).float(),
-        c_tags_embeddings=torch.cat([torch.zeros(1, len(fine_mapper.c_t_map)),
-                                     torch.diag(torch.ones(len(fine_mapper.c_t_map)))])
+        morph_lex_embeddings=torch.from_numpy(embedding).float().to(device),
+        c_tags_embeddings=torch.diag(torch.ones(
+            len(fine_mapper.c_t_map))).to(device),
+        lstm_dropouts=0.1
     )
     log.info(
         f'Trainable parameters={sum(p.numel() for p in fine_tagger.parameters() if p.requires_grad)}')
     log.info(
         f'Not trainable parameters={sum(p.numel() for p in fine_tagger.parameters() if not p.requires_grad)}')
-    # Make the model data parallel
-    fine_tagger = torch.nn.DataParallel(fine_tagger)
+    if 'cuda' in str(device):
+        # Make the model data parallel
+        fine_tagger = torch.nn.DataParallel(fine_tagger)
     # Move model to device, before optimizer
     fine_tagger.to(device)
     log.info(fine_tagger)
@@ -178,6 +189,7 @@ def train(training_files,
                   for tok_sent, tag_sent in zip(train_tokens, train_tags_coarse_tagged)]
     fine_test = [[(tok, tag) for tok, tag in zip(tok_sent, tag_sent)]
                  for tok_sent, tag_sent in zip(test_tokens, test_tags_coarse_tagged)]
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID)
     optimizer = torch.optim.SGD(fine_tagger.parameters(), lr=0.13)
     # learning rate decay as in ABLTagger
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
@@ -200,25 +212,26 @@ def tag_sents(sentences: data.In,
               batch_size: int,
               mapper: data.DataVocabMap) -> List[data.SentTags]:
     model.eval()
-    start = time.time()
-    log.info(f'Tagging sentences len={len(sentences)}')
-    iter = mapper.in_x_batches(x=sentences,
-                               # Batch size to 1 to avoid dealing with PAD
-                               batch_size=batch_size,
-                               device=device)
-    tags = []
-    for i, x in enumerate(iter, start=1):
-        pred = model(x)
-        # (b, seq, tags)
-        for b in range(pred.shape[0]):
-            # (seq, f)
-            sent_pred = pred[b, :, :].view(-1, pred.shape[-1])
-            # x = (b, seq, f), the last few elements in f word/token, morph and maybe c_tag
-            num_non_pads = torch.sum((x[b, :, -1] != data.PAD_ID)).item()
-            # We use the fact that padding is placed BEHIND those features
-            sent_pred = sent_pred[:num_non_pads, :]  # type: ignore
-            idxs = sent_pred.argmax(dim=1).tolist()
-            tags.append(tuple(mapper.t_map.i2w[idx] for idx in idxs))
+    with torch.no_grad():
+        start = time.time()
+        log.info(f'Tagging sentences len={len(sentences)}')
+        iter = mapper.in_x_batches(x=sentences,
+                                   # Batch size to 1 to avoid dealing with PAD
+                                   batch_size=batch_size,
+                                   device=device)
+        tags = []
+        for i, x in enumerate(iter, start=1):
+            pred = model(x)
+            # (b, seq, tags)
+            for b in range(pred.shape[0]):
+                # (seq, f)
+                sent_pred = pred[b, :, :].view(-1, pred.shape[-1])
+                # x = (b, seq, f), the last few elements in f word/token, morph and maybe c_tag
+                num_non_pads = torch.sum((x[b, :, -1] != data.PAD_ID)).item()
+                # We use the fact that padding is placed BEHIND those features
+                sent_pred = sent_pred[:num_non_pads, :]  # type: ignore
+                idxs = sent_pred.argmax(dim=1).tolist()
+                tags.append(tuple(mapper.t_map.i2w[idx] for idx in idxs))
 
     end = time.time()
     log.info(f'Tagging took={end-start} seconds')
@@ -235,7 +248,7 @@ def run_epochs(model: torch.nn.Module,
                test: Tuple[List[Any], List[Any]],
                epochs: int,
                batch_size: int):
-    best_validation_loss = batch_size
+    best_validation_loss = 100
     for epoch in range(1, epochs + 1):
         # Time it
         start = time.time()
@@ -246,7 +259,8 @@ def run_epochs(model: torch.nn.Module,
                                            batch_size=batch_size,
                                            shuffle=True,
                                            device=device)
-        train_model(model, train_iter, optimizer, criterion)
+        train_model(model, train_iter, optimizer, criterion,
+                    log_prepend=f'Epoch={epoch}/{epochs}, ')
         end = time.time()
         log.info(f'Training took={end-start} seconds')
         # We just run the validation using same batch size, to keep PAD to minimum
@@ -264,7 +278,7 @@ def run_epochs(model: torch.nn.Module,
     # model.load_state_dict(torch.load('model.pt'))
 
 
-def train_model(model, train, optimizer, criterion):
+def train_model(model, train, optimizer, criterion, log_prepend):
     epoch_loss = 0
     epoch_acc = 0
 
@@ -272,7 +286,13 @@ def train_model(model, train, optimizer, criterion):
     for i, (x, y) in enumerate(train, start=1):
         optimizer.zero_grad()
 
-        y_pred = model(x)
+        try:
+            y_pred = model(x)
+        except IndexError:
+            for b in range(x.shape[0]):
+                print(x[b, :, :])
+                print(y[b, :])
+            raise
 
         y_pred = y_pred.view(-1, y_pred.shape[-1])
         y = y.view(-1)
@@ -286,7 +306,8 @@ def train_model(model, train, optimizer, criterion):
         epoch_loss += loss.item()
         epoch_acc += acc.item()
         if i % 10 == 0:
-            log.info(f'batch={i}, acc={acc.item()}, loss={loss.item():.4f}')
+            log.info(log_prepend
+                     + f'batch={i}, acc={acc.item()}, loss={loss.item():.4f}')
 
 
 def evaluate_model(model, iterator, criterion):
