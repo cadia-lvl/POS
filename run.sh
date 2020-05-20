@@ -30,8 +30,27 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     #python preprocess/vectorize_dim.py -i "$RAW_DIR"/SHsnid.csv/SHsnid.csv -o "$FORMAT_DIR"/dmii.vectors
 fi
 if ((FIRST_STEP <= 2 && LAST_STEP >= 2)); then
-    echo "Running training and evaluation"
-
-    python evaluate.py --out_folder ./models/IFD-1 --dataset_fold 1
-    python evaluate.py --out_folder ./models/IFD-10 --dataset_fold 10
+    echo "Running DyNet training and evaluation"
+    out_folder="./out/DyNetIFD-1"
+    mkdir -p $out_folder
+    sbatch \
+    --mem=40G \
+    --partition=longrunning \
+    --cpus-per-task 2 \
+    --time 2-17:00:00 \
+    --wrap="python evaluate.py --out_folder $out_folder --dataset_fold 1"
+    #python evaluate.py --out_folder ./out/DyNetIFD-10 --dataset_fold 10
+fi
+if ((FIRST_STEP <= 3 && LAST_STEP >= 3)); then
+    dt=$(date '+%Y-%m-%d_%H-%M-%S');
+    out_folder="./out/$dt"
+    mkdir -p "$out_folder"
+    batch_size=32
+    coarse_epochs=1
+    fine_epochs=1
+    debug=""
+    sbatch \
+    --gres=gpu \
+    --mem=10G \
+    --wrap="./main.py train-and-tag data/format/IFD-10TM.tsv data/format/IFD-10PM.tsv $out_folder --known_chars_file data/extra/characters_training.txt --morphlex_embeddings_file data/format/dmii.vectors --coarse_epochs $coarse_epochs --fine_epochs $fine_epochs --batch_size $batch_size $debug"
 fi

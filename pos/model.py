@@ -1,11 +1,18 @@
+import logging
+
 import torch
 import torch.nn as nn
 
 from . import data
 
 
+log = logging.getLogger()
+
+
 class ABLTagger(nn.Module):
     def __init__(self,
+                 mapper: data.DataVocabMap,
+                 device,
                  char_dim: int,  # The number of characters in dictionary
                  token_dim: int,  # The number of tokens in dictionary
                  tags_dim: int,  # The number of tags in dictionary - to predict
@@ -19,6 +26,8 @@ class ABLTagger(nn.Module):
                  lstm_dropouts=0.0,
                  input_dropouts=0.0):
         super(ABLTagger, self).__init__()
+        self.mapper = mapper
+        self.device = device
         # Start with embeddings
         if morph_lex_embeddings is not None:
             self.morph_lex_embedding = nn.Embedding(num_embeddings=morph_lex_embeddings.shape[0],
