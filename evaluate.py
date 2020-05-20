@@ -51,7 +51,7 @@ if __name__ == '__main__':
     parser.add_argument('--out_folder', '-out-data',
                         help="Folder containing results", default='./models')
     parser.add_argument('--use_morphlex', '-morphlex',
-                        help="File with morphological lexicon embeddings in ./extra folder. Example file: ./extra/dmii.or", default='./data/extra/dmii.vectors')
+                        help="File with morphological lexicon embeddings in ./extra folder. Example file: ./extra/dmii.or", default='./data/format/dmii.vectors')
     parser.add_argument('--load_characters', '-load_chars',
                         help="File to load characters from", default='./extra/characters_training.txt')
     parser.add_argument('--load_coarse_tagset', '-load_coarse',
@@ -78,7 +78,7 @@ if __name__ == '__main__':
         sys.exit(0)
     args = parser.parse_args()
 
-    chars = data.read_known_characters(args.load_characters)
+    chars = data.read_vocab(args.load_characters)
 
     out_folder = args.out_folder
 
@@ -92,37 +92,36 @@ if __name__ == '__main__':
     test_tags_coarse = data.coarsify(test_tags)
 
     # Read the coarse tagset as defined in the old days
-    coarse_tag_vocab_map, coarse_embedding = data.read_embedding(
+    c_t_map, coarse_embedding = data.read_embedding(
         args.load_coarse_tagset)
 
     # Define the vocabularies and mappings
-    coarse_mapper = data.DataVocabMap(
-        tokens=train_tokens, tags=data.get_vocab(train_tags_coarse), chars=chars)
-    # We overwrite the tag map with the read coarse tag map
-    coarse_mapper.t_map = coarse_tag_vocab_map
-    fine_mapper = data.DataVocabMap(
-        tokens=train_tokens, tags=data.get_vocab(train_tags), chars=chars, c_tags=data.get_vocab(train_tags_coarse))
-    # We overwrite the coarse_tag map with the read coarse tag map
-    fine_mapper.t_map = coarse_tag_vocab_map
+    c_map = data.VocabMap(chars, special_tokens=[
+        (data.EOS, 0),  # We start from 0, and do not use default id
+        (data.SOS, 1)  # We start from 0, and do not use default id
+    ])
+    print(c_map)
+    w_map = data.VocabMap(data.get_vocab(train_tokens))
+    t_map = data.VocabMap(data.get_vocab(train_tags))
+    print(f'Character vocab={len(c_map)}')
+    print(f'Word vocab={len(w_map)}')
+    print(f'Tag vocab={len(t_map)}')
+    print(f'Coarse tag vocab={len(c_t_map)}')
+    t_freq = data.get_tok_freq(train_tokens)
     # We filter the morphlex embeddings based on the training and test set for quicker training. This should not be done in production
     filter_on = data.get_vocab(train_tokens)
     filter_on.update(data.get_vocab(test_tokens))
     # The morphlex embeddings are similar to the tokens, no EOS or SOS needed
-    m_vocab_map, embedding = data.read_embedding(args.use_morphlex, filter_on=filter_on, special_tokens=[
-        (data.UNK, data.UNK_ID),
-        (data.PAD, data.PAD_ID)
-    ])
-    # Now we add the morphlex map
-    coarse_mapper.add_morph_map(m_vocab_map)
-    fine_mapper.add_morph_map(m_vocab_map)
+    m_map, embedding = data.read_embedding(
+        args.use_morphlex, filter_on=filter_on)
 
-    morphlex_embeddings = Embeddings(m_vocab_map, embedding)
+    morphlex_embeddings = Embeddings(m_map, embedding)
     print("Creating coarse tagger")
     from ABLTagger import ABLTagger
-    tagger_coarse = ABLTagger(vocab_chars=coarse_mapper.c_map,
-                              vocab_words=coarse_mapper.w_map,
-                              vocab_tags=coarse_mapper.t_map,  # coarse tags
-                              word_freq=coarse_mapper.t_freq,
+    tagger_coarse = ABLTagger(vocab_chars=c_map,
+                              vocab_words=w_map,
+                              vocab_tags=c_t_map,  # coarse tags
+                              word_freq=t_freq,
                               morphlex_embeddings=morphlex_embeddings,
                               coarse_features_embeddings=None,
                               hyperparams=args)
@@ -139,12 +138,12 @@ if __name__ == '__main__':
     test_coarse_tagged_tags: data.List[data.SentTags] = [
         tagger_coarse.tag_sent(sent) for sent in test_tokens]
 
-    coarse_embeddings = Embeddings(coarse_tag_vocab_map, coarse_embedding)
+    coarse_embeddings = Embeddings(c_t_map, coarse_embedding)
 
-    tagger_fine = ABLTagger(vocab_chars=fine_mapper.c_map,
-                            vocab_words=fine_mapper.w_map,
-                            vocab_tags=fine_mapper.t_map,  # fine tags
-                            word_freq=fine_mapper.t_freq,
+    tagger_fine = ABLTagger(vocab_chars=c_map,
+                            vocab_words=w_map,
+                            vocab_tags=t_map,  # fine tags
+                            word_freq=t_freq,
                             morphlex_embeddings=morphlex_embeddings,
                             coarse_features_embeddings=coarse_embeddings,
                             hyperparams=args)

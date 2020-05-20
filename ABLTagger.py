@@ -144,7 +144,6 @@ class ABLTagger():
         char_embs = [self.CHARS_LOOKUP[cid]
                      if cid != - 1 else dy.zeros(self.dim.char_lookup) for cid in char_ids]
         # unknown char is treated as -1 idx which is mapped to zeroes().
-        # PAD is treated like any other char
         fw_exps = cf_init.transduce(char_embs)
         bw_exps = cb_init.transduce(reversed(char_embs))
         return dy.concatenate([fw_exps[-1], bw_exps[-1]])

@@ -97,8 +97,8 @@ def coarsify(sentences: List[SentTags]) -> List[SentTags]:
     return [tuple(tag[0] for tag in tags) for tags in sentences]
 
 
-def read_known_characters(char_file) -> Vocab:
-    with open(char_file) as f:
+def read_vocab(vocab_file) -> Vocab:
+    with open(vocab_file) as f:
         return get_vocab([tuple(line.strip().split()) for line in f.readlines()])
 
 
@@ -145,7 +145,7 @@ def read_embedding(emb_file, filter_on: Optional[Set[str]] = None, special_token
             embedding_dict[key] = [int(n) for n in vector[1:-1].split(',')]
     # find out how long the embeddings are, we assume all have the same length.
     length_of_embeddings = len(list(embedding_dict.values())[0])
-    # All special tokens are treated equall as zeros
+    # All special tokens are treated equally as zeros - just like in DyNet
     for token, _ in special_tokens:
         embedding_dict[token] = [0 for _ in range(length_of_embeddings)]
     # UNK should not be in words_to_add, since the vocab_map will handle adding it.
