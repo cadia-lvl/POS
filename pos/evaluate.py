@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Set
 import logging
 
 from . import data
@@ -71,3 +71,24 @@ def all_errors(examples: Dict[str, TagExamples]) -> Counter:
     for gold, tag_example in examples.items():
         error_counter.update(tag_example.errors())
     return error_counter
+
+
+def get_vocab(examples: Dict[str, TagExamples]) -> Set[str]:
+    vocab = set()
+    for tag_example in examples.values():
+        for example in tag_example.examples:
+            vocab.add(example[0])
+    return vocab
+
+
+def filter_examples(examples: Dict[str, TagExamples], vocab: Set[str]) -> Dict[str, TagExamples]:
+    filtered: Dict[str, TagExamples] = {}
+    for tag, tag_example in examples.items():
+        for example in tag_example.examples:
+            if example[0] in vocab:
+                try:
+                    filtered[tag].add_example(*example)
+                except KeyError:
+                    filtered[tag] = TagExamples(tag)
+                    filtered[tag].add_example(*example)
+    return filtered

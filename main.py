@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import pickle
 import random
 import logging
 import datetime
@@ -43,16 +44,51 @@ def gather_tags(inputs, output, coarse):
 
 @cli.command()
 @click.argument('input')
-@click.option('--report_type', type=click.Choice(['accuracy', 'errors']), help='Type of reporting to do')
+@click.option('--report_type', type=click.Choice(['accuracy', 'accuracy-breakdown', 'errors']), help='Type of reporting to do')
 @click.option('--count', default=10, help='The number of outputs for top-k')
-def report(input, report_type, count):
+@click.option('--vocab', default=None, help='The pickle file containing the DataVocabMap of the model.')
+def report(input, report_type, count, vocab):
     examples = evaluate.analyse_examples(
         evaluate.flatten_data(data.read_tsv(input)))
     if report_type == 'accuracy':
         log.info(evaluate.calculate_accuracy(examples))
+    elif report_type == 'accuracy-breakdown':
+        with open(vocab, 'rb') as f:
+            data_vocab_map: data.DataVocabMap = pickle.load(f)
+        test_vocab = evaluate.get_vocab(examples)
+        train_vocab = set(data_vocab_map.w_map.w2i.keys())
+        morphlex_vocab = set(data_vocab_map.m_map.w2i.keys())
+        both_vocab = train_vocab.union(morphlex_vocab)
+        neither_vocab = test_vocab.difference(
+            (train_vocab.union(morphlex_vocab)))
+        examples_filter_on_train = evaluate.filter_examples(
+            examples, train_vocab)
+        examples_filter_on_morphlex = evaluate.filter_examples(
+            examples, morphlex_vocab)
+        examples_filter_on_both = evaluate.filter_examples(
+            examples, both_vocab)
+        examples_filter_on_neither = evaluate.filter_examples(
+            examples, neither_vocab)
+        log.info(f'T = w ∈ training set, M = w ∈ morphlex set, Test = w ∈ test set')
+        log.info(
+            f'len(Test)={len(test_vocab)}, len(T)={len(train_vocab)}, len(M)={len(morphlex_vocab)}')
+        log.info(f'len(T ∪ M)={len(both_vocab)}')
+        log.info(f'len(w ∉ (T ∪ M))={len(neither_vocab)}')
+        log.info(
+            f'Total acc (w ∈ Test): {evaluate.calculate_accuracy(examples)}')
+        log.info(
+            f'Train acc (w ∈ T): {evaluate.calculate_accuracy(examples_filter_on_train)}')
+        log.info(
+            f'Morph acc (w ∈ M): {evaluate.calculate_accuracy(examples_filter_on_morphlex)}')
+        log.info(
+            f'Both acc (w ∈ (T ∪ M)): {evaluate.calculate_accuracy(examples_filter_on_both)}')
+        log.info(
+            f'Unk acc (w ∉ (T ∪ M) = w ∈ Test - (T ∪ M)): {evaluate.calculate_accuracy(examples_filter_on_neither)}')
     elif report_type == 'errors':
         errors = evaluate.all_errors(examples)
         log.info(pprint.pformat(errors.most_common(count)))
+    else:
+        raise ValueError('Unkown report_type')
 
 
 @cli.command()
@@ -68,6 +104,8 @@ def report(input, report_type, count):
 @click.option('--coarse_epochs', default=12)
 @click.option('--fine_epochs', default=20)
 @click.option('--batch_size', default=32)
+@click.option('--save_model/--no_save_model', default=False)
+@click.option('--save_vocab/--no_save_vocab', default=False)
 def train_and_tag(training_files,
                   test_file,
                   output_dir,
@@ -76,7 +114,9 @@ def train_and_tag(training_files,
                   morphlex_embeddings_file,
                   coarse_epochs,
                   fine_epochs,
-                  batch_size):
+                  batch_size,
+                  save_model,
+                  save_vocab):
     """
     training_files: Files to use for training (supports multiple files = globbing).
     All training files should be .tsv, with two columns, the token and tag.
@@ -215,6 +255,16 @@ def train_and_tag(training_files,
                                        batch_size=batch_size)
     data.write_tsv(str(output_dir.joinpath('fine_predictions.tsv')),
                    (test_tokens, test_tags, test_tags_tagged))
+    if save_vocab:
+        save_location = output_dir.joinpath('coarse_vocab.pickle')
+        with save_location.open('wb+') as f:
+            pickle.dump(coarse_mapper, f)
+        save_location = output_dir.joinpath('fine_vocab.pickle')
+        with save_location.open('wb+') as f:
+            pickle.dump(fine_mapper, f)
+    if save_model:
+        save_location = output_dir.joinpath('fine_tagger.pt')
+        torch.save(fine_tagger.state_dict(), str(save_location))
 
 
 if __name__ == '__main__':
