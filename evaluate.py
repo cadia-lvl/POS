@@ -21,13 +21,16 @@
 """
 import argparse
 import sys
+import logging
 
 import pos.data as data
 from pos.data import Embeddings
 import dynet_config
-dynet_config.set(mem=33000, random_seed=42)
+dynet_config.set(mem=23000, random_seed=42)
 __license__ = "Apache 2.0"
 
+logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
+log = logging.getLogger()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -100,13 +103,13 @@ if __name__ == '__main__':
         (data.EOS, 0),  # We start from 0, and do not use default id
         (data.SOS, 1)  # We start from 0, and do not use default id
     ])
-    print(c_map)
+    log.info(c_map)
     w_map = data.VocabMap(data.get_vocab(train_tokens))
     t_map = data.VocabMap(data.get_vocab(train_tags))
-    print(f'Character vocab={len(c_map)}')
-    print(f'Word vocab={len(w_map)}')
-    print(f'Tag vocab={len(t_map)}')
-    print(f'Coarse tag vocab={len(c_t_map)}')
+    log.info(f'Character vocab={len(c_map)}')
+    log.info(f'Word vocab={len(w_map)}')
+    log.info(f'Tag vocab={len(t_map)}')
+    log.info(f'Coarse tag vocab={len(c_t_map)}')
     t_freq = data.get_tok_freq(train_tokens)
     # We filter the morphlex embeddings based on the training and test set for quicker training. This should not be done in production
     filter_on = data.get_vocab(train_tokens)
@@ -116,7 +119,7 @@ if __name__ == '__main__':
         args.use_morphlex, filter_on=filter_on)
 
     morphlex_embeddings = Embeddings(m_map, embedding)
-    print("Creating coarse tagger")
+    log.info("Creating coarse tagger")
     from ABLTagger import ABLTagger
     tagger_coarse = ABLTagger(vocab_chars=c_map,
                               vocab_words=w_map,
@@ -125,9 +128,9 @@ if __name__ == '__main__':
                               morphlex_embeddings=morphlex_embeddings,
                               coarse_features_embeddings=None,
                               hyperparams=args)
-    print("Starting training and evaluating")
+    log.info("Starting training and evaluating")
     x_y = list(zip(train_tokens, train_tags_coarse))
-    x_y_test = list(zip(test_tokens, train_tags_coarse))
+    x_y_test = list(zip(test_tokens, test_tags_coarse))
     tagger_coarse.train_and_evaluate_tagger(x_y=x_y,
                                             x_y_test=x_y_test,
                                             total_epochs=args.epochs_coarse_grained,

@@ -25,6 +25,7 @@ __license__ = "Apache 2.0"
 import random
 import datetime
 import gc
+import logging
 
 import numpy as np
 import dynet as dy
@@ -33,9 +34,11 @@ import csv
 import pos.data as data
 
 random.seed(42)
-
+log = logging.getLogger()
 
 # Layer Dimensions for Combined emb. model
+
+
 class CombinedDims:
     def __init__(self):
         self.hidden = 32  # map each timestep from bi_main_lstm to this
@@ -206,7 +209,7 @@ class ABLTagger():
                 wembs = [self.word_and_char_rep(
                     w, cf_init, cb_init, t) for w, t in zip(*x)]
             except ValueError:
-                print("Value error in tagging_graph", x)
+                log.info("Value error in tagging_graph", x)
                 raise
         else:
             wembs = [self.word_and_char_rep(w, cf_init, cb_init) for w in x]
@@ -268,14 +271,14 @@ class ABLTagger():
                 self.trainer.update()
 
                 if batch % 10 == 0:
-                    print(
+                    log.info(
                         f'{datetime.datetime.now()} epoch={epoch}/{total_epochs}, batch={batch}/{len(x_y)}, avg_loss={cum_loss / num_tagged}')
 
             # Evaluate
             if evaluate:
                 evaluation = self.evaluate_tagging(
                     x_y_test, file_out=f'{out_dir}/{"fine" if self.coarse_features_flag else "coarse"}_eval_{epoch}_tags.txt')
-                print(evaluation)
+                log.info(evaluation)
                 write_results_to_file(file_out=f'{out_dir}/{"fine" if self.coarse_features_flag else "coarse"}_eval_results.tsv',
                                       epoch=epoch,
                                       evaluation=evaluation,
@@ -290,7 +293,7 @@ class ABLTagger():
                     (1 - self.hp.learning_rate_decay)
 
         # Show hyperparameters used when we are done
-        print("\nHP={}".format(self.hp))
+        log.info("\nHP={}".format(self.hp))
 
     def evaluate_tagging(self,
                          test_data,
@@ -340,8 +343,7 @@ class ABLTagger():
         eval_text = str(total) + "|" + str(train_total) + "|" + \
             str(morphlex_total) + "|" + str(both_total) + "|" + str(unk_total)
         # 59169.0      3503.0      0.0          4482.0          54687.0     0.0
-        print(total, total_sent, train_total,
-              morphlex_total, both_total, unk_total)
+        log.info(eval_text)
         # A small hack to avoid devision by zero
         if total == 0:
             total = 1
