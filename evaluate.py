@@ -153,7 +153,7 @@ if __name__ == '__main__':
     x = list(zip(train_tokens, train_coarse_tagged_tags))
     x_y = list(zip(x, train_tags))  # type: ignore
     x_test = list(zip(test_tokens, test_coarse_tagged_tags))
-    x_y_test = list(zip(x, test_tags))  # type: ignore
+    x_y_test = list(zip(x_test, test_tags))  # type: ignore
     tagger_fine.train_and_evaluate_tagger(x_y=x_y,
                                           x_y_test=x_y_test,
                                           total_epochs=args.epochs_fine_grained,
