@@ -106,6 +106,7 @@ def report(input, report_type, count, vocab):
 @click.option('--batch_size', default=32)
 @click.option('--save_model/--no_save_model', default=False)
 @click.option('--save_vocab/--no_save_vocab', default=False)
+@click.option('--gpu/--no_gpu', default=False)
 def train_and_tag(training_files,
                   test_file,
                   output_dir,
@@ -116,7 +117,8 @@ def train_and_tag(training_files,
                   fine_epochs,
                   batch_size,
                   save_model,
-                  save_vocab):
+                  save_vocab,
+                  gpu):
     """
     training_files: Files to use for training (supports multiple files = globbing).
     All training files should be .tsv, with two columns, the token and tag.
@@ -139,12 +141,13 @@ def train_and_tag(training_files,
         'fine_epochs': fine_epochs,
         'batch_size': batch_size,
         'lstm_dropout': 0.1,
-        'input_dropouts': 0.1,
+        'input_dropouts': 0.0,
         'emb_char_dim': 20,  # The characters are mapped to this dim
         'char_lstm_dim': 64,  # The character LSTM will output with this dim
         'emb_token_dim': 128,  # The tokens are mapped to this dim
         'main_lstm_dim': 64,  # The main LSTM dim will output with this dim
         'hidden_dim': 32,  # The main LSTM time-steps will be mapped to this dim
+        'noise': 0.1,  # Noise to main_in, to main_bilstm
     }
     output_dir = pathlib.Path(output_dir)
     with output_dir.joinpath('hyperparamters.json').open(mode='+w') as f:
@@ -164,7 +167,7 @@ def train_and_tag(training_files,
     coarse_mapper, fine_mapper, embedding = train.create_mappers(
         train_tokens, test_tokens, train_tags, known_chars_file, c_tags_file, morphlex_embeddings_file)
 
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and gpu:
         device = torch.device('cuda')
         # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
         # --gres=gpu:titanx:2
