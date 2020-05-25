@@ -10,11 +10,12 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     dt=$(date '+%Y-%m-%d_%H-%M-%S');
     out_folder="./out/$dt"
     mkdir -p "$out_folder"
-    batch_size=64
+    batch_size=1
     coarse_epochs=1
     fine_epochs=1
     debug=""
     sbatch \
+    --output="$out_folder/slurm-%j.out" \
     --gres=gpu \
     --mem=10G \
     --wrap="./main.py \
@@ -29,5 +30,6 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     --batch_size $batch_size \
     --save_vocab \
     --save_model \
+    --gpu \
     $debug"
 fi

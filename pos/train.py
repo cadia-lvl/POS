@@ -57,6 +57,7 @@ def create_model(mapper, hyperparameters, embedding, device, c_tags_embeddings=F
         main_lstm_dim=hyperparameters['main_lstm_dim'],
         # The main LSTM time-steps will be mapped to this dim
         hidden_dim=hyperparameters['hidden_dim'],
+        noise=hyperparameters['noise'],
     )
     log.info(
         f'Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}')

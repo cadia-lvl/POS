@@ -24,10 +24,12 @@ class ABLTagger(nn.Module):
                  main_lstm_dim=64,  # The main LSTM dim will output with this dim
                  hidden_dim=32,  # The main LSTM time-steps will be mapped to this dim
                  lstm_dropouts=0.0,
-                 input_dropouts=0.0):
+                 input_dropouts=0.0,
+                 noise=0.1):
         super(ABLTagger, self).__init__()
         self.mapper = mapper
         self.device = device
+        self.noise = noise
         # Start with embeddings
         if morph_lex_embeddings is not None:
             self.morph_lex_embedding = nn.Embedding(num_embeddings=morph_lex_embeddings.shape[0],
@@ -107,6 +109,10 @@ class ABLTagger(nn.Module):
                 (chars_as_word, w_embs, m_embs, c_tag_embs), dim=2)
         else:
             main_in = torch.cat((chars_as_word, w_embs, m_embs), dim=2)
+        # Add noise - like in dyney
+        if self.training:
+            main_in = main_in + \
+                torch.empty_like(main_in).normal_(0, self.noise)
         # (b, seq, f)
         self.bilstm.flatten_parameters()
         main_out = self.main_bilstm_out_dropout(self.bilstm(main_in)[0])
