@@ -203,8 +203,7 @@ class ABLTagger():
 
         cf_init = self.cFwdRNN.initial_state()
         cb_init = self.cBwdRNN.initial_state()
-        # if self.coarse_features_flag:
-        if type(x) == data.Tuple:
+        if self.coarse_features_flag:
             try:
                 wembs = [self.word_and_char_rep(
                     w, cf_init, cb_init, t) for w, t in zip(*x)]

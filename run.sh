@@ -31,11 +31,13 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
 fi
 if ((FIRST_STEP <= 2 && LAST_STEP >= 2)); then
     echo "Running DyNet training and evaluation"
-    out_folder="./out/DyNetIFD-1"
+    out_folder="./out/DyNetIFD-10"
     mkdir -p $out_folder
     sbatch \
+    --partition=longrunning \
+    --time 17:00:00 \
     --mem=30G \
     --cpus-per-task 2 \
-    --wrap="python evaluate.py --out_folder $out_folder --dataset_fold 1"
-    #python evaluate.py --out_folder ./out/DyNetIFD-10 --dataset_fold 10
+    --wrap="python evaluate.py --out_folder $out_folder --dataset_fold 10" \
+    --output="$out_folder/slurm-%j.out"
 fi

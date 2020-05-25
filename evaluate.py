@@ -70,6 +70,8 @@ if __name__ == '__main__':
                         help="How many epochs for fine grained training? (20 is default)", type=int, default=20)
     parser.add_argument(
         '--noise', '-n', help="Noise in embeddings", type=float, default=0.1)
+    # DEBUG
+    parser.add_argument('--debug', default=False, action='store_true')
     args = parser.parse_args()
 
     if len(sys.argv) < 2:
@@ -103,7 +105,6 @@ if __name__ == '__main__':
         (data.EOS, 0),  # We start from 0, and do not use default id
         (data.SOS, 1)  # We start from 0, and do not use default id
     ])
-    log.info(c_map)
     w_map = data.VocabMap(data.get_vocab(train_tokens))
     t_map = data.VocabMap(data.get_vocab(train_tags))
     log.info(f'Character vocab={len(c_map)}')
@@ -129,6 +130,14 @@ if __name__ == '__main__':
                               coarse_features_embeddings=None,
                               hyperparams=args)
     log.info("Starting training and evaluating")
+    if args.debug:
+        log.info('Running in debug mode, shortening training and testing data')
+        train_tokens = train_tokens[:100]
+        train_tags = train_tags[:100]
+        train_tags_coarse = train_tags_coarse[:100]
+        test_tokens = test_tokens[:100]
+        test_tags = test_tags[:100]
+        test_tags_coarse = test_tags_coarse[:100]
     x_y = list(zip(train_tokens, train_tags_coarse))
     x_y_test = list(zip(test_tokens, test_tags_coarse))
     tagger_coarse.train_and_evaluate_tagger(x_y=x_y,
