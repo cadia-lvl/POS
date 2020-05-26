@@ -23,6 +23,7 @@ import argparse
 import sys
 import logging
 
+import numpy as np
 import pos.data as data
 from pos.data import Embeddings
 import dynet_config
@@ -129,6 +130,18 @@ if __name__ == '__main__':
                               morphlex_embeddings=morphlex_embeddings,
                               coarse_features_embeddings=None,
                               hyperparams=args)
+    log.info(
+        f"Number of params {sum(np.prod(p.shape()) for p in tagger_coarse.model.parameters_list())}")
+    log.info(
+        f"Number of params {sum(np.prod(p.shape()) for p in tagger_coarse.model.lookup_parameters_list())}")
+    log.info(
+        f"Number of params {sum(np.prod(p.shape()) for l in tagger_coarse.fwdRNN.get_parameters()for p in l )}")
+    log.info(
+        f"Number of params {sum(np.prod(p.shape()) for l in tagger_coarse.bwdRNN.get_parameters()for p in l )}")
+    log.info(
+        f"Number of params {sum(np.prod(p.shape()) for l in tagger_coarse.cFwdRNN.get_parameters()for p in l )}")
+    log.info(
+        f"Number of params {sum(np.prod(p.shape()) for l in tagger_coarse.cBwdRNN.get_parameters()for p in l )}")
     log.info("Starting training and evaluating")
     if args.debug:
         log.info('Running in debug mode, shortening training and testing data')

@@ -112,7 +112,6 @@ class ABLTagger():
                 (len(self.morphlex_embeddings), self.dim.morphlex_lookup))
             self.MORPHLEX_LOOKUP.init_from_array(self.morphlex_embeddings)
         if self.coarse_features_flag:
-            # TODO: Is this + 1 correct? We now read '0' from the file.
             self.WORD_CLASS_LOOKUP = self.model.add_lookup_parameters(
                 (self.coarse_features_embeddings.shape[0], self.coarse_features_embeddings.shape[1]))
             self.WORD_CLASS_LOOKUP.init_from_array(
@@ -301,7 +300,7 @@ class ABLTagger():
             good = total = good_sent = total_sent = unk_good = morphlex_good = morphlex_total = train_good = train_total = both_good = both_total = unk_total = 0.0
             for words, golds in test_data:
                 tags = [t for t in self.tag_sent(words)]
-                if tags == golds:
+                if all(t == g for t, g in zip(tags, golds)):
                     good_sent += 1
                 total_sent += 1
                 if self.coarse_features_flag:
