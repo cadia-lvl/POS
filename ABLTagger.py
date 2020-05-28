@@ -261,7 +261,8 @@ class ABLTagger():
                     tid = self.vt.w2i[t]
                     err = dy.pickneglogsoftmax(v, tid)
                     errs.append(err)
-                loss = dy.esum(errs)
+                loss = dy.average(errs)
+                # loss = dy.esum(errs)
 
                 cum_loss += loss.scalar_value()
                 num_tagged += len(x)
