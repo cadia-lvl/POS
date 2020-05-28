@@ -32,25 +32,23 @@ class ABLTagger(nn.Module):
         self.noise = noise
         # Start with embeddings
         if morph_lex_embeddings is not None:
-            self.morph_lex_embedding = nn.Embedding(num_embeddings=morph_lex_embeddings.shape[0],
-                                                    embedding_dim=morph_lex_embeddings.shape[1],
-                                                    padding_idx=data.PAD_ID)
-            # Here we could also use weight=torch.nn.Parameter(tensor, requires_grad=False)
-            self.morph_lex_embedding.weight.data = morph_lex_embeddings
-            self.morph_lex_embedding.weight.requires_grad = False
+            self.morph_lex_embedding = nn.Embedding.from_pretrained(morph_lex_embeddings,
+                                                                    freeze=False,
+                                                                    padding_idx=data.PAD_ID)
         if c_tags_embeddings is not None:
-            self.c_tags_embedding = nn.Embedding(num_embeddings=c_tags_embeddings.shape[0],
-                                                 embedding_dim=c_tags_embeddings.shape[1],
-                                                 padding_idx=data.PAD_ID)
-            # Don't update these weights
-            self.c_tags_embedding.weight.data = c_tags_embeddings
-            self.c_tags_embedding.weight.requires_grad = False
-
-        self.token_embedding = nn.Embedding(
-            token_dim, emb_token_dim, padding_idx=data.PAD_ID)
-        self.character_embedding = nn.Embedding(
-            char_dim, emb_char_dim, padding_idx=data.PAD_ID)
-
+            self.c_tags_embedding = nn.Embedding.from_pretrained(c_tags_embeddings,
+                                                                 freeze=False,
+                                                                 padding_idx=data.PAD_ID)
+        self.token_embedding = nn.Embedding(token_dim,
+                                            emb_token_dim,
+                                            padding_idx=data.PAD_ID,
+                                            sparse=True)
+        nn.init.xavier_uniform_(self.token_embedding.weight[1:, :])
+        self.character_embedding = nn.Embedding(char_dim,
+                                                emb_char_dim,
+                                                padding_idx=data.PAD_ID,
+                                                sparse=True)
+        nn.init.xavier_uniform_(self.character_embedding.weight[1:, :])
         # The character BiLSTM
         self.char_bilstm = nn.LSTM(input_size=emb_char_dim,
                                    hidden_size=char_lstm_dim,
@@ -58,6 +56,13 @@ class ABLTagger(nn.Module):
                                    dropout=lstm_dropouts,
                                    batch_first=True,
                                    bidirectional=True)
+        for name, param in self.char_bilstm.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+            else:
+                raise ValueError('Unknown parameter in lstm={name}')
         # 2 * char-bilstm + token emb + morph_lex + coarse tags
         main_bilstm_dim = 0
         main_bilstm_dim += 2 * char_lstm_dim
@@ -70,8 +75,18 @@ class ABLTagger(nn.Module):
                               dropout=lstm_dropouts,
                               batch_first=True,
                               bidirectional=True)
-        self.linear = nn.Linear(main_lstm_dim * 2, hidden_dim)
-        self.final = nn.Linear(hidden_dim, tags_dim)
+        for name, param in self.bilstm.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+            else:
+                raise ValueError('Unknown parameter in lstm={name}')
+        # no bias in DyNet
+        self.linear = nn.Linear(main_lstm_dim * 2, hidden_dim, bias=False)
+        nn.init.xavier_uniform_(self.linear.weight)
+        self.final = nn.Linear(hidden_dim, tags_dim, bias=False)
+        nn.init.xavier_uniform_(self.final.weight)
         self.c_embs_dropout = nn.Dropout(p=input_dropouts)
         self.w_embs_dropout = nn.Dropout(p=input_dropouts)
         self.char_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
@@ -95,13 +110,34 @@ class ABLTagger(nn.Module):
         # (b, seq, chars, f)
         char_embs = self.c_embs_dropout(self.character_embedding(chars))
         self.char_bilstm.flatten_parameters()
-        # We process a single word at a time (many chars) in the LSTM
-        # [(b, 1, f) for s in seq],
-        chars_as_word = self.char_bilstm_out_dropout(torch.cat(
-            [self.char_bilstm(
-                char_embs[:, s, :, :]
-            )[0][:, -1, :][:, None, :] for s in range(char_embs.shape[1])],
-            dim=1))
+        # One sentence at a time
+        words_as_chars = []
+        for b in range(char_embs.shape[0]):
+            # w = words in sent, c = chars in word, f = char features
+            # (w, c, f)
+            sent_chars = char_embs[b, :, :, :]
+            # some sentences might only contain PADs for some words, which pack_sequence does not like
+            # Count the number of non-PAD words
+            num_non_zero = torch.sum(
+                torch.sum(torch.sum(sent_chars, dim=2), dim=1) != 0.0).item()
+            # Drop them
+            dropped_pads = sent_chars[:int(num_non_zero), :, :]
+            packed, lengths = self.pack_sequence(dropped_pads)
+            sent_chars_rep = self.char_bilstm(packed)[0]
+            un_packed = self.unpack_sequence(sent_chars_rep)
+            # Get the last timestep, taking the PADs on char level into account
+            sent_chars_rep_last_ts = torch.cat(
+                [un_packed[idx, length - 1, :][None, :] for idx, length in enumerate(lengths.tolist())], dim=0)
+            # Re-add the PAD words we removed before
+            added_pads = copy_into_larger_tensor(sent_chars_rep_last_ts,
+                                                 torch.zeros(size=(sent_chars.shape[0],
+                                                                   sent_chars_rep_last_ts.shape[1])).to(
+                                                     self.device)
+                                                 )
+            # Collect and add dimension to sum up
+            words_as_chars.append(added_pads[None, :, :])
+        chars_as_word = torch.cat(words_as_chars, dim=0)
+
         w_embs = self.w_embs_dropout(self.token_embedding(w))
         m_embs = self.morph_lex_embedding(m)
         if hasattr(self, 'c_tags_embedding'):
@@ -115,15 +151,36 @@ class ABLTagger(nn.Module):
                 torch.empty_like(main_in).normal_(0, self.noise)
         # (b, seq, f)
         self.bilstm.flatten_parameters()
-        main_out = self.main_bilstm_out_dropout(self.bilstm(main_in)[0])
+        main_out = self.main_bilstm_out_dropout(
+            self.unpack_sequence(self.bilstm(self.pack_sequence(main_in)[0])[0]))
         # We map each word to our targets
-        # [(b, 1, f) for s in seq]:
-        out = torch.cat(
-            [self.final(
-                torch.tanh(
-                    self.linear(main_out[:, s, :])
-                )
-            )[:, None, :] for s in range(main_out.shape[1])],
-            dim=1)
-        # (b, s, target)
+        out = self.final(torch.tanh(self.linear(main_out)))
         return out
+
+    def pack_sequence(self, padded_sequence):
+        """
+        Packs the PAD in a sequence. Assumes that PAD=0.0 and appended.
+        """
+        # input:
+        # (b, s, f)
+        # lengths = (b, s)
+        lengths = torch.sum(torch.pow(padded_sequence, 2), dim=2)
+        # lengths = (b)
+        lengths = torch.sum(lengths != torch.tensor(
+            [0.0]).to(self.device), dim=1)
+        return torch.nn.utils.rnn.pack_padded_sequence(padded_sequence, lengths, batch_first=True, enforce_sorted=False), lengths
+
+    def unpack_sequence(self, packed_sequence):
+        """
+        Inverse of pack_sequence
+        """
+        return torch.nn.utils.rnn.pad_packed_sequence(packed_sequence, batch_first=True)[0]
+
+
+def copy_into_larger_tensor(tensor: torch.Tensor, like_tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Only works for 2-dims
+    """
+    base = torch.zeros_like(like_tensor)
+    base[:tensor.shape[0], :tensor.shape[1]] = tensor
+    return base
