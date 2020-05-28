@@ -35,7 +35,7 @@ def create_mappers(train_tokens, test_tokens, train_tags, known_chars_file, c_ta
     return coarse_mapper, fine_mapper, embedding
 
 
-def create_model(mapper, hyperparameters, embedding, device, c_tags_embeddings=False):
+def create_model(mapper, model_parameters, embedding, device, c_tags_embeddings=False):
     tagger = ABLTagger(
         mapper=mapper,
         device=device,
@@ -45,19 +45,7 @@ def create_model(mapper, hyperparameters, embedding, device, c_tags_embeddings=F
         morph_lex_embeddings=torch.from_numpy(embedding).float().to(device),
         c_tags_embeddings=torch.diag(torch.ones(len(mapper.c_t_map))).to(
             device) if c_tags_embeddings else None,
-        lstm_dropouts=hyperparameters['lstm_dropout'],
-        input_dropouts=hyperparameters['input_dropouts'],
-        # The characters are mapped to this dim
-        emb_char_dim=hyperparameters['emb_char_dim'],
-        # The character LSTM will output with this dim
-        char_lstm_dim=hyperparameters['char_lstm_dim'],
-        # The tokens are mapped to this dim
-        emb_token_dim=hyperparameters['emb_token_dim'],
-        # The main LSTM dim will output with this dim
-        main_lstm_dim=hyperparameters['main_lstm_dim'],
-        # The main LSTM time-steps will be mapped to this dim
-        hidden_dim=hyperparameters['hidden_dim'],
-        noise=hyperparameters['noise'],
+        **model_parameters
     )
     log.info(
         f'Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}')
@@ -67,8 +55,7 @@ def create_model(mapper, hyperparameters, embedding, device, c_tags_embeddings=F
     # # Make the model data parallel
     # tagger = torch.nn.DataParallel(tagger)
     # Move model to device, before optimizer
-    tagger.to(device)
-    return tagger
+    return tagger.to(device)
 
 
 def run_epochs(model,
@@ -119,30 +106,20 @@ def train_model(model,
                                              device=model.device)
     model.train()
 
-    epoch_loss = 0
-    epoch_acc = 0
     for i, (x, y) in enumerate(train_iter, start=1):
         optimizer.zero_grad()
 
-        try:
-            y_pred = model(x)
-        except IndexError:
-            for b in range(x.shape[0]):
-                print(x[b, :, :])
-                print(y[b, :])
-            raise
+        y_pred = model(x)
 
         y_pred = y_pred.view(-1, y_pred.shape[-1])
         y = y.view(-1)
 
         loss = criterion(y_pred, y)
+        # loss = torch.sum(loss) / loss.shape[0]
         acc = categorical_accuracy(y_pred, y)
 
         loss.backward()
         optimizer.step()
-
-        epoch_loss += loss.item()
-        epoch_acc += acc.item()
         if i % 10 == 0:
             log.info(log_prepend
                      + f'batch={i}, acc={acc.item()}, loss={loss.item():.4f}')
@@ -172,10 +149,11 @@ def evaluate_model(model,
                 y_pred_total = torch.cat([y_pred_total, y_pred], dim=0)
                 y_total = torch.cat([y_total, y], dim=0)
 
-        loss = criterion(y_pred_total, y_total).item()
-        acc = categorical_accuracy(y_pred_total, y_total).item()
+        loss = criterion(y_pred_total, y_total)
+        # loss = torch.sum(loss) / y_total.shape[0]
+        acc = categorical_accuracy(y_pred_total, y_total)
 
-    return loss, acc
+    return loss.item(), acc.item()
 
 
 def tag_sents(model,
