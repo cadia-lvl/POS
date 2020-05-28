@@ -215,7 +215,6 @@ class DataVocabMap:
             (PAD, PAD_ID),
         ]
         if unk_to_tags:
-            # TODO: We do not want UNK in coarse tagging, but in fine tagging we want it.
             special_tokens.append((UNK, UNK_ID))
         self.t_map = VocabMap(tags, special_tokens=special_tokens)
         log.info(f'Character vocab={len(self.c_map)}')
@@ -271,11 +270,13 @@ class DataVocabMap:
         log.debug("Longest sent in batch", longest_sent_in_examples)
         x_pad = copy.deepcopy(x)
         for x_i_pad in x_pad:
-            # Pad sentence-wise
+            # chars, word, morph
             if len(x_i_pad[0]) == 3:
                 empty_rest = (PAD, PAD)
+            # chars, word, morph, c_tag
             else:
                 empty_rest = (PAD, PAD, PAD)  # type: ignore
+            # Pad sentence-wise
             while len(x_i_pad) < longest_sent_in_examples:
                 x_i_pad.append((list(), *empty_rest))
             # Pad character-wise
@@ -313,7 +314,7 @@ class DataVocabMap:
                 features = chars_idx + rest_idx
                 x_i_idx.append(tuple(features))
             x_idx.append(x_i_idx)
-        # Break the list up and return (b, s, f)
+        # return (b, s, f)
         return torch.tensor(x_idx)
 
     def to_idx_y(self, y: Y) -> torch.Tensor:

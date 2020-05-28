@@ -134,13 +134,15 @@ def train_and_tag(training_files,
         torch.manual_seed(SEED)
         torch.backends.cudnn.deterministic = True  # type: ignore
     # We create a folder for this run specifically
-    hyperparameters = {
+    parameters = {
         'training_files': training_files,
         'test_file': test_file,
         'coarse_epochs': coarse_epochs,
         'fine_epochs': fine_epochs,
         'batch_size': batch_size,
-        'lstm_dropout': 0.1,
+    }
+    model_parameters = {
+        'lstm_dropouts': 0.1,
         'input_dropouts': 0.0,
         'emb_char_dim': 20,  # The characters are mapped to this dim
         'char_lstm_dim': 64,  # The character LSTM will output with this dim
@@ -151,7 +153,7 @@ def train_and_tag(training_files,
     }
     output_dir = pathlib.Path(output_dir)
     with output_dir.joinpath('hyperparamters.json').open(mode='+w') as f:
-        json.dump(hyperparameters, f, indent=4)
+        json.dump({**parameters, **model_parameters}, f, indent=4)
     # Read train and test data
     train_tokens, train_tags = [], []
     log.info(f'Reading training files={training_files}')
@@ -194,14 +196,17 @@ def train_and_tag(training_files,
 
     log.info('Creating coarse tagger')
     coarse_tagger = train.create_model(coarse_mapper,
-                                       hyperparameters,
+                                       model_parameters,
                                        embedding,
                                        device,
                                        c_tags_embeddings=False)
     log.info(coarse_tagger)
+    for name, tensor in coarse_tagger.state_dict().items():
+        log.info(f'{name}: {torch.numel(tensor)}')
 
     # We ignore targets which have beed padded
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID)
+    criterion = torch.nn.CrossEntropyLoss(
+        ignore_index=data.PAD_ID, reduction='mean')
     # lr as used in ABLTagger
     optimizer = torch.optim.SGD(coarse_tagger.parameters(), lr=0.13)
     # learning rate decay as in ABLTagger
@@ -231,16 +236,18 @@ def train_and_tag(training_files,
     torch.cuda.empty_cache()
     log.info('Creating fine tagger')
     fine_tagger = train.create_model(fine_mapper,
-                                     hyperparameters,
+                                     model_parameters,
                                      embedding,
                                      device,
                                      c_tags_embeddings=True)
     log.info(fine_tagger)
+
     fine_train = [[(tok, tag) for tok, tag in zip(tok_sent, tag_sent)]
                   for tok_sent, tag_sent in zip(train_tokens, train_tags_coarse_tagged)]
     fine_test = [[(tok, tag) for tok, tag in zip(tok_sent, tag_sent)]
                  for tok_sent, tag_sent in zip(test_tokens, test_tags_coarse_tagged)]
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID)
+    criterion = torch.nn.CrossEntropyLoss(
+        ignore_index=data.PAD_ID, reduction='mean')
     optimizer = torch.optim.SGD(fine_tagger.parameters(), lr=0.13)
     # learning rate decay as in ABLTagger
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
