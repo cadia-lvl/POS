@@ -117,6 +117,15 @@ if __name__ == '__main__':
     filter_on = data.get_vocab(train_tokens)
     filter_on.update(data.get_vocab(test_tokens))
     # The morphlex embeddings are similar to the tokens, no EOS or SOS needed
+    if args.debug:
+        log.info('Running in debug mode, shortening training and testing data')
+        train_tokens = train_tokens[:30]
+        train_tags = train_tags[:30]
+        train_tags_coarse = train_tags_coarse[:30]
+        test_tokens = test_tokens[:30]
+        test_tags = test_tags[:30]
+        test_tags_coarse = test_tags_coarse[:30]
+        args.use_morphlex = args.use_morphlex  # + '_short'
     m_map, embedding = data.read_embedding(
         args.use_morphlex, filter_on=filter_on)
 
@@ -143,14 +152,7 @@ if __name__ == '__main__':
     log.info(
         f"Number of params {sum(np.prod(p.shape()) for l in tagger_coarse.cBwdRNN.get_parameters()for p in l )}")
     log.info("Starting training and evaluating")
-    if args.debug:
-        log.info('Running in debug mode, shortening training and testing data')
-        train_tokens = train_tokens[:100]
-        train_tags = train_tags[:100]
-        train_tags_coarse = train_tags_coarse[:100]
-        test_tokens = test_tokens[:100]
-        test_tags = test_tags[:100]
-        test_tags_coarse = test_tags_coarse[:100]
+
     x_y = list(zip(train_tokens, train_tags_coarse))
     x_y_test = list(zip(test_tokens, test_tags_coarse))
     tagger_coarse.train_and_evaluate_tagger(x_y=x_y,
