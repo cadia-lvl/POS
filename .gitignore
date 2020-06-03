@@ -1,10 +1,8 @@
 .mypy_cache/
 .vscode/
-/__pycache__/
-*/__pycache__/
+**/__pycache__/
+.pytest_cache/
 data/raw/*
-data/format/*
 models/*
 out/*
 slurm-*
-test.py
