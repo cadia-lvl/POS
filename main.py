@@ -95,11 +95,11 @@ def report(input, report_type, count, vocab):
 @click.argument('training_files', nargs=-1)
 @click.argument('test_file')
 @click.argument('output_dir', default='./out')
-@click.option('--known_chars_file', default='./extra/characters_training.txt',
+@click.option('--known_chars_file', default='./data/extra/characters_training.txt',
               help='A file which contains the characters the model should know. '
               + 'File should be a single line, the line is split() to retrieve characters.')
-@click.option('--c_tags_file', default='./extra/word_class_vocab.txt')
-@click.option('--morphlex_embeddings_file', default='./data/format/dmii.vectors',
+@click.option('--c_tags_file', default='./data/extra/word_class_vocab.txt')
+@click.option('--morphlex_embeddings_file', default='./data/extra/dmii.vectors',
               help='A file which contains the morphological embeddings.')
 @click.option('--coarse_epochs', default=12)
 @click.option('--fine_epochs', default=20)
@@ -154,6 +154,11 @@ def train_and_tag(training_files,
     output_dir = pathlib.Path(output_dir)
     with output_dir.joinpath('hyperparamters.json').open(mode='+w') as f:
         json.dump({**parameters, **model_parameters}, f, indent=4)
+    # Tracking experiments and visualization
+    import wandb
+    wandb.init(project="pos", config={
+               **parameters, **model_parameters}, dir=str(output_dir))
+
     # Read train and test data
     train_tokens, train_tags = [], []
     log.info(f'Reading training files={training_files}')
@@ -201,6 +206,7 @@ def train_and_tag(training_files,
                                        device,
                                        c_tags_embeddings=False)
     log.info(coarse_tagger)
+    wandb.watch(coarse_tagger)
     for name, tensor in coarse_tagger.state_dict().items():
         log.info(f'{name}: {torch.numel(tensor)}')
 

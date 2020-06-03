@@ -3,6 +3,7 @@ import logging
 import datetime
 
 import torch
+import wandb
 
 from . import data
 from .model import ABLTagger
@@ -86,6 +87,7 @@ def run_epochs(model,
                                            test,
                                            criterion)
         log.info(f'Validation acc={val_acc}, loss={val_loss}')
+        wandb.log({'epoch': epoch, 'loss': val_loss, 'acc': val_acc})
         if val_loss < best_validation_loss:
             best_validation_loss = val_loss
             # torch.save(pos_model.state_dict(), 'model.pt')

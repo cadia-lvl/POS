@@ -24,8 +24,6 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     $RAW_DIR/otb/10TM.plain \
     $RAW_DIR/otb/10PM.plain \
     $out_folder \
-    --known_chars_file data/extra/characters_training.txt \
-    --morphlex_embeddings_file $FORMAT_DIR/dmii.vectors \
     --coarse_epochs $coarse_epochs \
     --fine_epochs $fine_epochs \
     --batch_size $batch_size \
