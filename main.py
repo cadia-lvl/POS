@@ -206,7 +206,7 @@ def train_and_tag(training_files,
 
     # We ignore targets which have beed padded
     criterion = torch.nn.CrossEntropyLoss(
-        ignore_index=data.PAD_ID, reduction='mean')
+        ignore_index=data.PAD_ID, reduction='none')
     # lr as used in ABLTagger
     optimizer = torch.optim.SGD(coarse_tagger.parameters(), lr=0.13)
     # learning rate decay as in ABLTagger
@@ -247,7 +247,7 @@ def train_and_tag(training_files,
     fine_test = [[(tok, tag) for tok, tag in zip(tok_sent, tag_sent)]
                  for tok_sent, tag_sent in zip(test_tokens, test_tags_coarse_tagged)]
     criterion = torch.nn.CrossEntropyLoss(
-        ignore_index=data.PAD_ID, reduction='mean')
+        ignore_index=data.PAD_ID, reduction='none')
     optimizer = torch.optim.SGD(fine_tagger.parameters(), lr=0.13)
     # learning rate decay as in ABLTagger
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(

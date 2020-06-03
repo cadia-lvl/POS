@@ -80,9 +80,9 @@ def run_epochs(model,
             f'Epoch={epoch}/{epochs}, lr={list(param_group["lr"] for param_group in optimizer.param_groups)}')
         end = datetime.datetime.now()
         log.info(f'Training took={end-start} seconds')
-        # We just run the validation using same batch size, to keep PAD to minimum
+        # We just run the validation using a larger batch size
         val_loss, val_acc = evaluate_model(model,
-                                           batch_size,
+                                           batch_size * 100,
                                            test,
                                            criterion)
         log.info(f'Validation acc={val_acc}, loss={val_loss}')
@@ -115,10 +115,13 @@ def train_model(model,
         y = y.view(-1)
 
         loss = criterion(y_pred, y)
-        # loss = torch.sum(loss) / loss.shape[0]
+        # Filter out the pads
+        loss = loss[y != data.PAD_ID]
+        loss = loss.sum()
         acc = categorical_accuracy(y_pred, y)
-
         loss.backward()
+        # Clip gardients like in DyNet
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
         optimizer.step()
         if i % 10 == 0:
             log.info(log_prepend
@@ -150,7 +153,9 @@ def evaluate_model(model,
                 y_total = torch.cat([y_total, y], dim=0)
 
         loss = criterion(y_pred_total, y_total)
-        # loss = torch.sum(loss) / y_total.shape[0]
+        # Filter out the pads
+        loss = loss[y_total != data.PAD_ID]
+        loss = loss.sum()
         acc = categorical_accuracy(y_pred_total, y_total)
 
     return loss.item(), acc.item()
@@ -163,8 +168,7 @@ def tag_sents(model,
     with torch.no_grad():
         log.info(f'Tagging sentences len={len(sentences)}')
         iter = model.mapper.in_x_batches(x=sentences,
-                                         # Batch size to 1 to avoid dealing with PAD
-                                         batch_size=batch_size,
+                                         batch_size=batch_size * 100,
                                          device=model.device)
         tags = []
         for i, x in enumerate(iter, start=1):
@@ -174,8 +178,7 @@ def tag_sents(model,
                 # (seq, f)
                 sent_pred = pred[b, :, :].view(-1, pred.shape[-1])
                 # x = (b, seq, f), the last few elements in f word/token, morph and maybe c_tag
-                num_non_pads = torch.sum(
-                    (x[b, :, -1] != data.PAD_ID)).item()
+                num_non_pads = torch.sum((x[b, :, -1] != data.PAD_ID)).item()
                 # We use the fact that padding is placed BEHIND those features
                 sent_pred = sent_pred[:num_non_pads, :]  # type: ignore
                 idxs = sent_pred.argmax(dim=1).tolist()
@@ -190,7 +193,7 @@ def categorical_accuracy(preds, y):
     """
     max_preds = preds.argmax(
         dim=1, keepdim=True)  # get the index of the max probability
-    # nonzero to map to idexes again
+    # nonzero to map to idexes again and filter out pads.
     non_pad_elements = (y != data.PAD_ID).nonzero()
     correct = max_preds[non_pad_elements].squeeze(1).eq(y[non_pad_elements])
     return correct.sum() / torch.FloatTensor([y[non_pad_elements].shape[0]])

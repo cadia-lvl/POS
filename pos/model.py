@@ -34,11 +34,13 @@ class ABLTagger(nn.Module):
         if morph_lex_embeddings is not None:
             self.morph_lex_embedding = nn.Embedding.from_pretrained(morph_lex_embeddings,
                                                                     freeze=False,
-                                                                    padding_idx=data.PAD_ID)
+                                                                    padding_idx=data.PAD_ID,
+                                                                    sparse=True)
         if c_tags_embeddings is not None:
             self.c_tags_embedding = nn.Embedding.from_pretrained(c_tags_embeddings,
                                                                  freeze=False,
-                                                                 padding_idx=data.PAD_ID)
+                                                                 padding_idx=data.PAD_ID,
+                                                                 sparse=True)
         self.token_embedding = nn.Embedding(token_dim,
                                             emb_token_dim,
                                             padding_idx=data.PAD_ID,
