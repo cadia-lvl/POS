@@ -11,9 +11,6 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     dt=$(date '+%Y-%m-%d_%H-%M-%S');
     out_folder="./out/$dt"
     mkdir -p "$out_folder"
-    batch_size=16
-    coarse_epochs=1
-    fine_epochs=1
     debug=""
     sbatch \
     --output="$out_folder/slurm-%j.out" \
@@ -24,9 +21,8 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     $RAW_DIR/otb/10TM.plain \
     $RAW_DIR/otb/10PM.plain \
     $out_folder \
-    --coarse_epochs $coarse_epochs \
-    --fine_epochs $fine_epochs \
-    --batch_size $batch_size \
+    --epochs 1 \
+    --batch_size 16 \
     --save_vocab \
     --save_model \
     --gpu \

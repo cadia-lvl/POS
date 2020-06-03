@@ -17,7 +17,6 @@ class ABLTagger(nn.Module):
                  token_dim: int,  # The number of tokens in dictionary
                  tags_dim: int,  # The number of tags in dictionary - to predict
                  morph_lex_embeddings: torch.Tensor,
-                 c_tags_embeddings: torch.Tensor,
                  emb_char_dim=20,  # The characters are mapped to this dim
                  char_lstm_dim=64,  # The character LSTM will output with this dim
                  emb_token_dim=128,  # The tokens are mapped to this dim
@@ -36,21 +35,14 @@ class ABLTagger(nn.Module):
                                                                     freeze=False,
                                                                     padding_idx=data.PAD_ID,
                                                                     sparse=True)
-        if c_tags_embeddings is not None:
-            self.c_tags_embedding = nn.Embedding.from_pretrained(c_tags_embeddings,
-                                                                 freeze=False,
-                                                                 padding_idx=data.PAD_ID,
-                                                                 sparse=True)
         self.token_embedding = nn.Embedding(token_dim,
                                             emb_token_dim,
                                             padding_idx=data.PAD_ID,
                                             sparse=True)
-        nn.init.xavier_uniform_(self.token_embedding.weight[1:, :])
         self.character_embedding = nn.Embedding(char_dim,
                                                 emb_char_dim,
                                                 padding_idx=data.PAD_ID,
                                                 sparse=True)
-        nn.init.xavier_uniform_(self.character_embedding.weight[1:, :])
         # The character BiLSTM
         self.char_bilstm = nn.LSTM(input_size=emb_char_dim,
                                    hidden_size=char_lstm_dim,
@@ -58,37 +50,20 @@ class ABLTagger(nn.Module):
                                    dropout=lstm_dropouts,
                                    batch_first=True,
                                    bidirectional=True)
-        for name, param in self.char_bilstm.named_parameters():
-            if 'bias' in name:
-                nn.init.constant_(param, 0.0)
-            elif 'weight' in name:
-                nn.init.xavier_uniform_(param)
-            else:
-                raise ValueError('Unknown parameter in lstm={name}')
-        # 2 * char-bilstm + token emb + morph_lex + coarse tags
+        # 2 * char-bilstm + token emb + morph_lex
         main_bilstm_dim = 0
         main_bilstm_dim += 2 * char_lstm_dim
         main_bilstm_dim += emb_token_dim
         main_bilstm_dim += self.morph_lex_embedding.weight.data.shape[1] if morph_lex_embeddings is not None else 0
-        main_bilstm_dim += self.c_tags_embedding.weight.data.shape[1] if c_tags_embeddings is not None else 0
         self.bilstm = nn.LSTM(input_size=main_bilstm_dim,
                               hidden_size=main_lstm_dim,
                               num_layers=1,
                               dropout=lstm_dropouts,
                               batch_first=True,
                               bidirectional=True)
-        for name, param in self.bilstm.named_parameters():
-            if 'bias' in name:
-                nn.init.constant_(param, 0.0)
-            elif 'weight' in name:
-                nn.init.xavier_uniform_(param)
-            else:
-                raise ValueError('Unknown parameter in lstm={name}')
         # no bias in DyNet
-        self.linear = nn.Linear(main_lstm_dim * 2, hidden_dim, bias=False)
-        nn.init.xavier_uniform_(self.linear.weight)
-        self.final = nn.Linear(hidden_dim, tags_dim, bias=False)
-        nn.init.xavier_uniform_(self.final.weight)
+        self.linear = nn.Linear(main_lstm_dim * 2, hidden_dim)
+        self.final = nn.Linear(hidden_dim, tags_dim)
         self.c_embs_dropout = nn.Dropout(p=input_dropouts)
         self.w_embs_dropout = nn.Dropout(p=input_dropouts)
         self.char_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
@@ -97,18 +72,10 @@ class ABLTagger(nn.Module):
     def forward(self, input):
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # (b, seq, chars)
-        if hasattr(self, 'c_tags_embedding'):
-            chars = input[:, :, :-3]
-            # (b, seq, 1)
-            w = input[:, :, -3]
-            m = input[:, :, -2]
-            c_tag = input[:, :, -1]
-            c_tag_embs = self.c_tags_embedding(c_tag)
-        else:
-            chars = input[:, :, :-2]
-            # (b, seq, 1)
-            w = input[:, :, -2]
-            m = input[:, :, -1]
+        chars = input[:, :, :-2]
+        # (b, seq, 1)
+        w = input[:, :, -2]
+        m = input[:, :, -1]
         # (b, seq, chars, f)
         char_embs = self.c_embs_dropout(self.character_embedding(chars))
         self.char_bilstm.flatten_parameters()
@@ -142,11 +109,7 @@ class ABLTagger(nn.Module):
 
         w_embs = self.w_embs_dropout(self.token_embedding(w))
         m_embs = self.morph_lex_embedding(m)
-        if hasattr(self, 'c_tags_embedding'):
-            main_in = torch.cat(
-                (chars_as_word, w_embs, m_embs, c_tag_embs), dim=2)
-        else:
-            main_in = torch.cat((chars_as_word, w_embs, m_embs), dim=2)
+        main_in = torch.cat((chars_as_word, w_embs, m_embs), dim=2)
         # Add noise - like in dyney
         if self.training:
             main_in = main_in + \

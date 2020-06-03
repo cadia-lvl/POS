@@ -2,7 +2,6 @@
 import pickle
 import random
 import logging
-import datetime
 import json
 import pprint
 import pathlib
@@ -98,11 +97,9 @@ def report(input, report_type, count, vocab):
 @click.option('--known_chars_file', default='./data/extra/characters_training.txt',
               help='A file which contains the characters the model should know. '
               + 'File should be a single line, the line is split() to retrieve characters.')
-@click.option('--c_tags_file', default='./data/extra/word_class_vocab.txt')
 @click.option('--morphlex_embeddings_file', default='./data/extra/dmii.vectors',
               help='A file which contains the morphological embeddings.')
-@click.option('--coarse_epochs', default=12)
-@click.option('--fine_epochs', default=20)
+@click.option('--epochs', default=20)
 @click.option('--batch_size', default=32)
 @click.option('--save_model/--no_save_model', default=False)
 @click.option('--save_vocab/--no_save_vocab', default=False)
@@ -111,10 +108,8 @@ def train_and_tag(training_files,
                   test_file,
                   output_dir,
                   known_chars_file,
-                  c_tags_file,
                   morphlex_embeddings_file,
-                  coarse_epochs,
-                  fine_epochs,
+                  epochs,
                   batch_size,
                   save_model,
                   save_vocab,
@@ -137,9 +132,9 @@ def train_and_tag(training_files,
     parameters = {
         'training_files': training_files,
         'test_file': test_file,
-        'coarse_epochs': coarse_epochs,
-        'fine_epochs': fine_epochs,
+        'epochs': epochs,
         'batch_size': batch_size,
+        'learning_rate': 0.20,
     }
     model_parameters = {
         'lstm_dropouts': 0.1,
@@ -148,7 +143,7 @@ def train_and_tag(training_files,
         'char_lstm_dim': 64,  # The character LSTM will output with this dim
         'emb_token_dim': 128,  # The tokens are mapped to this dim
         'main_lstm_dim': 64,  # The main LSTM dim will output with this dim
-        'hidden_dim': 32,  # The main LSTM time-steps will be mapped to this dim
+        'hidden_dim': 64,  # The main LSTM time-steps will be mapped to this dim
         'noise': 0.1,  # Noise to main_in, to main_bilstm
     }
     output_dir = pathlib.Path(output_dir)
@@ -167,12 +162,12 @@ def train_and_tag(training_files,
         train_tokens.extend(toks)
         train_tags.extend(tags)
     test_tokens, test_tags, _ = data.read_tsv(test_file)
-    # Prepare the coarse tags
-    train_tags_coarse = data.coarsify(train_tags)
-    test_tags_coarse = data.coarsify(test_tags)
 
-    coarse_mapper, fine_mapper, embedding = train.create_mappers(
-        train_tokens, test_tokens, train_tags, known_chars_file, c_tags_file, morphlex_embeddings_file)
+    mapper, embedding = train.create_mapper(train_tokens,
+                                            test_tokens,
+                                            train_tags,
+                                            known_chars_file,
+                                            morphlex_embeddings_file)
 
     if torch.cuda.is_available() and gpu:
         device = torch.device('cuda')
@@ -193,94 +188,55 @@ def train_and_tag(training_files,
         torch.set_num_threads(threads)
         log.info(f'Using {threads} CPU threads')
         train_tokens = train_tokens[:batch_size]
-        train_tags_coarse = train_tags_coarse[:batch_size]
         train_tags = train_tags[:batch_size]
         test_tokens = test_tokens[:batch_size]
-        test_tags_coarse = test_tags_coarse[:batch_size]
         test_tags = test_tags[:batch_size]
 
-    log.info('Creating coarse tagger')
-    coarse_tagger = train.create_model(coarse_mapper,
-                                       model_parameters,
-                                       embedding,
-                                       device,
-                                       c_tags_embeddings=False)
-    log.info(coarse_tagger)
-    wandb.watch(coarse_tagger)
-    for name, tensor in coarse_tagger.state_dict().items():
+    from pos.model import ABLTagger
+    tagger = ABLTagger(
+        mapper=mapper,
+        device=device,
+        char_dim=len(mapper.c_map),
+        token_dim=len(mapper.w_map),
+        tags_dim=len(mapper.t_map),
+        morph_lex_embeddings=torch.from_numpy(embedding).float().to(device),
+        **model_parameters
+    ).to(device)
+    log.info(tagger)
+    wandb.watch(tagger)
+    for name, tensor in tagger.state_dict().items():
         log.info(f'{name}: {torch.numel(tensor)}')
-
-    # We ignore targets which have beed padded
+    log.info(
+        f'Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}')
+    log.info(
+        f'Not trainable parameters={sum(p.numel() for p in tagger.parameters() if not p.requires_grad)}')
     criterion = torch.nn.CrossEntropyLoss(
         ignore_index=data.PAD_ID, reduction='none')
-    # lr as used in ABLTagger
-    optimizer = torch.optim.SGD(coarse_tagger.parameters(), lr=0.13)
+    optimizer = torch.optim.SGD(
+        tagger.parameters(), lr=parameters['learning_rate'])
     # learning rate decay as in ABLTagger
     scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
         optimizer, lr_lambda=lambda epoch: 0.95)
-    train.run_epochs(model=coarse_tagger,
+    train.run_epochs(model=tagger,
                      optimizer=optimizer,
                      criterion=criterion,
                      scheduler=scheduler,
-                     train=(train_tokens, train_tags_coarse),
-                     test=(test_tokens, test_tags_coarse),
-                     epochs=coarse_epochs,
+                     train=(train_tokens, train_tags),
+                     test=(test_tokens, test_tags),
+                     epochs=epochs,
                      batch_size=batch_size)
-    start = datetime.datetime.now()
-    train_tags_coarse_tagged = train.tag_sents(model=coarse_tagger,
-                                               sentences=train_tokens,
-                                               batch_size=batch_size)
-    end = datetime.datetime.now()
-    log.info(f'Tagging took={end-start} seconds')
-    test_tags_coarse_tagged = train.tag_sents(model=coarse_tagger,
-                                              sentences=test_tokens,
-                                              batch_size=batch_size)
-
-    data.write_tsv(str(output_dir.joinpath('coarse_predictions.tsv')),
-                   (test_tokens, test_tags_coarse, test_tags_coarse_tagged))
-    del coarse_tagger
-    torch.cuda.empty_cache()
-    log.info('Creating fine tagger')
-    fine_tagger = train.create_model(fine_mapper,
-                                     model_parameters,
-                                     embedding,
-                                     device,
-                                     c_tags_embeddings=True)
-    log.info(fine_tagger)
-
-    fine_train = [[(tok, tag) for tok, tag in zip(tok_sent, tag_sent)]
-                  for tok_sent, tag_sent in zip(train_tokens, train_tags_coarse_tagged)]
-    fine_test = [[(tok, tag) for tok, tag in zip(tok_sent, tag_sent)]
-                 for tok_sent, tag_sent in zip(test_tokens, test_tags_coarse_tagged)]
-    criterion = torch.nn.CrossEntropyLoss(
-        ignore_index=data.PAD_ID, reduction='none')
-    optimizer = torch.optim.SGD(fine_tagger.parameters(), lr=0.13)
-    # learning rate decay as in ABLTagger
-    scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
-        optimizer, lr_lambda=lambda epoch: 0.95)
-    train.run_epochs(model=fine_tagger,
-                     optimizer=optimizer,
-                     criterion=criterion,
-                     scheduler=scheduler,
-                     train=(fine_train, train_tags),
-                     test=(fine_test, test_tags),
-                     epochs=fine_epochs,
-                     batch_size=batch_size)
-    test_tags_tagged = train.tag_sents(model=fine_tagger,
-                                       sentences=fine_test,
+    test_tags_tagged = train.tag_sents(model=tagger,
+                                       sentences=test_tokens,
                                        batch_size=batch_size)
-    data.write_tsv(str(output_dir.joinpath('fine_predictions.tsv')),
+    data.write_tsv(str(output_dir.joinpath('predictions.tsv')),
                    (test_tokens, test_tags, test_tags_tagged))
     if save_vocab:
-        save_location = output_dir.joinpath('coarse_vocab.pickle')
+        save_location = output_dir.joinpath('vocab.pickle')
         with save_location.open('wb+') as f:
-            pickle.dump(coarse_mapper, f)
-        save_location = output_dir.joinpath('fine_vocab.pickle')
-        with save_location.open('wb+') as f:
-            pickle.dump(fine_mapper, f)
+            pickle.dump(mapper, f)
     if save_model:
-        save_location = output_dir.joinpath('fine_tagger.pt')
-        torch.save(fine_tagger.state_dict(), str(save_location))
+        save_location = output_dir.joinpath('tagger.pt')
+        torch.save(tagger.state_dict(), str(save_location))
 
 
 if __name__ == '__main__':

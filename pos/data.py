@@ -10,25 +10,29 @@ import torch
 import random
 
 log = logging.getLogger()
-# When iterating over Sent-x, whole sentences are yielded
-SentTokens = Tuple[str, ...]
-SentTags = Tuple[str, ...]
-# Either tokens or tags, we don't care
-Sent = Union[SentTags, SentTokens]
-Vocab = Set[str]
-DataSent = List[Sent]
-DataPairs = Tuple[List[SentTokens], List[SentTags]]
-DataPairs_c = Tuple[Tuple[List[SentTokens], List[SentTags]], List[SentTags]]
-Data = Union[DataPairs, DataPairs_c]
 
-TaggedToken = Tuple[str, str]
+# Useful types
+Tag = str
 Token = str
-In_Tok = Union[Token, TaggedToken]
-In_Sent = List[In_Tok]
-In = List[In_Sent]
+SentTokens = Tuple[Token, ...]
+SentTags = Tuple[Tag, ...]
+# Sent is either tokens or tags, we don't care
+Sent = Union[SentTags, SentTokens]
+Vocab = Set[Token]
+DataSent = List[Sent]
+Data = Tuple[DataSent, DataSent]
+
+TaggedToken = Tuple[Token, Tag]
 
 SentTokTag = List[TaggedToken]
 Corpus = List[SentTokTag]
+
+x_i_j = Tuple[List[str], Token, Token]
+x_i = List[x_i_j]
+X = List[x_i]
+y_i_j = Tag
+y_i = List[y_i_j]
+Y = List[y_i]
 
 
 # To pad in batches
@@ -91,10 +95,6 @@ def get_vocab(sentences: List[Sent]) -> Vocab:
 
 def get_tok_freq(sentences: List[Sent]) -> Counter:
     return Counter((tok for sent in sentences for tok in sent))
-
-
-def coarsify(sentences: List[SentTags]) -> List[SentTags]:
-    return [tuple(tag[0] for tag in tags) for tags in sentences]
 
 
 def read_vocab(vocab_file) -> Vocab:
@@ -177,26 +177,17 @@ class Embeddings:
         self.embeddings = embedding
 
 
-x_i_j = Tuple[List[str], str, str]
-# For coarse tags, slightly hacky
-x_i_j_c = Tuple[List[str], str, str, str]
-x_i = List[Union[x_i_j]]
-X = List[x_i]
-y_i_j = str
-y_i = List[y_i_j]
-Y = List[y_i]
 @dataclass()
 class DataVocabMap:
     c_map: VocabMap  # characters
     w_map: VocabMap  # words "tokens"
     m_map: VocabMap  # morphlex
     t_map: VocabMap  # tags - the target
-    # Additional feature maps, words/tokens, morphlex and c_tags, in that order
+    # Additional feature maps, words/tokens, morphlex in that order
     f_maps: List[VocabMap]
-    c_t_map: VocabMap  # coarse-tags - optional input
     t_freq: Counter
 
-    def __init__(self, tokens: List[SentTokens], tags: Vocab, chars: Vocab, c_tags: Vocab = None, unk_to_tags=False):
+    def __init__(self, tokens: List[SentTokens], tags: Vocab, chars: Vocab):
         """
         Here we create all the necessary vocabulary mappings for the batch function.
         """
@@ -208,26 +199,17 @@ class DataVocabMap:
             (SOS, SOS_ID)
         ])
         self.w_map = VocabMap(get_vocab(tokens), special_tokens=[
-            (UNK, UNK_ID),
             (PAD, PAD_ID),
         ])
-        special_tokens = [
+        self.t_map = VocabMap(tags, special_tokens=[
             (PAD, PAD_ID),
-        ]
-        if unk_to_tags:
-            special_tokens.append((UNK, UNK_ID))
-        self.t_map = VocabMap(tags, special_tokens=special_tokens)
+            (UNK, UNK_ID),
+        ])
         log.info(f'Character vocab={len(self.c_map)}')
         log.info(f'Word vocab={len(self.w_map)}')
         log.info(f'Tag vocab={len(self.t_map)}')
         # Add the mappings to a list for idx mapping later
         self.x_maps = [self.w_map]
-        if c_tags:
-            # The c_tags will be padded, but we do not support UNK
-            self.c_t_map = VocabMap(c_tags, special_tokens=[
-                (PAD, PAD_ID),
-            ])
-            log.info(f'Coarse tag vocab={len(self.c_t_map)}')
         self.t_freq = get_tok_freq(tokens)
 
     def add_morph_map(self, m_map):
@@ -236,24 +218,18 @@ class DataVocabMap:
         """
         self.m_map = m_map
         self.x_maps.append(self.m_map)
-        # We add the c_tag map last
-        if hasattr(self, 'c_t_map'):
-            self.x_maps.append(self.c_t_map)
 
     @classmethod
-    def make_x(cls, sentences: In) -> X:
+    def make_x(cls, sentences: DataSent) -> X:
         return [
             [
                 # ([SOS + characters + EOS], word, morph)
-                ([SOS] + [c for c in tok] + [EOS], tok, tok)  # type: ignore
-                if type(tok) == str else
-                # ([SOS + characters + EOS], word, morph, c_tag)
-                ([SOS] + [c for c in tok[0]] + [EOS], tok[0], tok[0], tok[1])
+                ([SOS] + [c for c in tok] + [EOS], tok, tok)
                 for tok in sent]
             for sent in sentences]
 
     @classmethod
-    def make_y(cls, sentences: List[SentTags]) -> Y:
+    def make_y(cls, sentences: DataSent) -> Y:
         return [[tag for tag in sent] for sent in sentences]
 
     @classmethod
@@ -270,15 +246,9 @@ class DataVocabMap:
         log.debug("Longest sent in batch", longest_sent_in_examples)
         x_pad = copy.deepcopy(x)
         for x_i_pad in x_pad:
-            # chars, word, morph
-            if len(x_i_pad[0]) == 3:
-                empty_rest = (PAD, PAD)
-            # chars, word, morph, c_tag
-            else:
-                empty_rest = (PAD, PAD, PAD)  # type: ignore
             # Pad sentence-wise
             while len(x_i_pad) < longest_sent_in_examples:
-                x_i_pad.append((list(), *empty_rest))
+                x_i_pad.append((list(), *(PAD, PAD)))
             # Pad character-wise
             for x_i_js_pad in x_i_pad:
                 while len(x_i_js_pad[0]) < longest_token_in_examples:
@@ -319,12 +289,11 @@ class DataVocabMap:
 
     def to_idx_y(self, y: Y) -> torch.Tensor:
         # TODO: Remove UNK when we can express all the tags
-        # UNK is temproary supported.
         return torch.tensor([[self.t_map.w2i[t] if t in self.t_map.w2i else UNK_ID for t in y_i] for y_i in y])
 
     def in_x_y_batches(self,
-                       x: In,
-                       y: List[SentTags],
+                       x: DataSent,
+                       y: DataSent,
                        batch_size=32,
                        shuffle=True,
                        device=None) -> Iterable[Tuple[torch.Tensor, torch.Tensor]]:
@@ -345,7 +314,7 @@ class DataVocabMap:
                    self.to_idx_y(self.pad_y(y_f[ndx:min(ndx + batch_size, length)])).to(device))
 
     def in_x_batches(self,
-                     x: In,
+                     x: DataSent,
                      batch_size=32,
                      device=None) -> Iterable[torch.Tensor]:
         x_f = self.make_x(x)

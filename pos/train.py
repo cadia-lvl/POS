@@ -1,4 +1,4 @@
-from typing import Tuple, List, Any
+from typing import Tuple, List
 import logging
 import datetime
 
@@ -6,22 +6,18 @@ import torch
 import wandb
 
 from . import data
-from .model import ABLTagger
 
 log = logging.getLogger()
 
 
-def create_mappers(train_tokens, test_tokens, train_tags, known_chars_file, c_tags_file, morphlex_embeddings_file):
+def create_mapper(train_tokens, test_tokens, train_tags, known_chars_file, morphlex_embeddings_file):
 
     # Read the supported characters
     chars = data.read_vocab(known_chars_file)
-    c_tags = data.read_vocab(c_tags_file)
 
     # Define the vocabularies and mappings
-    coarse_mapper = data.DataVocabMap(
-        tokens=train_tokens, tags=c_tags, chars=chars, unk_to_tags=False)
-    fine_mapper = data.DataVocabMap(
-        tokens=train_tokens, tags=data.get_vocab(train_tags), chars=chars, c_tags=c_tags, unk_to_tags=True)
+    mapper = data.DataVocabMap(
+        tokens=train_tokens, tags=data.get_vocab(train_tags), chars=chars)
 
     # We filter the morphlex embeddings based on the training and test set for quicker training. This should not be done in production
     filter_on = data.get_vocab(train_tokens)
@@ -31,40 +27,16 @@ def create_mappers(train_tokens, test_tokens, train_tags, known_chars_file, c_ta
         (data.UNK, data.UNK_ID),
         (data.PAD, data.PAD_ID)
     ])
-    coarse_mapper.add_morph_map(m_vocab_map)
-    fine_mapper.add_morph_map(m_vocab_map)
-    return coarse_mapper, fine_mapper, embedding
-
-
-def create_model(mapper, model_parameters, embedding, device, c_tags_embeddings=False):
-    tagger = ABLTagger(
-        mapper=mapper,
-        device=device,
-        char_dim=len(mapper.c_map),
-        token_dim=len(mapper.w_map),
-        tags_dim=len(mapper.t_map),
-        morph_lex_embeddings=torch.from_numpy(embedding).float().to(device),
-        c_tags_embeddings=torch.diag(torch.ones(len(mapper.c_t_map))).to(
-            device) if c_tags_embeddings else None,
-        **model_parameters
-    )
-    log.info(
-        f'Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}')
-    log.info(
-        f'Not trainable parameters={sum(p.numel() for p in tagger.parameters() if not p.requires_grad)}')
-    # if 'cuda' in str(device):
-    # # Make the model data parallel
-    # tagger = torch.nn.DataParallel(tagger)
-    # Move model to device, before optimizer
-    return tagger.to(device)
+    mapper.add_morph_map(m_vocab_map)
+    return mapper, embedding
 
 
 def run_epochs(model,
                optimizer,
                criterion,
                scheduler: torch.optim.lr_scheduler._LRScheduler,
-               train: Tuple[List[Any], List[Any]],
-               test: Tuple[List[Any], List[Any]],
+               train: Tuple[List[data.DataSent], List[data.DataSent]],
+               test: Tuple[List[data.DataSent], List[data.DataSent]],
                epochs: int,
                batch_size: int):
     best_validation_loss = 100
@@ -87,7 +59,7 @@ def run_epochs(model,
                                            test,
                                            criterion)
         log.info(f'Validation acc={val_acc}, loss={val_loss}')
-        wandb.log({'epoch': epoch, 'loss': val_loss, 'acc': val_acc})
+        wandb.log({'loss': val_loss, 'acc': val_acc})
         if val_loss < best_validation_loss:
             best_validation_loss = val_loss
             # torch.save(pos_model.state_dict(), 'model.pt')
@@ -99,7 +71,7 @@ def train_model(model,
                 batch_size: int,
                 optimizer,
                 criterion,
-                train: Tuple[List[Any], List[Any]],
+                train: Tuple[List[data.DataSent], List[data.DataSent]],
                 log_prepend: str):
     train_iter = model.mapper.in_x_y_batches(x=train[0],
                                              y=train[1],
@@ -132,7 +104,7 @@ def train_model(model,
 
 def evaluate_model(model,
                    batch_size,
-                   test: Tuple[List[Any], List[Any]],
+                   test: Tuple[List[data.DataSent], List[data.DataSent]],
                    criterion):
     test_iter = model.mapper.in_x_y_batches(x=test[0],
                                             y=test[1],
@@ -164,11 +136,12 @@ def evaluate_model(model,
 
 
 def tag_sents(model,
-              sentences: data.In,
-              batch_size: int) -> List[data.SentTags]:
+              sentences: data.DataSent,
+              batch_size: int) -> data.DataSent:
     model.eval()
     with torch.no_grad():
         log.info(f'Tagging sentences len={len(sentences)}')
+        start = datetime.datetime.now()
         iter = model.mapper.in_x_batches(x=sentences,
                                          batch_size=batch_size * 100,
                                          device=model.device)
@@ -186,6 +159,8 @@ def tag_sents(model,
                 idxs = sent_pred.argmax(dim=1).tolist()
                 tags.append(
                     tuple(model.mapper.t_map.i2w[idx] for idx in idxs))
+    end = datetime.datetime.now()
+    log.info(f'Tagging took={end-start} seconds')
     return tags
 
 
