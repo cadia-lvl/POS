@@ -31,11 +31,13 @@ class TagExamples:
         errors: Counter = Counter()
         for _, p, _ in self.examples:
             if self.tag != p:
-                errors.update([f'{self.tag} -> {p}'])
+                errors.update([f"{self.tag} -> {p}"])
         return errors
 
 
-def flatten_data(in_data: Tuple[data.DataSent, data.DataSent, data.DataSent]) -> List[Example]:
+def flatten_data(
+    in_data: Tuple[data.DataSent, data.DataSent, data.DataSent]
+) -> List[Example]:
     line_id = 0
     flat = []
     for sent_toks, sent_gold, sent_pred in zip(*in_data):
@@ -81,7 +83,9 @@ def get_vocab(examples: Dict[str, TagExamples]) -> Set[str]:
     return vocab
 
 
-def filter_examples(examples: Dict[str, TagExamples], vocab: Set[str]) -> Dict[str, TagExamples]:
+def filter_examples(
+    examples: Dict[str, TagExamples], vocab: Set[str]
+) -> Dict[str, TagExamples]:
     filtered: Dict[str, TagExamples] = {}
     for tag, tag_example in examples.items():
         for example in tag_example.examples:

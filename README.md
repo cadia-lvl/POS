@@ -68,6 +68,17 @@ The script takes two parameters:
 | -i --input 	       |	./data/extra/SHsnid.csv           |The file containing the DIM morphological lexicon in SHsnid format.
 | -o  --output          | ./data/extra/dmii.vectors           |The file containing the DIM n-hot vectors.
 
+### Filtering the morphological lexicon
+Since the morphological lexicon contains more words than will be seen in the training and testing sets it is useful *when developing/experimenting with* models to filter
+out words which will not be seen during training and testing.
+
+To do this we filter out the morphological lexicon based on the training and test sets and use the filtered morphological lexicon when developing models.
+
+```
+./main.py filter-embedding data/raw/mim/* data/raw/otb/* data/extra/dmii.vectors data/extra/dmii.vectors_filtered bin
+```
+For explaination of the parameters run `./main.py filter-embedding --help`
+
 ## Training models
 A model can be trained by invoking the following command.
 ```
