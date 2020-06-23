@@ -31,7 +31,7 @@ class TagExamples:
         errors: Counter = Counter()
         for _, p, _ in self.examples:
             if self.tag != p:
-                errors.update([f"{self.tag} -> {p}"])
+                errors.update([f"{p} -> {self.tag}"])
         return errors
 
 
