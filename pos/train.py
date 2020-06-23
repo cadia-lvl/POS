@@ -17,29 +17,67 @@ def create_mapper(
     known_chars_file,
     morphlex_embeddings_file,
     word_embeddings_file,
+    filter=True,
 ):
-
     # Read the supported characters
     chars = data.read_vocab(known_chars_file)
-
-    # Define the vocabularies and mappings
-    mapper = data.DataVocabMap(
-        tokens=train_tokens, tags=data.get_vocab(train_tags), chars=chars
+    tokens = data.get_vocab(train_tokens)
+    if filter:
+        # We filter the read embeddings based on the training and test set for quicker training. This should not be done in production
+        filter_on = set(tokens)
+        filter_on.update(data.get_vocab(test_tokens))
+    else:
+        filter_on = None
+    # We need EOS and SOS for chars
+    c_map = data.VocabMap(
+        chars,
+        special_tokens=[
+            (data.UNK, data.UNK_ID),
+            (data.PAD, data.PAD_ID),
+            (data.EOS, data.EOS_ID),
+            (data.SOS, data.SOS_ID),
+        ],
     )
+    if word_embeddings_file:
+        with open(word_embeddings_file) as f:
+            embedding_dict = data.read_word_embedding(f)
+        w_map, w_embedding = data.map_embedding(
+            embedding_dict=embedding_dict,
+            filter_on=filter_on,
+            special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
+        )
+    else:
+        w_map = data.VocabMap(
+            data.get_vocab(tokens),
+            special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
+        )
+        w_embedding = None
+    t_map = data.VocabMap(
+        data.get_vocab(train_tags),
+        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
+    )
+    t_freq = data.get_tok_freq(train_tokens)
 
-    # We filter the morphlex embeddings based on the training and test set for quicker training. This should not be done in production
-    filter_on = data.get_vocab(train_tokens)
-    filter_on.update(data.get_vocab(test_tokens))
     # The morphlex embeddings are similar to the tokens, no EOS or SOS needed
     with open(morphlex_embeddings_file) as f:
         embedding_dict = data.read_bin_embedding(f)
-    m_vocab_map, embedding = data.map_embedding(
+    m_map, m_embedding = data.map_embedding(
         embedding_dict=embedding_dict,
         filter_on=filter_on,
         special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
     )
-    mapper.add_morph_map(m_vocab_map)
-    return mapper, embedding
+    # Add the mappings to a list for idx mapping later
+    f_maps = [w_map, m_map]
+    log.info(f"Character vocab={len(c_map)}")
+    log.info(f"Word vocab={len(w_map)}")
+    log.info(f"Tag vocab={len(t_map)}")
+    log.info(f"Morphlex vocab={len(m_map)}")
+
+    return (
+        data.DataVocabMap(c_map, w_map, m_map, t_map, f_maps, t_freq),
+        m_embedding,
+        w_embedding,
+    )
 
 
 def run_epochs(
@@ -76,7 +114,7 @@ def run_epochs(
         if val_loss < best_validation_loss:
             best_validation_loss = val_loss
             # torch.save(pos_model.state_dict(), 'model.pt')
-        scheduler.step()
+        scheduler.step(val_loss)
     # model.load_state_dict(torch.load('model.pt'))
 
 

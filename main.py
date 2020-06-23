@@ -70,6 +70,7 @@ def filter_embedding(inputs, embedding, output, format):
                     output.write(f"{token};[{','.join((str(x) for x in value))}]\n")
         elif format == "wemb":
             emb_dict = data.read_word_embedding(f)
+            output.write("x x\n")
             for token, value in emb_dict.items():
                 if token in tokens:
                     output.write(f"{token} {' '.join((str(x) for x in value))}\n")
@@ -151,6 +152,7 @@ def report(input, report_type, count, vocab):
 )
 @click.option(
     "--pretrained_word_embeddings",
+    is_flag=True,
     default=False,
     help="Should we use pretrained word embeddings? If set, also set --pretrained_word_embeddings_file",
 )
@@ -161,6 +163,8 @@ def report(input, report_type, count, vocab):
 )
 @click.option("--epochs", default=20)
 @click.option("--batch_size", default=32)
+@click.option("--char_lstm_layers", default=1)
+@click.option("--main_lstm_layers", default=1)
 @click.option("--learning_rate", default=0.20)
 @click.option("--morphlex_freeze", is_flag=True, default=False)
 @click.option(
@@ -172,6 +176,12 @@ def report(input, report_type, count, vocab):
     type=click.Choice(["sgd", "adam"], case_sensitive=False),
     help="The optimizer to use.",
 )
+@click.option(
+    "--scheduler",
+    default="multiply",
+    type=click.Choice(["multiply", "plateau"], case_sensitive=False),
+    help="The learning rate scheduler to use.",
+)
 def train_and_tag(
     training_files,
     test_file,
@@ -181,6 +191,8 @@ def train_and_tag(
     pretrained_word_embeddings,
     pretrained_word_embeddings_file,
     epochs,
+    main_lstm_layers,
+    char_lstm_layers,
     batch_size,
     save_model,
     save_vocab,
@@ -190,6 +202,7 @@ def train_and_tag(
     morphlex_freeze,
     word_embedding_dim,
     name,
+    scheduler,
 ):
     """
     training_files: Files to use for training (supports multiple files = globbing).
@@ -218,8 +231,10 @@ def train_and_tag(
         "input_dropouts": 0.0,
         "emb_char_dim": 20,  # The characters are mapped to this dim
         "char_lstm_dim": 64,  # The character LSTM will output with this dim
+        "char_lstm_layers": char_lstm_layers,  # The character LSTM will output with this dim
         "emb_token_dim": word_embedding_dim,  # The tokens are mapped to this dim
         "main_lstm_dim": 64,  # The main LSTM dim will output with this dim
+        "main_lstm_layers": main_lstm_layers,  # The main LSTM dim will output with this dim
         "hidden_dim": 64,  # The main LSTM time-steps will be mapped to this dim
         "noise": 0.1,  # Noise to main_in, to main_bilstm
     }
@@ -245,7 +260,7 @@ def train_and_tag(
         train_tags.extend(tags)
     test_tokens, test_tags, _ = data.read_tsv(test_file)
 
-    mapper, embedding = train.create_mapper(
+    mapper, m_embedding, w_embedding = train.create_mapper(
         train_tokens,
         test_tokens,
         train_tags,
@@ -285,7 +300,10 @@ def train_and_tag(
         char_dim=len(mapper.c_map),
         token_dim=len(mapper.w_map),
         tags_dim=len(mapper.t_map),
-        morph_lex_embeddings=torch.from_numpy(embedding).float().to(device),
+        morph_lex_embeddings=torch.from_numpy(m_embedding).float().to(device),
+        word_embeddings=torch.from_numpy(w_embedding).float().to(device)
+        if w_embedding is not None
+        else None,
         **model_parameters,
     ).to(device)
     log.info(tagger)
@@ -299,29 +317,52 @@ def train_and_tag(
         f"Not trainable parameters={sum(p.numel() for p in tagger.parameters() if not p.requires_grad)}"
     )
     criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID, reduction="none")
+    reduced_lr_names = ["token_embedding.weight"]
+    params = [
+        {
+            "params": list(
+                param
+                for name, param in filter(
+                    lambda kv: kv[0] not in reduced_lr_names, tagger.named_parameters()
+                )
+            )
+        },
+        {
+            "params": list(
+                param
+                for name, param in filter(
+                    lambda kv: kv[0] in reduced_lr_names, tagger.named_parameters()
+                )
+            ),
+            "lr": parameters["learning_rate"] / 100,
+        },
+    ]
     if optimizer == "sgd":
-        optimizer = torch.optim.SGD(tagger.parameters(), lr=parameters["learning_rate"])
+        optimizer = torch.optim.SGD(params, lr=parameters["learning_rate"])
         log.info(f"Using SGD with lr={parameters['learning_rate']}")
     elif optimizer == "adam":
-        optimizer = torch.optim.Adam(
-            tagger.parameters(), lr=parameters["learning_rate"]
-        )
+        optimizer = torch.optim.Adam(params, lr=parameters["learning_rate"])
         log.info(f"Using Adam with lr={parameters['learning_rate']}")
     else:
         raise ValueError("Unknown optimizer")
-    # learning rate decay as in ABLTagger
-    scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
-        optimizer, lr_lambda=lambda epoch: 0.95
-    )
-    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    # optimizer=optimizer,
-    # mode="min",
-    # factor=0.5,
-    # patience=3,
-    # verbose=True,
-    # threshold=1e-3,
-    # threshold_mode="rel",
-    # )
+    if scheduler == "multiply":
+        scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
+            optimizer, lr_lambda=lambda epoch: 0.95
+        )
+    elif scheduler == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer=optimizer,
+            mode="min",
+            factor=0.5,
+            patience=2,
+            verbose=True,
+            threshold=100.0,
+            threshold_mode="abs",
+            cooldown=0,
+        )
+    else:
+        raise ValueError("Unknown scheduler")
+
     train.run_epochs(
         model=tagger,
         optimizer=optimizer,

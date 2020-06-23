@@ -137,6 +137,7 @@ def read_word_embedding(embedding_data: Iterable[str],) -> Dict[str, List[float]
 
     See called function for further parameters and return value.
     """
+    log.info("Reading word embeddings")
     embedding_dict: Dict[str, List[float]] = dict()
     it = iter(embedding_data)
     # pop the number of vectors and dimension
@@ -158,6 +159,7 @@ def read_bin_embedding(embedding_data: Iterable[str],) -> Dict[str, List[int]]:
 
     See called function for further parameters and return value.
     """
+    log.info("Reading bin embeddings")
     embedding_dict: Dict[str, List[int]] = dict()
     for line in tqdm(embedding_data):
         key, vector = line.strip().split(";")
@@ -220,34 +222,10 @@ class DataVocabMap:
     w_map: VocabMap  # words "tokens"
     m_map: VocabMap  # morphlex
     t_map: VocabMap  # tags - the target
-    # Additional feature maps, words/tokens, morphlex in that order
-    f_maps: List[VocabMap]
+    f_maps: List[
+        VocabMap
+    ]  # Additional feature maps, words/tokens, morphlex in that order
     t_freq: Counter
-
-    def __init__(self, tokens: List[SentTokens], tags: Vocab, chars: Vocab):
-        """
-        Here we create all the necessary vocabulary mappings for the batch function.
-        """
-        # We need EOS and SOS for chars
-        self.c_map = VocabMap(
-            chars,
-            special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID), (EOS, EOS_ID), (SOS, SOS_ID)],
-        )
-        self.w_map = VocabMap(get_vocab(tokens), special_tokens=[(PAD, PAD_ID),])
-        self.t_map = VocabMap(tags, special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID),])
-        log.info(f"Character vocab={len(self.c_map)}")
-        log.info(f"Word vocab={len(self.w_map)}")
-        log.info(f"Tag vocab={len(self.t_map)}")
-        # Add the mappings to a list for idx mapping later
-        self.x_maps = [self.w_map]
-        self.t_freq = get_tok_freq(tokens)
-
-    def add_morph_map(self, m_map):
-        """
-        Adds the m_map to the object and the c_t_map if defined (to maintain order). Do not call twice.
-        """
-        self.m_map = m_map
-        self.x_maps.append(self.m_map)
 
     @classmethod
     def make_x(cls, sentences: DataSent) -> X:
@@ -316,8 +294,8 @@ class DataVocabMap:
                 # for x_maps, 0 = word/token, 1 = morphlex, 2 = c_tags (optional)
                 rest = x_i_js[1:]
                 rest_idx = [
-                    self.x_maps[i].w2i[rest[i]]
-                    if rest[i] in self.x_maps[i].w2i
+                    self.f_maps[i].w2i[rest[i]]
+                    if rest[i] in self.f_maps[i].w2i
                     else UNK_ID
                     for i in range(len(rest))
                 ]

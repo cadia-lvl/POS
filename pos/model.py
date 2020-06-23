@@ -18,10 +18,13 @@ class ABLTagger(nn.Module):
         token_dim: int,  # The number of tokens in dictionary
         tags_dim: int,  # The number of tags in dictionary - to predict
         morph_lex_embeddings: torch.Tensor,
+        word_embeddings: torch.Tensor,
         emb_char_dim=20,  # The characters are mapped to this dim
         char_lstm_dim=64,  # The character LSTM will output with this dim
+        char_lstm_layers=1,  # The character LSTM will output with this dim
         emb_token_dim=128,  # The tokens are mapped to this dim
         main_lstm_dim=64,  # The main LSTM dim will output with this dim
+        main_lstm_layers=1,  # The main LSTM dim will output with this dim
         hidden_dim=32,  # The main LSTM time-steps will be mapped to this dim
         lstm_dropouts=0.0,
         input_dropouts=0.0,
@@ -37,10 +40,15 @@ class ABLTagger(nn.Module):
             self.morph_lex_embedding = nn.Embedding.from_pretrained(
                 morph_lex_embeddings, freeze=morph_lex_freeze, padding_idx=data.PAD_ID,
             )
-        self.token_embedding = nn.Embedding(
-            token_dim, emb_token_dim, padding_idx=data.PAD_ID
-        )
-        nn.init.xavier_uniform_(self.token_embedding.weight[1:, :])
+        if word_embeddings is not None:
+            self.token_embedding = nn.Embedding.from_pretrained(
+                word_embeddings, padding_idx=data.PAD_ID,
+            )
+        else:
+            self.token_embedding = nn.Embedding(
+                token_dim, emb_token_dim, padding_idx=data.PAD_ID
+            )
+            nn.init.xavier_uniform_(self.token_embedding.weight[1:, :])
         self.character_embedding = nn.Embedding(
             char_dim, emb_char_dim, padding_idx=data.PAD_ID
         )
@@ -49,7 +57,7 @@ class ABLTagger(nn.Module):
         self.char_bilstm = nn.LSTM(
             input_size=emb_char_dim,
             hidden_size=char_lstm_dim,
-            num_layers=1,
+            num_layers=char_lstm_layers,
             dropout=lstm_dropouts,
             batch_first=True,
             bidirectional=True,
@@ -64,7 +72,7 @@ class ABLTagger(nn.Module):
         # 2 * char-bilstm + token emb + morph_lex
         main_bilstm_dim = 0
         main_bilstm_dim += 2 * char_lstm_dim
-        main_bilstm_dim += emb_token_dim
+        main_bilstm_dim += self.token_embedding.weight.data.shape[1]
         main_bilstm_dim += (
             self.morph_lex_embedding.weight.data.shape[1]
             if morph_lex_embeddings is not None
@@ -73,7 +81,7 @@ class ABLTagger(nn.Module):
         self.bilstm = nn.LSTM(
             input_size=main_bilstm_dim,
             hidden_size=main_lstm_dim,
-            num_layers=1,
+            num_layers=main_lstm_layers,
             dropout=lstm_dropouts,
             batch_first=True,
             bidirectional=True,
