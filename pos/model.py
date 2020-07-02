@@ -1,3 +1,4 @@
+"""The tagging Module."""
 import logging
 
 import torch
@@ -10,10 +11,10 @@ log = logging.getLogger()
 
 
 class ABLTagger(nn.Module):
+    """The Pytorch module implementing the tagger."""
+
     def __init__(
         self,
-        mapper: data.DataVocabMap,
-        device,
         char_dim: int,  # The number of characters in dictionary
         token_dim: int,  # The number of tokens in dictionary
         tags_dim: int,  # The number of tags in dictionary - to predict
@@ -31,9 +32,8 @@ class ABLTagger(nn.Module):
         noise=0.1,
         morph_lex_freeze=True,
     ):
+        """Initialize the module given the parameters."""
         super(ABLTagger, self).__init__()
-        self.mapper = mapper
-        self.device = device
         self.noise = noise
         # Start with embeddings
         if morph_lex_embeddings is not None:
@@ -104,6 +104,7 @@ class ABLTagger(nn.Module):
         self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
 
     def forward(self, input):
+        """Run a forward pass through the module. Input should be tensors."""
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # (b, seq, chars)
         chars = input[:, :, :-2]
@@ -140,9 +141,9 @@ class ABLTagger(nn.Module):
             # Re-add the PAD words we removed before
             added_pads = copy_into_larger_tensor(
                 sent_chars_rep_last_ts,
-                torch.zeros(
+                sent_chars_rep_last_ts.new_zeros(
                     size=(sent_chars.shape[0], sent_chars_rep_last_ts.shape[1])
-                ).to(self.device),
+                ),
             )
             # Collect and add dimension to sum up
             words_as_chars.append(added_pads[None, :, :])
@@ -164,15 +165,15 @@ class ABLTagger(nn.Module):
         return out
 
     def pack_sequence(self, padded_sequence):
-        """
-        Packs the PAD in a sequence. Assumes that PAD=0.0 and appended.
-        """
+        """Pack the PAD in a sequence. Assumes that PAD=0.0 and appended."""
         # input:
         # (b, s, f)
         # lengths = (b, s)
         lengths = torch.sum(torch.pow(padded_sequence, 2), dim=2)
         # lengths = (b)
-        lengths = torch.sum(lengths != torch.tensor([0.0]).to(self.device), dim=1)
+        lengths = torch.sum(
+            lengths != torch.tensor([0.0]).to(padded_sequence.get_device()), dim=1
+        )
         return (
             torch.nn.utils.rnn.pack_padded_sequence(
                 padded_sequence, lengths, batch_first=True, enforce_sorted=False
@@ -181,9 +182,7 @@ class ABLTagger(nn.Module):
         )
 
     def unpack_sequence(self, packed_sequence):
-        """
-        Inverse of pack_sequence
-        """
+        """Inverse of pack_sequence."""
         return torch.nn.utils.rnn.pad_packed_sequence(
             packed_sequence, batch_first=True
         )[0]
@@ -192,9 +191,7 @@ class ABLTagger(nn.Module):
 def copy_into_larger_tensor(
     tensor: torch.Tensor, like_tensor: torch.Tensor
 ) -> torch.Tensor:
-    """
-    Only works for 2-dims
-    """
+    """Create a larger tensor based on given tensor. Only works for 2-dims."""
     base = torch.zeros_like(like_tensor)
     base[: tensor.shape[0], : tensor.shape[1]] = tensor
     return base
