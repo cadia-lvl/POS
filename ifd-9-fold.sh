@@ -1,6 +1,6 @@
 #!/bin/bash
-FOLDS="01 02 03 04 05 06 07 08 09 10"
-DATA_DIR=./data/raw/mim
+FOLDS="01 02 03 04 05 06 07 08 09"
+DATA_DIR=./data/raw/otb
 
 NAME="$1"
 # Move the arguments forward
@@ -27,8 +27,8 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
         --save_model \
         --gpu \
         --optimizer sgd \
-        --learning_rate 0.2 \
         --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
-        --final_dim 32"
+        --final_dim 32 \
+        --learning_rate 0.2"
     done
 fi

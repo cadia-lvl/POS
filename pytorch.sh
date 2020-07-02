@@ -1,8 +1,5 @@
 #!/bin/bash
-FOLDS="01 02 03 04 05 06 07 08 09 10"
-SPLITS="TM PM"
 DATA_DIR=./data
-FORMAT_DIR="$DATA_DIR"/format
 RAW_DIR="$DATA_DIR"/raw
 
 NAME="$1"
@@ -27,10 +24,12 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     $out_folder \
     --epochs 20 \
     --batch_size 16 \
+    --learning_rate 0.2 \
+    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+    --final_dim 32 \
     --save_vocab \
     --save_model \
     --gpu \
     --optimizer sgd \
-    --name $NAME \
     $extra_params"
 fi
