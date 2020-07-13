@@ -1,7 +1,7 @@
-import copy
+"""Data preparation and reading."""
 from dataclasses import dataclass
 from collections import Counter
-from typing import List, Tuple, Set, Dict, Optional, Union, Iterable, MutableMapping
+from typing import List, Tuple, Set, Dict, Optional, Union, Iterable, NewType
 import logging
 
 from tqdm import tqdm
@@ -10,30 +10,6 @@ import torch
 import random
 
 log = logging.getLogger()
-
-# Useful types
-Tag = str
-Token = str
-SentTokens = Tuple[Token, ...]
-SentTags = Tuple[Tag, ...]
-# Sent is either tokens or tags, we don't care
-Sent = Union[SentTags, SentTokens]
-Vocab = Set[Token]
-DataSent = List[Sent]
-Data = Tuple[DataSent, DataSent]
-
-TaggedToken = Tuple[Token, Tag]
-
-SentTokTag = List[TaggedToken]
-Corpus = List[SentTokTag]
-
-x_i_j = Tuple[List[str], Token, Token]
-x_i = List[x_i_j]
-X = List[x_i]
-y_i_j = Tag
-y_i = List[y_i_j]
-Y = List[y_i]
-
 
 # To pad in batches
 PAD = "<pad>"
@@ -47,8 +23,25 @@ EOS_ID = 2
 SOS = "<s>"
 SOS_ID = 3
 
+# Some types
+Sent = NewType("Sent", Tuple[str, ...])
+TaggedSent = NewType("TaggedSent", Tuple[Sent, Sent])
+
+
+class Vocab(set):
+    """A class to hold a vocabulary as an unordered set of symbols."""
+
+
+class Dataset(tuple):
+    """A class to hold tagged sentences."""
+
+
+class DataSent(tuple):
+    """A class to hold (untagged) sentences."""
+
 
 def write_tsv(output, data: Tuple[DataSent, ...]):
+    """Write a tsv in many columns."""
     with open(output, "w+") as f:
         for sent_tok_tags in zip(*data):
             for tok_tags in zip(*sent_tok_tags):
@@ -57,6 +50,7 @@ def write_tsv(output, data: Tuple[DataSent, ...]):
 
 
 def read_tsv(input) -> Tuple[DataSent, DataSent, DataSent]:
+    """Read a tsv, two or three columns."""
     tokens = []
     tags = []
     model_tags = []
@@ -68,9 +62,9 @@ def read_tsv(input) -> Tuple[DataSent, DataSent, DataSent]:
             line = line.strip()
             # We read a blank line - sentence has been read.
             if not line:
-                tokens.append(tuple(sent_tokens))
-                tags.append(tuple(sent_tags))
-                model_tags.append(tuple(sent_model_tags))
+                tokens.append(Sent(tuple(sent_tokens)))
+                tags.append(Sent(tuple(sent_tags)))
+                model_tags.append(Sent(tuple(sent_model_tags)))
                 sent_tokens = []
                 sent_tags = []
                 sent_model_tags = []
@@ -83,35 +77,78 @@ def read_tsv(input) -> Tuple[DataSent, DataSent, DataSent]:
 
     # The file does not neccessarily end with a blank line
     if len(sent_tokens) != 0:
-        tokens.append(tuple(sent_tokens))
-        tags.append(tuple(sent_tags))
-        model_tags.append(tuple(sent_model_tags))
-    return tokens, tags, model_tags
+        tokens.append(Sent(tuple(sent_tokens)))
+        tags.append(Sent(tuple(sent_tags)))
+        model_tags.append(Sent(tuple(sent_model_tags)))
+    return (DataSent(tuple(tokens)), DataSent(tuple(tags)), DataSent(tuple(model_tags)))
 
 
-def get_vocab(sentences: List[Sent]) -> Vocab:
-    return set(tok for sent in sentences for tok in sent)
+def read_pos_tsv(filepath) -> Dataset:
+    """Read a single .tsv file with two columns and returns a Dataset."""
+    sentences = []
+    with open(filepath) as f:
+        sent_tokens: List[str] = []
+        sent_tags: List[str] = []
+        for line in f:
+            line = line.strip()
+            # We read a blank line and buffer is not empty - sentence has been read.
+            if not line and len(sent_tokens) != 0:
+                sentences.append(
+                    TaggedSent((Sent(tuple(sent_tokens)), Sent(tuple(sent_tags))))
+                )
+                sent_tokens = []
+                sent_tags = []
+            else:
+                token, tag = line.split()
+                sent_tokens.append(token)
+                sent_tags.append(tag)
+    # For the last sentence
+    if len(sent_tokens) != 0:
+        log.info("No newline at end of file, handling it.")
+        sentences.append(TaggedSent((Sent(tuple(sent_tokens)), Sent(tuple(sent_tags)))))
+    return Dataset(sentences)
 
 
-def get_tok_freq(sentences: List[Sent]) -> Counter:
+def get_vocab(sentences: Iterable[Sent]) -> Vocab:
+    """Iterate over sentences and extract tokens/tags."""
+    return Vocab((tok for sent in sentences for tok in sent))
+
+
+def get_tok_freq(sentences: Iterable[Sent]) -> Counter:
+    """Gather token/tag frequencies."""
     return Counter((tok for sent in sentences for tok in sent))
 
 
 def read_vocab(vocab_file) -> Vocab:
+    """Read a vocab file and return Vocab."""
     with open(vocab_file) as f:
-        return get_vocab([tuple(line.strip().split()) for line in f.readlines()])
+        return get_vocab([Sent(tuple(line.strip().split())) for line in f.readlines()])
+
+
+def read_datasets(data_paths: List[str]) -> Dataset:
+    """Read the given paths and returns a combined dataset of all paths.
+
+    The files should be .tsv with two columns, first column is the word, second column is the POS.
+    Sentences are separated with a blank line.
+    """
+    log.info(f"Reading files={data_paths}")
+    return Dataset(
+        (tagged_sent for path in data_paths for tagged_sent in read_pos_tsv(path))
+    )
 
 
 @dataclass()
 class VocabMap:
+    """For w2i and i2w storage for different dictionaries."""
+
     w2i: Dict[str, int]
     i2w: Dict[int, str]
 
     def __init__(
         self, vocab: Vocab, special_tokens: Optional[List[Tuple[str, int]]] = None
     ):
-        """
-        Builds a vocabulary mapping from the provided vocabulary, starting at index=0.
+        """Build a vocabulary mapping from the provided vocabulary, needs to start at index=0.
+
         If special_tokens is given, will add these tokens first and start from the next index of the highest index provided.
         """
         self.w2i = {}
@@ -125,12 +162,14 @@ class VocabMap:
         self.i2w = {i: w for w, i in self.w2i.items()}
 
     def __len__(self):
+        """Return the length of the dictionary."""
         return len(self.w2i)
 
 
 def read_word_embedding(embedding_data: Iterable[str],) -> Dict[str, List[float]]:
-    """
-    Reads an embedding file which is formatted as:
+    """Read an embedding file and return the embedding mapping.
+
+    Formatted as:
     Each line is a token and the corresponding embedding.
     Between the token and the embedding there is a space " ".
     Between each value in the embedding there is a space " ".
@@ -151,8 +190,9 @@ def read_word_embedding(embedding_data: Iterable[str],) -> Dict[str, List[float]
 
 
 def read_bin_embedding(embedding_data: Iterable[str],) -> Dict[str, List[int]]:
-    """
-    Reads an embedding file which is formatted as:
+    """Read an embedding file and return the embedding mapping.
+
+    Formatted as:
     Each line is a token and the corresponding embedding.
     Between the token and the embedding there is a ";".
     Between each value in the embedding there is a comma ",".
@@ -169,12 +209,12 @@ def read_bin_embedding(embedding_data: Iterable[str],) -> Dict[str, List[int]]:
 
 
 def map_embedding(
-    embedding_dict: MutableMapping[str, Union[List[float], List[int]]],
+    embedding_dict: Dict[str, Union[List[float], List[int]]],
     filter_on: Optional[Set[str]] = None,
     special_tokens: Optional[List[Tuple[str, int]]] = None,
 ) -> Tuple[VocabMap, np.array]:
-    """
-    Accepts an embedding dict and returns the read embedding (np.array) and the VocabMap based on the embedding dict.
+    """Accept an embedding dict and returns the read embedding (np.array) and the VocabMap based on the embedding dict.
+
     filter_on: If provided, will only return mappings for given words (if present in the file). If not provided, will read all the file.
     First element will be all zeroes for UNK.
     Returns: The embeddings as np.array and VocabMap for the embedding.
@@ -184,7 +224,7 @@ def map_embedding(
     # find out how long the embeddings are, we assume all have the same length.
     length_of_embeddings = len(list(embedding_dict.values())[0])
     # words_to_add are the words in the dict, filtered
-    words_to_add = set()
+    words_to_add = Vocab(set())
     if filter_on is not None:
         log.info(f"Filtering on #symbols={len(filter_on)}")
         for filter_word in filter_on:
@@ -192,7 +232,7 @@ def map_embedding(
             if filter_word in embedding_dict:
                 words_to_add.add(filter_word)
     else:
-        words_to_add = set(embedding_dict.keys())
+        words_to_add.update(embedding_dict.keys())
     # All special tokens are treated equally as zeros
     # If the token is already present in the dict, we will overwrite it.
     for token, _ in special_tokens:
@@ -209,149 +249,182 @@ def map_embedding(
     return vocab_map, embeddings
 
 
-class Embeddings:
-    # Just here for good-old times
-    def __init__(self, vocabmap: VocabMap, embedding: np.array):
-        self.vocab = vocabmap.w2i
-        self.embeddings = embedding
+def create_mappers(
+    dataset: Dataset,
+    w_emb="standard",
+    c_emb="standard",
+    m_emb="standard",
+    pretrained_word_embeddings_file=None,
+    morphlex_embeddings_file=None,
+    known_chars: Vocab = None,
+) -> Tuple[Dict[str, VocabMap], Dict[str, np.array]]:
+    """Prepare the mappers for processing the data based on the parameters.
+
+    Returns:
+        The dictionaries which map symbol<->idx.
+        Other configuration such as read embeddings to be loaded by the model.
+    """
+    dictionaries: Dict[str, VocabMap] = {}
+    extras: Dict[str, np.array] = {}
+
+    if w_emb == "pretrained":
+        with open(pretrained_word_embeddings_file) as f:
+            embedding_dict = read_word_embedding(f)
+        w_map, w_embedding = map_embedding(
+            embedding_dict=embedding_dict,  # type: ignore
+            filter_on=None,
+            special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
+        )
+        dictionaries["w_map"] = w_map
+        extras["word_embeddings"] = w_embedding
+    elif w_emb == "standard":
+        dictionaries["w_map"] = VocabMap(
+            get_vocab((x for x, y in dataset)),
+            special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID)],
+        )
+    else:
+        raise ValueError(f"Unknown w_emb={w_emb}")
+
+    dictionaries["t_map"] = VocabMap(
+        get_vocab((y for x, y in dataset)),
+        special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID),],
+    )
+    if c_emb == "standard" and known_chars is not None:
+        dictionaries["c_map"] = VocabMap(
+            known_chars,
+            special_tokens=[
+                (UNK, UNK_ID),
+                (PAD, PAD_ID),
+                (EOS, EOS_ID),
+                (SOS, SOS_ID),
+            ],
+        )
+    elif c_emb == "none":
+        # Nothing to do
+        pass
+    else:
+        raise ValueError(f"Unkown c_emb={c_emb}")
+    if m_emb == "standard":
+        with open(morphlex_embeddings_file) as f:
+            embedding_dict = read_bin_embedding(f)  # type: ignore
+        m_map, m_embedding = map_embedding(
+            embedding_dict=embedding_dict,  # type: ignore
+            filter_on=None,
+            special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
+        )
+        dictionaries["m_map"] = m_map
+        extras["morph_lex_embeddings"] = m_embedding
+
+    return dictionaries, extras
 
 
-@dataclass()
-class DataVocabMap:
-    c_map: VocabMap  # characters
-    w_map: VocabMap  # words "tokens"
-    m_map: VocabMap  # morphlex
-    t_map: VocabMap  # tags - the target
-    f_maps: List[
-        VocabMap
-    ]  # Additional feature maps, words/tokens, morphlex in that order
-    t_freq: Counter
+def data_loader(
+    dataset: Union[Dataset, DataSent],
+    device: torch.device,
+    dictionaries: Dict[str, VocabMap],
+    shuffle=True,
+    w_emb="standard",
+    c_emb="standard",
+    m_emb="standard",
+    batch_size=16,
+) -> Iterable[Dict[str, Optional[torch.Tensor]]]:
+    """Perpare the data according to parameters and return batched Tensors."""
+    if shuffle:
+        dataset_l = list(dataset)
+        random.shuffle(dataset_l)
+        dataset = Dataset(dataset_l)
+    length = len(dataset)
+    for ndx in range(0, length, batch_size):
+        batch = dataset[ndx : min(ndx + batch_size, length)]
+        batch_y: Optional[DataSent]
+        if type(dataset) is Dataset:
+            batch_x = DataSent(tuple(x[0] for x in batch))
+            batch_y = DataSent(tuple(x[1] for x in batch))
+        elif type(dataset) is DataSent:
+            batch_x = DataSent(batch)
+        else:
+            raise ValueError(f"Unsupported dataset type={type(batch)}")
 
-    @classmethod
-    def make_x(cls, sentences: DataSent) -> X:
-        return [
-            [
-                # ([SOS + characters + EOS], word, morph)
-                ([SOS] + [c for c in tok] + [EOS], tok, tok)
-                for tok in sent
-            ]
-            for sent in sentences
-        ]
+        batch_w: Optional[torch.Tensor] = None
+        batch_c: Optional[torch.Tensor] = None
+        batch_m: Optional[torch.Tensor] = None
+        batch_t: Optional[torch.Tensor] = None
+        if w_emb == "standard" or w_emb == "pretrained":
+            # We need the w_map
+            w2i = dictionaries["w_map"].w2i
+            batch_w = torch.nn.utils.rnn.pad_sequence(
+                [
+                    torch.tensor(
+                        [w2i[token] if token in w2i else w2i[UNK] for token in sent]
+                    )
+                    for sent in batch_x
+                ],
+                batch_first=True,
+                padding_value=w2i[PAD],
+            ).to(device)
+            # First pad, then map to index
+        else:
+            raise ValueError(f"Unsupported w_emb={w_emb}")
+        if m_emb == "standard":
+            w2i = dictionaries["m_map"].w2i
+            batch_m = torch.nn.utils.rnn.pad_sequence(
+                [
+                    torch.tensor(
+                        [w2i[token] if token in w2i else w2i[UNK] for token in sent]
+                    )
+                    for sent in batch_x
+                ],
+                batch_first=True,
+                padding_value=w2i[PAD],
+            ).to(device)
+        if c_emb == "standard":
+            from . import model
 
-    @classmethod
-    def make_y(cls, sentences: DataSent) -> Y:
-        return [[tag for tag in sent] for sent in sentences]
-
-    @classmethod
-    def pad_x(cls, x: X) -> X:
-        """ Pads characters and sentences in place. Input should be strings since we need the length of a token"""
-        longest_token_in_examples = max(
-            (
-                max(
-                    # Avoid tuple unpacking
-                    (len(x_i_js[0]) for x_i_js in x_is)
+            w2i = dictionaries["c_map"].w2i
+            sents_padded = []
+            for sent in batch_x:
+                try:
+                    sents_padded.append(
+                        torch.nn.utils.rnn.pad_sequence(
+                            [
+                                torch.tensor(
+                                    [w2i[SOS]]
+                                    + [
+                                        w2i[char] if char in w2i else w2i[UNK]
+                                        for char in token
+                                    ]
+                                    + [w2i[EOS]]
+                                )
+                                for token in sent
+                            ],
+                            batch_first=True,
+                            padding_value=w2i[PAD],
+                        )
+                    )
+                except IndexError:
+                    log.error(f"Invalid sequence={sent}, in batch={batch_x}")
+            max_words = max((t.shape[0] for t in sents_padded))
+            max_chars = max((t.shape[1] for t in sents_padded))
+            sents_padded = [
+                model.copy_into_larger_tensor(
+                    t, t.new_zeros(size=(max_words, max_chars))
                 )
-                for x_is in x
-            )
-        )
-        longest_sent_in_examples = max(len(x_i) for x_i in x)
-        log.debug("Longest token in batch", longest_token_in_examples)
-        log.debug("Longest sent in batch", longest_sent_in_examples)
-        x_pad = copy.deepcopy(x)
-        for x_i_pad in x_pad:
-            # Pad sentence-wise
-            while len(x_i_pad) < longest_sent_in_examples:
-                x_i_pad.append((list(), *(PAD, PAD)))
-            # Pad character-wise
-            for x_i_js_pad in x_i_pad:
-                while len(x_i_js_pad[0]) < longest_token_in_examples:
-                    x_i_js_pad[0].append(PAD)
-        return x_pad
-
-    @classmethod
-    def pad_y(cls, y: Y) -> Y:
-        longest_sent_in_examples = max((len(y_i) for y_i in y))
-        y_pad = copy.deepcopy(y)
-        for y_i_pad in y_pad:
-            # Pad sentence-wise
-            while len(y_i_pad) < longest_sent_in_examples:
-                y_i_pad.append(PAD)
-        return y_pad
-
-    def to_idx_x(self, x: X) -> torch.Tensor:
-        """
-        Maps the input to idices, breaks up character list and returns a tensor. Uses f_map for additinal features.
-        Input needs to be padded, otherwise the character break up will mess things up.
-        """
-        x_idx = []
-        for x_is in x:
-            x_i_idx: List[Tuple[int, ...]] = []
-            for x_i_js in x_is:
-                chars = x_i_js[0]
-                chars_idx = [
-                    self.c_map.w2i[c] if c in self.c_map.w2i else UNK_ID for c in chars
-                ]
-                # for x_maps, 0 = word/token, 1 = morphlex, 2 = c_tags (optional)
-                rest = x_i_js[1:]
-                rest_idx = [
-                    self.f_maps[i].w2i[rest[i]]
-                    if rest[i] in self.f_maps[i].w2i
-                    else UNK_ID
-                    for i in range(len(rest))
-                ]
-                features = chars_idx + rest_idx
-                x_i_idx.append(tuple(features))
-            x_idx.append(x_i_idx)
-        # return (b, s, f)
-        return torch.tensor(x_idx)
-
-    def to_idx_y(self, y: Y) -> torch.Tensor:
-        # TODO: Remove UNK when we can express all the tags
-        return torch.tensor(
-            [
-                [self.t_map.w2i[t] if t in self.t_map.w2i else UNK_ID for t in y_i]
-                for y_i in y
+                for t in sents_padded
             ]
-        )
-
-    def in_x_y_batches(
-        self, x: DataSent, y: DataSent, batch_size=32, shuffle=True, device=None
-    ) -> Iterable[Tuple[torch.Tensor, torch.Tensor]]:
-        if shuffle:
-            x_y = list(zip(x, y))
-            random.shuffle(x_y)
-            x, y = tuple(map(list, zip(*x_y)))  # type: ignore
-
-        # Correct format
-        x_f = self.make_x(x)
-        y_f = self.make_y(y)
-
-        # Make batches
-        length = len(x_f)
-        for ndx in range(0, length, batch_size):
-            # First pad, then map to index
-            yield (
-                self.to_idx_x(self.pad_x(x_f[ndx : min(ndx + batch_size, length)])).to(
-                    device
-                ),
-                self.to_idx_y(self.pad_y(y_f[ndx : min(ndx + batch_size, length)])).to(
-                    device
-                ),
-            )
-
-    def in_x_batches(
-        self, x: DataSent, batch_size=32, device=None
-    ) -> Iterable[torch.Tensor]:
-        x_f = self.make_x(x)
-        length = len(x_f)
-        for ndx in range(0, length, batch_size):
-            # First pad, then map to index
-            yield self.to_idx_x(
-                self.pad_x(x_f[ndx : min(ndx + batch_size, length)])
+            batch_c = torch.nn.utils.rnn.pad_sequence(
+                sents_padded, batch_first=True, padding_value=w2i[PAD]
             ).to(device)
 
-
-def unk_analysis(train: Vocab, test: Vocab):
-    log.info(f"Train len={len(train)}")
-    log.info(f"Test len={len(test)}")
-    log.info(f"Test not in train={len(test-train)}")
+        if batch_y is not None:
+            w2i = dictionaries["t_map"].w2i
+            batch_t = torch.nn.utils.rnn.pad_sequence(
+                [
+                    torch.tensor(
+                        [w2i[token] if token in w2i else w2i[UNK] for token in sent]
+                    )
+                    for sent in batch_y
+                ],
+                batch_first=True,
+                padding_value=w2i[PAD],
+            ).to(device)
+        yield {"w": batch_w, "c": batch_c, "m": batch_m, "t": batch_t}

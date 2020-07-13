@@ -1,83 +1,15 @@
-from typing import Tuple, List
+"""Train, evaluate and tag using a certain model."""
+from typing import Iterable, Optional, Callable, Dict
 import logging
 import datetime
 
 import torch
-import wandb
 
 from . import data
 
 log = logging.getLogger()
 
-
-def create_mapper(
-    train_tokens,
-    test_tokens,
-    train_tags,
-    known_chars_file,
-    morphlex_embeddings_file,
-    word_embeddings_file,
-    filter=True,
-):
-    # Read the supported characters
-    chars = data.read_vocab(known_chars_file)
-    tokens = data.get_vocab(train_tokens)
-    if filter:
-        # We filter the read embeddings based on the training and test set for quicker training. This should not be done in production
-        filter_on = set(tokens)
-        filter_on.update(data.get_vocab(test_tokens))
-    else:
-        filter_on = None
-    # We need EOS and SOS for chars
-    c_map = data.VocabMap(
-        chars,
-        special_tokens=[
-            (data.UNK, data.UNK_ID),
-            (data.PAD, data.PAD_ID),
-            (data.EOS, data.EOS_ID),
-            (data.SOS, data.SOS_ID),
-        ],
-    )
-    if word_embeddings_file:
-        with open(word_embeddings_file) as f:
-            embedding_dict = data.read_word_embedding(f)
-        w_map, w_embedding = data.map_embedding(
-            embedding_dict=embedding_dict,
-            filter_on=filter_on,
-            special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
-        )
-    else:
-        w_map = data.VocabMap(
-            data.get_vocab(tokens),
-            special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
-        )
-        w_embedding = None
-    t_map = data.VocabMap(
-        data.get_vocab(train_tags),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
-    )
-    t_freq = data.get_tok_freq(train_tokens)
-
-    # The morphlex embeddings are similar to the tokens, no EOS or SOS needed
-    with open(morphlex_embeddings_file) as f:
-        embedding_dict = data.read_bin_embedding(f)
-    m_map, m_embedding = data.map_embedding(
-        embedding_dict=embedding_dict,
-        filter_on=filter_on,
-        special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
-    )
-    # Add the mappings to a list for idx mapping later
-    f_maps = [w_map, m_map]
-    log.info(f"Character vocab={len(c_map)}")
-    log.info(f"Word vocab={len(w_map)}")
-    log.info(f"Tag vocab={len(t_map)}")
-    log.info(f"Morphlex vocab={len(m_map)}")
-
-    return (
-        data.DataVocabMap(c_map, w_map, m_map, t_map, f_maps, t_freq),
-        m_embedding,
-        w_embedding,
-    )
+WRITTEN_GRAPH = False
 
 
 def run_epochs(
@@ -85,32 +17,35 @@ def run_epochs(
     optimizer,
     criterion,
     scheduler: torch.optim.lr_scheduler._LRScheduler,
-    train: Tuple[List[data.DataSent], List[data.DataSent]],
-    test: Tuple[List[data.DataSent], List[data.DataSent]],
+    train_loader: Callable[[], Iterable[Dict[str, Optional[torch.Tensor]]]],
+    test_loader: Callable[[], Iterable[Dict[str, Optional[torch.Tensor]]]],
     epochs: int,
-    batch_size: int,
+    writer,
 ):
+    """Run all the training epochs using the training data and evaluate on the test data."""
     best_validation_loss = 100
     for epoch in range(1, epochs + 1):
         # Time it
         start = datetime.datetime.now()
-        train_model(
-            model=model,
-            batch_size=batch_size,
-            optimizer=optimizer,
-            criterion=criterion,
-            train=train,
-            log_prepend=f"Epoch={epoch}/{epochs}, ",
-        )
         log.info(
             f'Epoch={epoch}/{epochs}, lr={list(param_group["lr"] for param_group in optimizer.param_groups)}'
+        )
+        train_loss = train_model(
+            model=model,
+            optimizer=optimizer,
+            criterion=criterion,
+            data_loader=train_loader,
+            log_prepend=f"Epoch={epoch}/{epochs}, ",
+            writer=writer,
         )
         end = datetime.datetime.now()
         log.info(f"Training took={end-start} seconds")
         # We just run the validation using a larger batch size
-        val_loss, val_acc = evaluate_model(model, batch_size * 100, test, criterion)
+        val_loss, val_acc = evaluate_model(model, test_loader, criterion)
         log.info(f"Validation acc={val_acc}, loss={val_loss}")
-        wandb.log({"loss": val_loss, "acc": val_acc})
+        writer.add_scalar("Loss/Train", train_loss, epoch)
+        writer.add_scalar("Loss/Val", val_loss, epoch)
+        writer.add_scalar("Accuracy/Val", val_acc, epoch)
         if val_loss < best_validation_loss:
             best_validation_loss = val_loss
             # torch.save(pos_model.state_dict(), 'model.pt')
@@ -120,30 +55,30 @@ def run_epochs(
 
 def train_model(
     model,
-    batch_size: int,
     optimizer,
     criterion,
-    train: Tuple[List[data.DataSent], List[data.DataSent]],
+    data_loader: Callable[[], Iterable[Dict[str, Optional[torch.Tensor]]]],
     log_prepend: str,
-):
-    train_iter = model.mapper.in_x_y_batches(
-        x=train[0], y=train[1], batch_size=batch_size, shuffle=True, device=model.device
-    )
+    writer,
+) -> float:
+    """Run a single training epoch and evaluate the model."""
     model.train()
+    total_loss = 0.0
 
-    for i, (x, y) in enumerate(train_iter, start=1):
+    for i, batch in enumerate(data_loader(), start=1):
+        global WRITTEN_GRAPH
+        if not WRITTEN_GRAPH:
+            writer.add_graph(model, batch)
+            WRITTEN_GRAPH = True
         optimizer.zero_grad()
-
-        y_pred = model(x)
-
+        y_pred = model(batch)
         y_pred = y_pred.view(-1, y_pred.shape[-1])
-        y = y.view(-1)
+        assert batch["t"] is not None
+        y = batch["t"].view(-1)
 
         loss = criterion(y_pred, y)
-        # Filter out the pads
-        loss = loss[y != data.PAD_ID]
-        loss = loss.sum()
         acc = categorical_accuracy(y_pred, y)
+        total_loss += loss.item()
         loss.backward()
         # Clip gardients like in DyNet
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
@@ -152,22 +87,24 @@ def train_model(
             log.info(
                 log_prepend + f"batch={i}, acc={acc.item()}, loss={loss.item():.4f}"
             )
+    return total_loss
 
 
 def evaluate_model(
-    model, batch_size, test: Tuple[List[data.DataSent], List[data.DataSent]], criterion
+    model,
+    data_loader: Callable[[], Iterable[Dict[str, Optional[torch.Tensor]]]],
+    criterion,
 ):
-    test_iter = model.mapper.in_x_y_batches(
-        x=test[0], y=test[1], batch_size=batch_size, shuffle=False, device=model.device
-    )
+    """Evaluate a model on a given test set."""
     model.eval()
     with torch.no_grad():
         y_pred_total = None
         y_total = None
-        for x, y in test_iter:
-            y_pred = model(x)
+        for batch in data_loader():
+            y_pred = model(batch)
             y_pred = y_pred.view(-1, y_pred.shape[-1])
-            y = y.view(-1)
+            assert batch["t"] is not None
+            y = batch["t"].view(-1)
             if y_pred_total is None:
                 y_pred_total = y_pred
                 y_total = y
@@ -176,44 +113,41 @@ def evaluate_model(
                 y_total = torch.cat([y_total, y], dim=0)
 
         loss = criterion(y_pred_total, y_total)
-        # Filter out the pads
-        loss = loss[y_total != data.PAD_ID]
-        loss = loss.sum()
         acc = categorical_accuracy(y_pred_total, y_total)
 
     return loss.item(), acc.item()
 
 
-def tag_sents(model, sentences: data.DataSent, batch_size: int) -> data.DataSent:
+def tag_sents(
+    model,
+    data_loader: Callable[[], Iterable[Dict[str, Optional[torch.Tensor]]]],
+    dictionaries: Dict[str, data.VocabMap],
+) -> data.DataSent:
+    """Tag (apply POS) on a given data set."""
     model.eval()
     with torch.no_grad():
-        log.info(f"Tagging sentences len={len(sentences)}")
         start = datetime.datetime.now()
-        iter = model.mapper.in_x_batches(
-            x=sentences, batch_size=batch_size * 100, device=model.device
-        )
         tags = []
-        for i, x in enumerate(iter, start=1):
-            pred = model(x)
+        for i, batch in enumerate(data_loader(), start=1):
+            pred = model(batch)
             # (b, seq, tags)
             for b in range(pred.shape[0]):
                 # (seq, f)
                 sent_pred = pred[b, :, :].view(-1, pred.shape[-1])
                 # x = (b, seq, f), the last few elements in f word/token, morph and maybe c_tag
-                num_non_pads = torch.sum((x[b, :, -1] != data.PAD_ID)).item()
+                assert batch["w"] is not None
+                num_non_pads = torch.sum((batch["w"][b, :, -1] != data.PAD_ID)).item()
                 # We use the fact that padding is placed BEHIND those features
                 sent_pred = sent_pred[:num_non_pads, :]  # type: ignore
                 idxs = sent_pred.argmax(dim=1).tolist()
-                tags.append(tuple(model.mapper.t_map.i2w[idx] for idx in idxs))
+                tags.append(tuple(dictionaries["t_map"].i2w[idx] for idx in idxs))
     end = datetime.datetime.now()
     log.info(f"Tagging took={end-start} seconds")
-    return tags
+    return data.DataSent(tags)
 
 
 def categorical_accuracy(preds, y):
-    """
-    Returns accuracy per batch, i.e. if you get 8/10 right, this returns 0.8, NOT 8
-    """
+    """Calculate accuracy (per batch), i.e. if you get 8/10 right, this returns 0.8."""
     max_preds = preds.argmax(
         dim=1, keepdim=True
     )  # get the index of the max probability
@@ -221,3 +155,24 @@ def categorical_accuracy(preds, y):
     non_pad_elements = (y != data.PAD_ID).nonzero()
     correct = max_preds[non_pad_elements].squeeze(1).eq(y[non_pad_elements])
     return correct.sum() / torch.FloatTensor([y[non_pad_elements].shape[0]])
+
+
+def smooth_ce_loss(pred, gold, pad_idx, smoothing=0.1):
+    """Calculate cross entropy loss, apply label smoothing if needed."""
+    gold = gold.contiguous().view(-1)
+
+    n_class = pred.size(1)
+
+    # Expand the idx to one-hot representation
+    one_hot = torch.zeros_like(pred).scatter(1, gold.view(-1, 1), 1)
+    # First smooth the one hot and then add the smoothed values
+    smoothed = one_hot * (1 - smoothing) + (1 - one_hot) * smoothing / (n_class - 1)
+    log_prb = torch.log_softmax(pred, dim=1)
+    # Compute the smoothed loss
+    loss = -(smoothed * log_prb).sum(dim=1)
+
+    # Filter out the pad values
+    non_pad_mask = gold.ne(pad_idx)
+    # Return the pad filtered loss
+    loss = loss.masked_select(non_pad_mask).sum()
+    return loss

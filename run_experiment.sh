@@ -26,7 +26,9 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     --batch_size 16 \
     --learning_rate 0.2 \
     --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
-    --final_dim 32 \
+    --word_embedding_lr 0.2 \
+    --morphlex_freeze \
+    --final_dim 64 \
     --save_vocab \
     --save_model \
     --gpu \
