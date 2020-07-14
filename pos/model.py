@@ -27,7 +27,7 @@ class ABLTagger(nn.Module):
         emb_char_dim=20,  # The characters are mapped to this dim
         char_lstm_dim=64,  # The character LSTM will output with this dim
         char_lstm_layers=1,  # The character LSTM will output with this dim
-        emb_token_dim=128,  # The tokens are mapped to this dim
+        emb_token_dim=128,  # The tokens are mapped to this dim, ignored if pretrained
         main_lstm_dim=64,  # The main LSTM dim will output with this dim
         main_lstm_layers=1,  # The main LSTM dim will output with this dim
         hidden_dim=32,  # The main LSTM time-steps will be mapped to this dim

@@ -60,6 +60,12 @@ def test_create_mappers_c_w_emb_only():
     assert len(d["c_map"].w2i) == 18
 
 
+def test_unpack_dataset():
+    test_ds = data.read_datasets(["./tests/test.tsv"])
+    tokens, _ = data.unpack_dataset(test_ds)
+    assert tokens == (("Hæ",), ("Þetta", "er", "test"), ("Já", "Kannski"))
+
+
 def test_data_loader_w_emb_only():
     test_ds = data.read_datasets(["./tests/test.tsv"])
     d, e = data.create_mappers(

@@ -1,7 +1,7 @@
 """Data preparation and reading."""
 from dataclasses import dataclass
 from collections import Counter
-from typing import List, Tuple, Set, Dict, Optional, Union, Iterable, NewType
+from typing import List, Tuple, Set, Dict, Optional, Union, Iterable, NewType, cast
 import logging
 
 from tqdm import tqdm
@@ -33,11 +33,11 @@ class Vocab(set):
 
 
 class Dataset(tuple):
-    """A class to hold tagged sentences."""
+    """A class to hold tagged sentences: ( (tokens, tags), (tokens, tags), )."""
 
 
 class DataSent(tuple):
-    """A class to hold (untagged) sentences."""
+    """A class to hold (untagged) sentences: ( tokens, tokens, )."""
 
 
 def write_tsv(output, data: Tuple[DataSent, ...]):
@@ -135,6 +135,13 @@ def read_datasets(data_paths: List[str]) -> Dataset:
     return Dataset(
         (tagged_sent for path in data_paths for tagged_sent in read_pos_tsv(path))
     )
+
+
+def unpack_dataset(dataset: Dataset) -> Tuple[DataSent, DataSent]:
+    """Unpack a Dataset to two DataSent(s); Tokens and Tags."""
+    tokens = DataSent(tokens for tokens, _ in dataset)
+    tags = DataSent(tags for _, tags in dataset)
+    return (tokens, tags)
 
 
 @dataclass()
@@ -338,8 +345,8 @@ def data_loader(
         batch = dataset[ndx : min(ndx + batch_size, length)]
         batch_y: Optional[DataSent]
         if type(dataset) is Dataset:
-            batch_x = DataSent(tuple(x[0] for x in batch))
-            batch_y = DataSent(tuple(x[1] for x in batch))
+            batch = cast(Dataset, batch)
+            batch_x, batch_y = unpack_dataset(batch)
         elif type(dataset) is DataSent:
             batch_x = DataSent(batch)
         else:

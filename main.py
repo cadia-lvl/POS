@@ -128,8 +128,10 @@ def train_and_tag(
     output_dir,
     known_chars_file,
     morphlex_embeddings_file,
+    morphlex_freeze,
     pretrained_word_embeddings_file,
-    epochs,
+    word_embedding_lr,
+    word_embedding_dim,
     main_lstm_layers,
     char_lstm_layers,
     label_smoothing,
@@ -140,10 +142,8 @@ def train_and_tag(
     gpu,
     optimizer,
     learning_rate,
-    morphlex_freeze,
-    word_embedding_dim,
+    epochs,
     scheduler,
-    word_embedding_lr,
 ):
     """Train a POS tagger on intpus and write out the tagged the test files.
 
@@ -351,7 +351,7 @@ def train_and_tag(
     )
     test_tags_tagged = train.tag_sents(
         model=tagger,
-        test_loader=partial(
+        data_loader=partial(
             data.data_loader,
             dataset=test_ds,
             device=device,
@@ -362,10 +362,12 @@ def train_and_tag(
             dictionaries=dictionaries,
             batch_size=batch_size * 10,
         ),
+        dictionaries=dictionaries,
     )
+    log.info("Writing predictions, dictionaries and model")
     data.write_tsv(
         str(output_dir.joinpath("predictions.tsv")),
-        ((test[0], test[1], tags) for test, tags in zip(test_ds, test_tags_tagged)),
+        (*data.unpack_dataset(test_ds), test_tags_tagged),
     )
     if save_vocab:
         save_location = output_dir.joinpath("dictionaries.pickle")
@@ -374,6 +376,16 @@ def train_and_tag(
     if save_model:
         save_location = output_dir.joinpath("tagger.pt")
         torch.save(tagger.state_dict(), str(save_location))
+    log.info("Done!")
+
+
+@cli.command()
+@click.argument("model_file")
+@click.argument("dictionaries_files")
+@click.argument("input", type=click.File("r"))
+@click.argument("output", type=click.File("w+"))
+def tag(model_file, dictionaries_files, input, output):
+    pass
 
 
 if __name__ == "__main__":

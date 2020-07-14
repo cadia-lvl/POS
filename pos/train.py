@@ -136,7 +136,7 @@ def tag_sents(
                 sent_pred = pred[b, :, :].view(-1, pred.shape[-1])
                 # x = (b, seq, f), the last few elements in f word/token, morph and maybe c_tag
                 assert batch["w"] is not None
-                num_non_pads = torch.sum((batch["w"][b, :, -1] != data.PAD_ID)).item()
+                num_non_pads = torch.sum((batch["w"][b, :] != data.PAD_ID)).item()
                 # We use the fact that padding is placed BEHIND those features
                 sent_pred = sent_pred[:num_non_pads, :]  # type: ignore
                 idxs = sent_pred.argmax(dim=1).tolist()
