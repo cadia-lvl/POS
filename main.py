@@ -351,8 +351,7 @@ def train_and_tag(
     )
     test_tags_tagged = train.tag_sents(
         model=tagger,
-        data_loader=partial(
-            data.data_loader,
+        data_loader=data.data_loader(
             dataset=test_ds,
             device=device,
             shuffle=False,
@@ -375,7 +374,7 @@ def train_and_tag(
             pickle.dump(dictionaries, f)
     if save_model:
         save_location = output_dir.joinpath("tagger.pt")
-        torch.save(tagger.state_dict(), str(save_location))
+        torch.save(tagger, str(save_location))
     log.info("Done!")
 
 
@@ -384,8 +383,49 @@ def train_and_tag(
 @click.argument("dictionaries_files")
 @click.argument("input", type=click.File("r"))
 @click.argument("output", type=click.File("w+"))
-def tag(model_file, dictionaries_files, input, output):
-    pass
+@click.option(
+    "--device", default="cpu", help="The device to use, 'cpu' or 'cuda:0' for GPU."
+)
+def tag(model_file, dictionaries_files, input, output, device):
+    """Tag tokens in a file.
+
+    Args:
+        model_file: A filepath to a trained model.
+        dictionaries_file: A filepath to dictionaries (vocabulary mappings) for preprocessing.
+        input: A file or stdin (-), formatted as: token per line, sentences separated with newlines (empty line).
+        output: A file or stdout (-). Output is formatted like the input, but after each token there is a tab and then the tag.
+    """
+    log.info(f"Using device={device}")
+    device = torch.device(device)
+    log.info("Reading model")
+    model = torch.load(model_file, map_location=device)
+    log.info("Reading dictionaries")
+    with open(dictionaries_files, "rb") as f:
+        dictionaries = pickle.load(f)
+    log.info("Reading dataset")
+    datasent = data.read_datasent(input)
+    log.info("Predicting tags")
+    predicted_tags = train.tag_sents(
+        model,
+        data.data_loader(
+            datasent,
+            device,
+            dictionaries,
+            shuffle=False,
+            w_emb="pretrained",
+            c_emb="standard",
+            m_emb="standard",
+            batch_size=16,
+        ),
+        dictionaries=dictionaries,
+    )
+
+    log.info("Writing results")
+    for tokens, tags in zip(datasent, predicted_tags):
+        for token, tag in zip(tokens, tags):
+            output.write("\t".join([token, tag]) + "\n")
+        output.write("\n")
+    log.info("Done!")
 
 
 if __name__ == "__main__":

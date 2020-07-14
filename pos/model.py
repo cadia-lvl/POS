@@ -214,7 +214,7 @@ class ABLTagger(nn.Module):
         lengths = torch.sum(torch.pow(padded_sequence, 2), dim=2)
         # lengths = (b)
         lengths = torch.sum(
-            lengths != torch.tensor([0.0]).to(padded_sequence.get_device()), dim=1
+            lengths != torch.tensor([0.0]).to(padded_sequence.device), dim=1
         )
         return (
             torch.nn.utils.rnn.pack_padded_sequence(

@@ -109,6 +109,26 @@ def read_pos_tsv(filepath) -> Dataset:
     return Dataset(sentences)
 
 
+def read_datasent(file_stream) -> DataSent:
+    """Read a filestream, with token per line and new-line separating sentences."""
+    sentences = []
+    sent_tokens: List[str] = []
+    for line in file_stream:
+        line = line.strip()
+        # We read a blank line and buffer is not empty - sentence has been read.
+        if not line and len(sent_tokens) != 0:
+            sentences.append(Sent(tuple(sent_tokens)))
+            sent_tokens = []
+        else:
+            token = line
+            sent_tokens.append(token)
+    # For the last sentence
+    if len(sent_tokens) != 0:
+        log.info("No newline at end of file, handling it.")
+        sentences.append(Sent(tuple(sent_tokens)))
+    return DataSent(sentences)
+
+
 def get_vocab(sentences: Iterable[Sent]) -> Vocab:
     """Iterate over sentences and extract tokens/tags."""
     return Vocab((tok for sent in sentences for tok in sent))
@@ -343,7 +363,7 @@ def data_loader(
     length = len(dataset)
     for ndx in range(0, length, batch_size):
         batch = dataset[ndx : min(ndx + batch_size, length)]
-        batch_y: Optional[DataSent]
+        batch_y: Optional[DataSent] = None
         if type(dataset) is Dataset:
             batch = cast(Dataset, batch)
             batch_x, batch_y = unpack_dataset(batch)

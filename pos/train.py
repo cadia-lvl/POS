@@ -120,7 +120,7 @@ def evaluate_model(
 
 def tag_sents(
     model,
-    data_loader: Callable[[], Iterable[Dict[str, Optional[torch.Tensor]]]],
+    data_loader: Iterable[Dict[str, Optional[torch.Tensor]]],
     dictionaries: Dict[str, data.VocabMap],
 ) -> data.DataSent:
     """Tag (apply POS) on a given data set."""
@@ -128,7 +128,7 @@ def tag_sents(
     with torch.no_grad():
         start = datetime.datetime.now()
         tags = []
-        for i, batch in enumerate(data_loader(), start=1):
+        for i, batch in enumerate(data_loader, start=1):
             pred = model(batch)
             # (b, seq, tags)
             for b in range(pred.shape[0]):

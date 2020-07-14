@@ -13,7 +13,7 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     sbatch \
     --output="$out_folder/slurm-%j.out" \
     --gres=gpu \
-    --mem=10G \
+    --mem=30G \
     --wrap="./main.py \
     train-and-tag \
     $DATA_DIR/otb/01TM.plain \
