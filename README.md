@@ -14,7 +14,7 @@ For installation for further development see [Contributing](#Contributing).
 # Running (Tagging text)
 The docker image comes with a pretrained model. To tag tokens, execute the following command:
 ```
-cat tokenized_untagged.tsv | docker run -i  - - > tagged.tsv
+cat tokenized_untagged.tsv | docker run -i haukurp/pos - - > tagged.tsv
 ```
 The file `tokenized_untagged.tsv` is tokenized and correctly formatter input text which should be tagged.
 The tagger expects the input to be one token per line and sentences should be separated by with an empty line.
