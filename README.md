@@ -4,7 +4,24 @@ The goal of this project is to create a part-of-speech tagger for Icelandic usin
 This work is based on the ABLTagger but with some model modifications and is compatible with PyTorch 1.5.1.
 
 # Table of Contents
-TODO
+- [POS tagger for Icelandic](#pos-tagger-for-icelandic)
+- [Table of Contents](#table-of-contents)
+- [Installation](#installation)
+- [Running (Tagging text)](#running--tagging-text-)
+- [License](#license)
+- [Authors](#authors)
+  * [Acknowledgments](#acknowledgments)
+- [Contributing](#contributing)
+  * [Installation](#installation-1)
+  * [Training data](#training-data)
+  * [Additional training data (Morphological lexicon)](#additional-training-data--morphological-lexicon-)
+    + [Filtering the morphological lexicon](#filtering-the-morphological-lexicon)
+  * [Training models](#training-models)
+- [Versions](#versions)
+- [References](#references)
+
+<small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
+
 
 # Installation
 Pretrained models are distributed with Docker, so follow the [official installation guide for Docker](https://www.docker.com/).
@@ -71,6 +88,11 @@ vill    sfg3en
 [Apache v2.0](LICENSE)
 
 # Authors
+<a href="https://github.com/cadia-lvl/POS/graphs/contributors">
+  <img src="https://contributors-img.web.app/image?repo=cadia-lvl/POS" />
+</a>
+<!-- Made with [contributors-img](https://contributors-img.web.app). -->
+
 - Haukur Páll Jónsson (current maintainer)
 - Örvar Kárason
 - Steinþór Steingrímsson
