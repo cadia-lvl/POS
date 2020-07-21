@@ -1,0 +1,1 @@
+"""An Icelandic POS tagger."""
