@@ -122,6 +122,7 @@ class ABLTagger(nn.Module):
         # (b, seq)
         m = input["m"]
 
+        main_in = None
         # Word embeddings
         if self.w_emb == "standard" or self.w_emb == "pretrained":
             assert w is not None
@@ -187,7 +188,7 @@ class ABLTagger(nn.Module):
                 main_in = chars_as_word
 
         # Add noise - like in dyney
-        if self.training:
+        if self.training and main_in is not None:
             main_in = main_in + torch.empty_like(main_in).normal_(0, self.noise)
         # (b, seq, f)
         self.bilstm.flatten_parameters()
@@ -208,12 +209,16 @@ class ABLTagger(nn.Module):
         lengths = torch.sum(
             lengths != torch.tensor([0.0]).to(padded_sequence.device), dim=1
         )
-        return (
-            torch.nn.utils.rnn.pack_padded_sequence(
-                padded_sequence, lengths, batch_first=True, enforce_sorted=False
-            ),
-            lengths,
-        )
+        try:
+            return (
+                torch.nn.utils.rnn.pack_padded_sequence(
+                    padded_sequence, lengths, batch_first=True, enforce_sorted=False
+                ),
+                lengths,
+            )
+        except RuntimeError:
+            log.debug(f"Lengths={lengths}")
+            raise
 
     def unpack_sequence(self, packed_sequence):
         """Inverse of pack_sequence."""

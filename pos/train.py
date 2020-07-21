@@ -126,11 +126,10 @@ def tag_sents(
             for b in range(pred.shape[0]):
                 # (seq, f)
                 sent_pred = pred[b, :, :].view(-1, pred.shape[-1])
-                # x = (b, seq, f), the last few elements in f word/token, morph and maybe c_tag
-                assert batch["w"] is not None
-                num_non_pads = torch.sum((batch["w"][b, :] != data.PAD_ID)).item()
+                # Figure out the length of this sentence without padding
+                length = batch["lens"][b].item()
                 # We use the fact that padding is placed BEHIND those features
-                sent_pred = sent_pred[:num_non_pads, :]  # type: ignore
+                sent_pred = sent_pred[:length, :]  # type: ignore
                 idxs = sent_pred.argmax(dim=1).tolist()
                 tags.append(tuple(dictionaries["t_map"].i2w[idx] for idx in idxs))
     end = datetime.datetime.now()

@@ -82,8 +82,7 @@ def filter_embedding(inputs, embedding, output, format):
 @click.option("--save_vocab/--no_save_vocab", default=False)
 @click.option(
     "--known_chars_file",
-    default="./data/extra/characters_training.txt",
-    help="A file which contains the characters the model should know. "
+    help="A file which contains the characters the model should know. Omit, to disable character embeddings. "
     + "File should be a single line, the line is split() to retrieve characters.",
 )
 @click.option(
@@ -105,7 +104,9 @@ def filter_embedding(inputs, embedding, output, format):
 @click.option("--learning_rate", default=0.20)
 @click.option("--morphlex_freeze", is_flag=True, default=False)
 @click.option(
-    "--word_embedding_dim", default=128, help="The word/token embedding dimension."
+    "--word_embedding_dim",
+    default=128,
+    help="The word/token embedding dimension. Set to -1 to disable word embeddings.",
 )
 @click.option(
     "--word_embedding_lr", default=0.002, help="The word/token embedding learning rate."
@@ -156,18 +157,21 @@ def train_and_tag(
     from torch.utils import tensorboard
 
     # Set configuration values
-    w_emb = "standard"
-    if pretrained_word_embeddings_file is not None:
+    w_emb = "none"
+    if word_embedding_dim != -1:
+        w_emb = "standard"
+    elif pretrained_word_embeddings_file is not None:
         w_emb = "pretrained"
-    # TODO: add "none" option
 
-    m_emb = "standard"
-    if morphlex_embeddings_file is None:
-        m_emb = "none"
+    m_emb = "none"
+    if morphlex_embeddings_file is not None:
+        m_emb = "standard"
 
-    c_emb = "standard"
-    if known_chars_file is None:
-        c_emb = "none"
+    c_emb = "none"
+    char_vocab = None
+    if known_chars_file is not None:
+        c_emb = "standard"
+        char_vocab = data.read_vocab(known_chars_file)
 
     # Set the seed on all platforms
     SEED = 42
@@ -199,7 +203,7 @@ def train_and_tag(
         m_emb=m_emb,
         pretrained_word_embeddings_file=pretrained_word_embeddings_file,
         morphlex_embeddings_file=morphlex_embeddings_file,
-        known_chars=data.read_vocab(known_chars_file),
+        known_chars=char_vocab,
     )
     if DEBUG:
         device = torch.device("cpu")

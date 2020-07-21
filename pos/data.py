@@ -263,7 +263,13 @@ def map_embedding(
     # All special tokens are treated equally as zeros
     # If the token is already present in the dict, we will overwrite it.
     for token, _ in special_tokens:
-        embedding_dict[token] = [0 for _ in range(length_of_embeddings)]
+        # We treat PAD as 0s
+        if token == PAD:
+            embedding_dict[token] = [0 for _ in range(length_of_embeddings)]
+        # Others we treat as -1, this is not perfect and the implications for BIN are unknown.
+        else:
+            embedding_dict[token] = [-1 for _ in range(length_of_embeddings)]
+
     embeddings = np.zeros(
         shape=(len(words_to_add) + len(special_tokens), length_of_embeddings)
     )
@@ -309,6 +315,9 @@ def create_mappers(
             get_vocab((x for x, y in dataset)),
             special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID)],
         )
+    elif w_emb == "none":
+        # Nothing to do
+        pass
     else:
         raise ValueError(f"Unknown w_emb={w_emb}")
 
@@ -341,6 +350,11 @@ def create_mappers(
         )
         dictionaries["m_map"] = m_map
         extras["morph_lex_embeddings"] = m_embedding
+    elif m_emb == "none":
+        # Nothing to do
+        pass
+    else:
+        raise ValueError(f"Unkown c_emb={c_emb}")
 
     return dictionaries, extras
 
@@ -376,6 +390,10 @@ def data_loader(
         batch_c: Optional[torch.Tensor] = None
         batch_m: Optional[torch.Tensor] = None
         batch_t: Optional[torch.Tensor] = None
+        log.debug(batch_x)
+        batch_lens = torch.tensor([len(sent) for sent in batch_x]).to(
+            device, dtype=torch.int64
+        )
         if w_emb == "standard" or w_emb == "pretrained":
             # We need the w_map
             w2i = dictionaries["w_map"].w2i
@@ -390,6 +408,9 @@ def data_loader(
                 padding_value=w2i[PAD],
             ).to(device)
             # First pad, then map to index
+        elif w_emb == "none":
+            # Nothing to do.
+            pass
         else:
             raise ValueError(f"Unsupported w_emb={w_emb}")
         if m_emb == "standard":
@@ -404,6 +425,11 @@ def data_loader(
                 batch_first=True,
                 padding_value=w2i[PAD],
             ).to(device)
+        elif m_emb == "none":
+            # Nothing to do.
+            pass
+        else:
+            raise ValueError(f"Unsupported m_emb={m_emb}")
         if c_emb == "standard":
             from . import model
 
@@ -441,6 +467,11 @@ def data_loader(
             batch_c = torch.nn.utils.rnn.pad_sequence(
                 sents_padded, batch_first=True, padding_value=w2i[PAD]
             ).to(device)
+        elif c_emb == "none":
+            # Nothing to do.
+            pass
+        else:
+            raise ValueError(f"Unsupported c_emb={c_emb}")
 
         if batch_y is not None:
             w2i = dictionaries["t_map"].w2i
@@ -454,4 +485,10 @@ def data_loader(
                 batch_first=True,
                 padding_value=w2i[PAD],
             ).to(device)
-        yield {"w": batch_w, "c": batch_c, "m": batch_m, "t": batch_t}
+        yield {
+            "w": batch_w,
+            "c": batch_c,
+            "m": batch_m,
+            "t": batch_t,
+            "lens": batch_lens,
+        }
