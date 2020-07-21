@@ -1,5 +1,6 @@
 # POS tagger for Icelandic
-The goal of this project is to create a part-of-speech tagger for Icelandic using the revised fine-grained tagging schema for Icelandic. For further information about the schema see [CLARIN-IS](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/40).
+The goal of this project is to create a part-of-speech tagger for Icelandic using the revised fine-grained tagging schema for Icelandic.
+For further information about the schema see [MIM-GOLD on CLARIN-IS](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/40) (the description pdf).
 
 This work is based on the ABLTagger but with some model modifications and is compatible with PyTorch 1.5.1.
 
@@ -29,6 +30,8 @@ Pretrained models are distributed with Docker, so follow the [official installat
 For installation for further development see [Contributing](#Contributing).
 
 # Running (Tagging text)
+Before running the docker command be sure that the docker daemon has access to roughly 4GB of RAM.
+
 The docker image comes with a pretrained model. To tag tokens, execute the following command:
 ```
 cat tokenized_untagged.tsv | docker run -i haukurp/pos - - > tagged.tsv
@@ -100,7 +103,7 @@ vill    sfg3en
 ## Acknowledgments
 - Reykjavík University
 
-This project was funded (partly) by the Language Technology Programme for Icelandic 2019-2023. The programme, which is managed and coordinated by [Almannarómur](https://almannaromur.is/), is funded by the Icelandic Ministry of Education, Science and Culture."
+This project was funded (partly) by the Language Technology Programme for Icelandic 2019-2023. The programme, which is managed and coordinated by [Almannarómur](https://almannaromur.is/), is funded by the Icelandic Ministry of Education, Science and Culture.
 
 # Contributing
 For more involved installation instructions and how to train different models.
@@ -193,6 +196,7 @@ ABLTagger is a bidirectonal LSTM Part-of-Speech Tagger with combined Word and Ch
 
 The paper describes a method for achieving high accuracy in part-of-speech tagging a fine grained tagset. We show how the method is used to reach the highest accuracy reported for PoS-tagging Icelandic. The tagger is augmented by using a morphological lexicon, [The Database of Icelandic Morphology (DIM)](https://www.aclweb.org/anthology/W19-6116/), and by running a pre-tagging step using a very coarse grained tagset induced from the fine grained data.
 
+```
 @inproceedings{steingrimsson-etal-2019-augmenting,
     title = "Augmenting a {B}i{LSTM} Tagger with a Morphological Lexicon and a Lexical Category Identification Step",
     author = {Steingr{\'\i}msson, Stein{\th}{\'o}r  and
@@ -206,3 +210,4 @@ The paper describes a method for achieving high accuracy in part-of-speech taggi
     doi = "10.26615/978-954-452-056-4_133",
     pages = "1161--1168",
 }
+```
