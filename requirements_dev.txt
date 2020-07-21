@@ -1,0 +1,7 @@
+click==7.1.2
+torch==1.5.1
+flake8
+mypy
+pydocstyle
+pytest
+black
