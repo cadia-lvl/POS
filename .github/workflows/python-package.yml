@@ -14,9 +14,9 @@ jobs:
     - uses: actions/cache@v2
       with:
         path: /usr/share/miniconda
-        key: ${{ runner.os }}-conda-${{ hashFiles('requirements_dev.txt') }}
+        key: ${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('requirements_dev.txt') }}
         restore-keys: |
-          ${{ runner.os }}-conda-
+          ${{ runner.os }}-${{ matrix.python-version }}-
     - name: Set up Python ${{ matrix.python-version }} via Conda
       uses: s-weigand/setup-conda@v1
       with:
