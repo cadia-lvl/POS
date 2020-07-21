@@ -9,8 +9,6 @@ from . import data
 
 log = logging.getLogger()
 
-WRITTEN_GRAPH = False
-
 
 def run_epochs(
     model,
@@ -36,7 +34,6 @@ def run_epochs(
             criterion=criterion,
             data_loader=train_loader,
             log_prepend=f"Epoch={epoch}/{epochs}, ",
-            writer=writer,
         )
         end = datetime.datetime.now()
         log.info(f"Training took={end-start} seconds")
@@ -59,17 +56,12 @@ def train_model(
     criterion,
     data_loader: Callable[[], Iterable[Dict[str, Optional[torch.Tensor]]]],
     log_prepend: str,
-    writer,
 ) -> float:
     """Run a single training epoch and evaluate the model."""
     model.train()
     total_loss = 0.0
 
     for i, batch in enumerate(data_loader(), start=1):
-        global WRITTEN_GRAPH
-        if not WRITTEN_GRAPH:
-            writer.add_graph(model, batch)
-            WRITTEN_GRAPH = True
         optimizer.zero_grad()
         y_pred = model(batch)
         y_pred = y_pred.view(-1, y_pred.shape[-1])

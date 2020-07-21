@@ -43,23 +43,26 @@ class ABLTagger(nn.Module):
         self.c_emb = c_emb
         self.w_emb = w_emb
         # Morphlex embeddings
+        main_bilstm_dim = 0
         if m_emb == "standard":
             self.morph_lex_embedding = nn.Embedding.from_pretrained(
                 morph_lex_embeddings, freeze=morph_lex_freeze, padding_idx=data.PAD_ID,
             )
-
+            main_bilstm_dim += self.morph_lex_embedding.weight.data.shape[1]
         # Word embeddings
         if w_emb == "pretrained":
             self.token_embedding = nn.Embedding.from_pretrained(
                 word_embeddings, padding_idx=data.PAD_ID,
             )
             self.w_embs_dropout = nn.Dropout(p=input_dropouts)
+            main_bilstm_dim += self.token_embedding.weight.data.shape[1]
         elif w_emb == "standard":
             self.token_embedding = nn.Embedding(
                 token_dim, emb_token_dim, padding_idx=data.PAD_ID
             )
             nn.init.xavier_uniform_(self.token_embedding.weight[1:, :])
             self.w_embs_dropout = nn.Dropout(p=input_dropouts)
+            main_bilstm_dim += self.token_embedding.weight.data.shape[1]
 
         # Character embeddings
         if c_emb == "standard":
@@ -85,19 +88,8 @@ class ABLTagger(nn.Module):
                     raise ValueError("Unknown parameter in lstm={name}")
             self.c_embs_dropout = nn.Dropout(p=input_dropouts)
             self.char_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
-        # 2 * char-bilstm + token emb + morph_lex
-        main_bilstm_dim = 0
-        main_bilstm_dim += 2 * char_lstm_dim if hasattr(self, "char_bilstm") else 0
-        main_bilstm_dim += (
-            self.token_embedding.weight.data.shape[1]
-            if hasattr(self, "token_embedding")
-            else 0
-        )
-        main_bilstm_dim += (
-            self.morph_lex_embedding.weight.data.shape[1]
-            if hasattr(self, "morph_lex_embedding")
-            else 0
-        )
+            main_bilstm_dim += 2 * char_lstm_dim
+
         self.bilstm = nn.LSTM(
             input_size=main_bilstm_dim,
             hidden_size=main_lstm_dim,
@@ -138,7 +130,7 @@ class ABLTagger(nn.Module):
             main_in = w_embs
 
         # Morphlex embeddings
-        if self.m_emb:
+        if self.m_emb == "standard":
             assert m is not None
             # (b, seq, f)
             m_embs = self.morph_lex_embedding(m)
