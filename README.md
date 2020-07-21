@@ -114,8 +114,7 @@ We assume that development is made with `conda`. Start by creating a new conda e
 ```
 conda create --name pos python==3.7.7
 conda activate pos
-conda install pytorch -c pytorch
-conda install click pytest black mypy pydocstyle flake8 tqdm
+conda install -c pytorch -c conda-forge --file requirements_dev.txt
 ```
 ## Training data
 The training data is a text file wich contains PoS-tagged sentences. The file has one token per line, as well as its corresponding tag. The sentences are separated by an empty line. 
