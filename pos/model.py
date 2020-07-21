@@ -24,17 +24,17 @@ class ABLTagger(nn.Module):
         tags_dim: int,  # The number of tags in dictionary - to predict
         morph_lex_embeddings: torch.Tensor,
         word_embeddings: torch.Tensor,
-        emb_char_dim=20,  # The characters are mapped to this dim
-        char_lstm_dim=64,  # The character LSTM will output with this dim
-        char_lstm_layers=1,  # The character LSTM will output with this dim
-        emb_token_dim=128,  # The tokens are mapped to this dim, ignored if pretrained
-        main_lstm_dim=64,  # The main LSTM dim will output with this dim
-        main_lstm_layers=1,  # The main LSTM dim will output with this dim
-        hidden_dim=32,  # The main LSTM time-steps will be mapped to this dim
-        lstm_dropouts=0.0,
-        input_dropouts=0.0,
-        noise=0.1,
-        morph_lex_freeze=True,
+        emb_char_dim: int,  # The characters are mapped to this dim
+        char_lstm_dim: int,  # The character LSTM will output with this dim
+        char_lstm_layers: int,  # The character LSTM will output with this dim
+        emb_token_dim: int,  # The tokens are mapped to this dim, ignored if pretrained
+        main_lstm_dim: int,  # The main LSTM dim will output with this dim
+        main_lstm_layers: int,  # The main LSTM layers
+        hidden_dim: int,  # The main LSTM time-steps will be mapped to this dim
+        lstm_dropouts: float,
+        input_dropouts: float,
+        noise: float,
+        morphlex_freeze: bool,
     ):
         """Initialize the module given the parameters."""
         super(ABLTagger, self).__init__()
@@ -46,7 +46,7 @@ class ABLTagger(nn.Module):
         main_bilstm_dim = 0
         if m_emb == "standard":
             self.morph_lex_embedding = nn.Embedding.from_pretrained(
-                morph_lex_embeddings, freeze=morph_lex_freeze, padding_idx=data.PAD_ID,
+                morph_lex_embeddings, freeze=morphlex_freeze, padding_idx=data.PAD_ID,
             )
             main_bilstm_dim += self.morph_lex_embedding.weight.data.shape[1]
         # Word embeddings

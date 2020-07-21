@@ -221,24 +221,28 @@ def train_and_tag(
         "batch_size": batch_size,
         "learning_rate": learning_rate,
         "word_embedding_lr": word_embedding_lr,
+        "scheduler": scheduler,
+        "label_smoothing": label_smoothing,
+        "optimizer": optimizer,
     }
     model_parameters = {
         "w_emb": w_emb,
         "c_emb": c_emb,
         "m_emb": m_emb,
-        "lstm_dropouts": 0.1,
-        "input_dropouts": 0.0,
-        "emb_char_dim": 20,  # The characters are mapped to this dim
         "char_dim": len(dictionaries["c_map"]) if "c_map" in dictionaries else 0,
+        "token_dim": len(dictionaries["w_map"]) if w_emb == "standard" else 0,
+        "tags_dim": len(dictionaries["t_map"]),
+        "emb_char_dim": 20,  # The characters are mapped to this dim
         "char_lstm_dim": 64,  # The character LSTM will output with this dim
         "char_lstm_layers": char_lstm_layers,  # The character LSTM will output with this dim
-        "token_dim": len(dictionaries["w_map"]) if w_emb == "standard" else 0,
         "emb_token_dim": word_embedding_dim,  # The tokens are mapped to this dim
         "main_lstm_dim": 64,  # The main LSTM dim will output with this dim
         "main_lstm_layers": main_lstm_layers,  # The main LSTM dim will output with this dim
         "hidden_dim": final_dim,  # The main LSTM time-steps will be mapped to this dim
+        "lstm_dropouts": 0.1,
+        "input_dropouts": 0.0,
         "noise": 0.1,  # Noise to main_in, to main_bilstm
-        "tags_dim": len(dictionaries["t_map"]),
+        "morphlex_freeze": morphlex_freeze,
     }
     extras = {
         "morph_lex_embeddings": torch.from_numpy(extras["morph_lex_embeddings"])
