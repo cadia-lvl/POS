@@ -127,7 +127,7 @@ def tag_sents(
                 # (seq, f)
                 sent_pred = pred[b, :, :].view(-1, pred.shape[-1])
                 # Figure out the length of this sentence without padding
-                length = batch["lens"][b].item()
+                length = batch["lens"][b].item()  # type: ignore
                 # We use the fact that padding is placed BEHIND those features
                 sent_pred = sent_pred[:length, :]  # type: ignore
                 idxs = sent_pred.argmax(dim=1).tolist()
