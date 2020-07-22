@@ -340,7 +340,7 @@ def create_mappers(
         pass
     else:
         raise ValueError(f"Unkown c_emb={c_emb}")
-    if m_emb == "standard":
+    if m_emb == "standard" or m_emb == "extra":
         with open(morphlex_embeddings_file) as f:
             embedding_dict = read_bin_embedding(f)  # type: ignore
         m_map, m_embedding = map_embedding(
@@ -413,7 +413,7 @@ def data_loader(
             pass
         else:
             raise ValueError(f"Unsupported w_emb={w_emb}")
-        if m_emb == "standard":
+        if m_emb == "standard" or m_emb == "extra":
             w2i = dictionaries["m_map"].w2i
             batch_m = torch.nn.utils.rnn.pad_sequence(
                 [

@@ -23,6 +23,7 @@ class ABLTagger(nn.Module):
         token_dim: int,  # The number of tokens in dictionary
         tags_dim: int,  # The number of tags in dictionary - to predict
         morph_lex_embeddings: torch.Tensor,
+        morphlex_extra_dim: int,  # The dimension to map morphlex embeddings to. Only used if m_emb == "extra"
         word_embeddings: torch.Tensor,
         emb_char_dim: int,  # The characters are mapped to this dim
         char_lstm_dim: int,  # The character LSTM will output with this dim
@@ -44,11 +45,18 @@ class ABLTagger(nn.Module):
         self.w_emb = w_emb
         # Morphlex embeddings
         main_bilstm_dim = 0
-        if m_emb == "standard":
+        if m_emb == "standard" or m_emb == "extra":
             self.morph_lex_embedding = nn.Embedding.from_pretrained(
                 morph_lex_embeddings, freeze=morphlex_freeze, padding_idx=data.PAD_ID,
             )
-            main_bilstm_dim += self.morph_lex_embedding.weight.data.shape[1]
+            if m_emb == "extra":
+                self.morph_lex_extra_layer = nn.Linear(
+                    self.morph_lex_embedding.weight.data.shape[1], morphlex_extra_dim
+                )
+                main_bilstm_dim += morphlex_extra_dim
+            else:
+                main_bilstm_dim += self.morph_lex_embedding.weight.data.shape[1]
+
         # Word embeddings
         if w_emb == "pretrained":
             self.token_embedding = nn.Embedding.from_pretrained(
@@ -131,10 +139,12 @@ class ABLTagger(nn.Module):
             main_in = w_embs
 
         # Morphlex embeddings
-        if self.m_emb == "standard":
+        if self.m_emb == "standard" or self.m_emb == "extra":
             assert m is not None
             # (b, seq, f)
             m_embs = self.morph_lex_embedding(m)
+            if self.m_emb == "extra":
+                m_embs = torch.tanh(self.morph_lex_extra_layer(m_embs))
             if main_in is not None:
                 main_in = torch.cat((main_in, m_embs), dim=2)
             else:

@@ -2,6 +2,9 @@
 from collections import Counter
 from typing import Tuple, List, Dict, Set
 import logging
+from dataclasses import dataclass
+from pathlib import Path
+import pickle
 
 from . import data
 
@@ -69,14 +72,14 @@ def analyse_examples(flat_data: List[Example]) -> Dict[str, TagExamples]:
     return examples
 
 
-def calculate_accuracy(examples: Dict[str, TagExamples]) -> float:
-    """Calculate the accuracy of the TagExamples."""
+def calculate_accuracy(examples: Dict[str, TagExamples]) -> Tuple[int, int]:
+    """Calculate the total and incorrect count of the TagExamples."""
     total = 0
     incorrect = 0
     for gold, tag_example in examples.items():
         total += len(tag_example)
         incorrect += tag_example.incorrect_count()
-    return (total - incorrect) / total
+    return (incorrect, total)
 
 
 def all_errors(examples: Dict[str, TagExamples]) -> Counter:
@@ -110,3 +113,94 @@ def filter_examples(
                     filtered[tag] = TagExamples(tag)
                     filtered[tag].add_example(*example)
     return filtered
+
+
+@dataclass(init=False)
+class Experiment:
+    """A class to hold information about an experiment, i.e. predicted tags."""
+
+    path: Path
+    examples: Dict[str, TagExamples]
+    dicts: Dict[str, data.VocabMap]
+    train_vocab: Set[str]
+
+    def __init__(self, path: Path):
+        """Initialize an experiment given a path. Read the predictions and vocabulary."""
+        self.path = path
+        self.examples = analyse_examples(
+            flatten_data(data.read_tsv(str(path / "predictions.tsv")))
+        )
+        with (path / "dictionaries.pickle").open("rb") as f:
+            self.dicts = pickle.load(f)
+        with (path / "known_toks.txt").open("r") as f_known:
+            self.train_vocab = set(line.strip() for line in f_known)
+
+    def test_vocab(self):
+        """Return the vocabulary of the test data."""
+        return get_vocab(self.examples)
+
+    def wemb_vocab(self):
+        """Return the vocabulary in the training data."""
+        return set(self.dicts["w_map"].w2i.keys())
+
+    def morphlex_vocab(self):
+        """Return the vocabulary in the morphological lexicon."""
+        return set(self.dicts["m_map"].w2i.keys())
+
+    def both_vocab(self):
+        """Return the vocabulary in the morphological lexicon and wemb."""
+        return self.wemb_vocab().union(self.morphlex_vocab())
+
+    def unk_vocab(self):
+        """Return the vocabulary in the test data minus the morphological lexicon and training."""
+        return self.test_vocab().difference(self.train_vocab)
+
+    def accuracy(self, vocab: Set[str] = None):
+        """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter."""
+        if vocab is None:
+            return calculate_accuracy(self.examples)
+        else:
+            return calculate_accuracy(filter_examples(self.examples, vocab=vocab))
+
+    def __str__(self) -> str:
+        """Return nicely formatted information about the experiment."""
+        total_incorrect, total_total = self.accuracy()
+        unk_incorrect, unk_total = self.accuracy(self.unk_vocab())
+        known_incorrect, known_total = self.accuracy(self.train_vocab)
+        return f"{format_acc_total('total', total_total, total_incorrect)}, \
+                {format_acc_total('unk', unk_total, unk_incorrect)}, \
+                {format_acc_total('known', known_total, known_incorrect)}, \
+                "
+
+
+def format_acc_total(name: str, total: float, incorrect: float) -> str:
+    """Format accuracy and total incorrect."""
+    return f"{name}={((total - incorrect)/total)*100:2.3f}% / {incorrect:.0f}"
+
+
+def calculate_average_acc(
+    experiments: List[Experiment], filter: str
+) -> Tuple[float, float]:
+    """Calculate the average accuracy over a collection of experiments for the most common filters."""
+    if filter == "none":
+        total = [experiment.accuracy() for experiment in experiments]
+    elif filter == "unk":
+        total = [
+            experiment.accuracy(experiment.unk_vocab()) for experiment in experiments
+        ]
+    elif filter == "known":
+        total = [
+            experiment.accuracy(experiment.train_vocab) for experiment in experiments
+        ]
+    return sum(x[0] for x in total) / len(total), sum(x[1] for x in total) / len(total)
+
+
+def report_experiments(experiments: List[Experiment]) -> str:
+    """Return a nicely formatted aggregate of a collection of experiments."""
+    total_incorrect, total_total = calculate_average_acc(experiments, "none")
+    unk_incorrect, unk_total = calculate_average_acc(experiments, "unk")
+    known_incorrect, known_total = calculate_average_acc(experiments, "known")
+    return f"{format_acc_total('total', total_total, total_incorrect)}, \
+            {format_acc_total('unk', unk_total, unk_incorrect)}, \
+            {format_acc_total('known', known_total, known_incorrect)}, \
+            "

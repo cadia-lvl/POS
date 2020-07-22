@@ -39,6 +39,24 @@ def gather_tags(inputs, output, coarse):
 
 @cli.command()
 @click.argument("inputs", nargs=-1)
+def fix_known_toks(inputs):
+    """Add a known_toks.txt file in the directories provided in 'inputs'.
+
+    Reads the hyperparameters.json, grabs the training files, parses and writes the vocabulary out.
+    """
+    for input in inputs:
+        log.info(f"Fixing dir={input}")
+        with open(f"{input}/hyperparamters.json", "r") as f:
+            hyperparameters = json.load(f)
+        ds = data.read_datasets(hyperparameters["training_files"])
+        with open(f"{input}/known_toks.txt", "w+") as f:
+            for token in data.get_vocab(x for x, y in ds):
+                f.write(f"{token}\n")
+    log.info("Done!")
+
+
+@cli.command()
+@click.argument("inputs", nargs=-1)
 @click.argument("embedding", default=None)
 @click.argument("output", type=click.File("w+"))
 @click.argument("format", type=str)
@@ -104,6 +122,11 @@ def filter_embedding(inputs, embedding, output, format):
 @click.option("--learning_rate", default=0.20)
 @click.option("--morphlex_freeze", is_flag=True, default=False)
 @click.option(
+    "--morphlex_extra_dim",
+    default=-1,
+    help="The dimension to map morphlex embeddings to. -1 to disable.",
+)
+@click.option(
     "--word_embedding_dim",
     default=128,
     help="The word/token embedding dimension. Set to -1 to disable word embeddings.",
@@ -130,6 +153,7 @@ def train_and_tag(
     known_chars_file,
     morphlex_embeddings_file,
     morphlex_freeze,
+    morphlex_extra_dim,
     pretrained_word_embeddings_file,
     word_embedding_lr,
     word_embedding_dim,
@@ -166,6 +190,8 @@ def train_and_tag(
     m_emb = "none"
     if morphlex_embeddings_file is not None:
         m_emb = "standard"
+        if morphlex_extra_dim != -1:
+            m_emb = "extra"
 
     c_emb = "none"
     char_vocab = None
@@ -239,6 +265,7 @@ def train_and_tag(
         "main_lstm_dim": 64,  # The main LSTM dim will output with this dim
         "main_lstm_layers": main_lstm_layers,  # The main LSTM dim will output with this dim
         "hidden_dim": final_dim,  # The main LSTM time-steps will be mapped to this dim
+        "morphlex_extra_dim": morphlex_extra_dim,
         "lstm_dropouts": 0.1,
         "input_dropouts": 0.0,
         "noise": 0.1,  # Noise to main_in, to main_bilstm
@@ -248,7 +275,7 @@ def train_and_tag(
         "morph_lex_embeddings": torch.from_numpy(extras["morph_lex_embeddings"])
         .float()
         .to(device)
-        if m_emb == "standard"
+        if m_emb == "standard" or m_emb == "extra"
         else None,
         "word_embeddings": torch.from_numpy(extras["word_embeddings"])
         .float()
@@ -376,6 +403,9 @@ def train_and_tag(
         str(output_dir.joinpath("predictions.tsv")),
         (*data.unpack_dataset(test_ds), test_tags_tagged),
     )
+    with (output_dir / "known_toks.txt").open("w+") as f:
+        for token in data.get_vocab(x for x, y in train_ds):
+            f.write(f"{token}\n")
     if save_vocab:
         save_location = output_dir.joinpath("dictionaries.pickle")
         with save_location.open("wb+") as f:

@@ -23,7 +23,9 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
         $DATA_DIR/${fold}PM.plain \
         $out_folder \
         --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
-        --word_embedding_dim -1 \
+        --morphlex_freeze \
+        --morphlex_extra_dim 32 \
+        --word_embedding_dim 128 \
         --word_embedding_lr 0.2 \
         --final_dim 32 \
         --learning_rate 0.2 \
