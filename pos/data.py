@@ -1,7 +1,19 @@
 """Data preparation and reading."""
 from dataclasses import dataclass
 from collections import Counter
-from typing import List, Tuple, Set, Dict, Optional, Union, Iterable, NewType, cast
+from typing import (
+    List,
+    Tuple,
+    Set,
+    Dict,
+    Optional,
+    Union,
+    Iterable,
+    NewType,
+    cast,
+    Sequence,
+    Callable,
+)
 import logging
 
 from tqdm import tqdm
@@ -193,45 +205,38 @@ class VocabMap:
         return len(self.w2i)
 
 
-def read_word_embedding(embedding_data: Iterable[str],) -> Dict[str, List[float]]:
-    """Read an embedding file and return the embedding mapping.
+def wemb_str_to_emb_pair(line: str) -> Tuple[str, List[float]]:
+    """Map a word-embedding string to the key and values.
 
-    Formatted as:
-    Each line is a token and the corresponding embedding.
+    Word-embeddings string is formatted as:
+    A line is a token and the corresponding embedding.
     Between the token and the embedding there is a space " ".
     Between each value in the embedding there is a space " ".
-
-    See called function for further parameters and return value.
     """
-    log.info("Reading word embeddings")
-    embedding_dict: Dict[str, List[float]] = dict()
-    it = iter(embedding_data)
-    # pop the number of vectors and dimension
-    next(it)
-    for line in tqdm(it):
-        values = line.strip().split(" ")
-        token = values[0]
-        vector = values[1:]
-        embedding_dict[token] = [float(n) for n in vector]
-    return embedding_dict
+    values = line.strip().split(" ")
+    return (values[0], [float(n) for n in values[1:]])
 
 
-def read_bin_embedding(embedding_data: Iterable[str],) -> Dict[str, List[int]]:
-    """Read an embedding file and return the embedding mapping.
+def bin_str_to_emb_pair(line: str) -> Tuple[str, List[float]]:
+    """Map a bin-embedding string to the key and values.
 
-    Formatted as:
     Each line is a token and the corresponding embedding.
     Between the token and the embedding there is a ";".
     Between each value in the embedding there is a comma ",".
-
-    See called function for further parameters and return value.
     """
-    log.info("Reading bin embeddings")
-    embedding_dict: Dict[str, List[int]] = dict()
-    for line in tqdm(embedding_data):
-        key, vector = line.strip().split(";")
-        # We stip out '[' and ']'
-        embedding_dict[key] = [int(n) for n in vector[1:-1].split(",")]
+    key, vector = line.strip().split(";")
+    # We stip out '[' and ']'
+    return (key, [float(n) for n in vector[1:-1].split(",")])
+
+
+def emb_pairs_to_dict(
+    lines: Sequence[str], f: Callable[[str], Tuple[str, List[float]]]
+) -> Dict[str, List[float]]:
+    """Map a sequence of strings which are embeddings using f to dictionary."""
+    embedding_dict: Dict[str, List[float]] = dict()
+    for line in tqdm(lines):
+        key, values = f(line)
+        embedding_dict[key] = values
     return embedding_dict
 
 
@@ -280,83 +285,6 @@ def map_embedding(
 
     log.info(f"Embedding: final shape={embeddings.shape}")
     return vocab_map, embeddings
-
-
-def create_mappers(
-    dataset: Dataset,
-    w_emb="standard",
-    c_emb="standard",
-    m_emb="standard",
-    pretrained_word_embeddings_file=None,
-    morphlex_embeddings_file=None,
-    known_chars: Vocab = None,
-) -> Tuple[Dict[str, VocabMap], Dict[str, np.array]]:
-    """Prepare the mappers for processing the data based on the parameters.
-
-    Returns:
-        The dictionaries which map symbol<->idx.
-        Other configuration such as read embeddings to be loaded by the model.
-    """
-    dictionaries: Dict[str, VocabMap] = {}
-    extras: Dict[str, np.array] = {}
-
-    if w_emb == "pretrained":
-        with open(pretrained_word_embeddings_file) as f:
-            embedding_dict = read_word_embedding(f)
-        w_map, w_embedding = map_embedding(
-            embedding_dict=embedding_dict,  # type: ignore
-            filter_on=None,
-            special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
-        )
-        dictionaries["w_map"] = w_map
-        extras["word_embeddings"] = w_embedding
-    elif w_emb == "standard":
-        dictionaries["w_map"] = VocabMap(
-            get_vocab((x for x, y in dataset)),
-            special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID)],
-        )
-    elif w_emb == "none":
-        # Nothing to do
-        pass
-    else:
-        raise ValueError(f"Unknown w_emb={w_emb}")
-
-    dictionaries["t_map"] = VocabMap(
-        get_vocab((y for x, y in dataset)),
-        special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID),],
-    )
-    if c_emb == "standard" and known_chars is not None:
-        dictionaries["c_map"] = VocabMap(
-            known_chars,
-            special_tokens=[
-                (UNK, UNK_ID),
-                (PAD, PAD_ID),
-                (EOS, EOS_ID),
-                (SOS, SOS_ID),
-            ],
-        )
-    elif c_emb == "none":
-        # Nothing to do
-        pass
-    else:
-        raise ValueError(f"Unkown c_emb={c_emb}")
-    if m_emb == "standard" or m_emb == "extra":
-        with open(morphlex_embeddings_file) as f:
-            embedding_dict = read_bin_embedding(f)  # type: ignore
-        m_map, m_embedding = map_embedding(
-            embedding_dict=embedding_dict,  # type: ignore
-            filter_on=None,
-            special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
-        )
-        dictionaries["m_map"] = m_map
-        extras["morph_lex_embeddings"] = m_embedding
-    elif m_emb == "none":
-        # Nothing to do
-        pass
-    else:
-        raise ValueError(f"Unkown c_emb={c_emb}")
-
-    return dictionaries, extras
 
 
 def data_loader(

@@ -6,6 +6,7 @@ import logging
 import json
 import pathlib
 from functools import partial
+from typing import Dict
 
 import click
 import torch
@@ -180,25 +181,6 @@ def train_and_tag(
     # Tracking experiments and visualization
     from torch.utils import tensorboard
 
-    # Set configuration values
-    w_emb = "none"
-    if word_embedding_dim != -1:
-        w_emb = "standard"
-    elif pretrained_word_embeddings_file is not None:
-        w_emb = "pretrained"
-
-    m_emb = "none"
-    if morphlex_embeddings_file is not None:
-        m_emb = "standard"
-        if morphlex_extra_dim != -1:
-            m_emb = "extra"
-
-    c_emb = "none"
-    char_vocab = None
-    if known_chars_file is not None:
-        c_emb = "standard"
-        char_vocab = data.read_vocab(known_chars_file)
-
     # Set the seed on all platforms
     SEED = 42
     if SEED:
@@ -219,27 +201,7 @@ def train_and_tag(
         torch.set_num_threads(threads)
         log.info(f"Using {threads} CPU threads")
 
-    # Read train and test data
-    train_ds = data.read_datasets(training_files)
-    test_ds = data.read_datasets([test_file])
-    dictionaries, extras = data.create_mappers(
-        train_ds,
-        w_emb=w_emb,
-        c_emb=c_emb,
-        m_emb=m_emb,
-        pretrained_word_embeddings_file=pretrained_word_embeddings_file,
-        morphlex_embeddings_file=morphlex_embeddings_file,
-        known_chars=char_vocab,
-    )
-    if DEBUG:
-        device = torch.device("cpu")
-        threads = 1
-        # Set the number of threads to use for CPU
-        torch.set_num_threads(threads)
-        log.info(f"Using {threads} CPU threads")
-        train_ds = train_ds[:batch_size]
-        test_ds = test_ds[:batch_size]
-
+    # Run parameters
     parameters = {
         "training_files": training_files,
         "test_file": test_file,
@@ -251,6 +213,95 @@ def train_and_tag(
         "label_smoothing": label_smoothing,
         "optimizer": optimizer,
     }
+
+    # Read train and test data
+    train_ds = data.read_datasets(training_files)
+    test_ds = data.read_datasets([test_file])
+
+    # DEBUG - read a subset of the data
+    if DEBUG:
+        device = torch.device("cpu")
+        threads = 1
+        # Set the number of threads to use for CPU
+        torch.set_num_threads(threads)
+        log.info(f"Using {threads} CPU threads")
+        train_ds = train_ds[:batch_size]
+        test_ds = test_ds[:batch_size]
+
+    # Set configuration values and create mappers
+    dictionaries: Dict[str, data.VocabMap] = {}
+    extras: Dict[str, np.array] = {}
+
+    # WORD EMBEDDINGS
+    # By default we do not use word-embeddings.
+    w_emb = "none"
+    if pretrained_word_embeddings_file is not None:
+        # If a file is provided, we use it.
+        w_emb = "pretrained"
+        with open(pretrained_word_embeddings_file) as f:
+            it = iter(f)
+            # pop the number of vectors and dimension
+            next(it)
+            embedding_dict = data.emb_pairs_to_dict(it, data.wemb_str_to_emb_pair)
+            w_map, w_embedding = data.map_embedding(
+                embedding_dict=embedding_dict,
+                filter_on=None,
+                special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
+            )
+            dictionaries["w_map"] = w_map
+            extras["word_embeddings"] = torch.from_numpy(w_embedding).float().to(device)
+    elif word_embedding_dim != -1:
+        # No file is given and the dimension is not -1 we train from scratch.
+        w_emb = "standard"
+        dictionaries["w_map"] = data.VocabMap(
+            data.get_vocab((x for x, y in train_ds)),
+            special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
+        )
+
+    # MORPHLEX EMBEDDINGS
+    # By default we do not use morphlex embeddings.
+    m_emb = "none"
+    if morphlex_embeddings_file is not None:
+        # File is provided, use it.
+        m_emb = "standard"
+        with open(morphlex_embeddings_file) as f:
+            it = iter(f)
+            embedding_dict = data.emb_pairs_to_dict(it, data.bin_str_to_emb_pair)
+            m_map, m_embedding = data.map_embedding(
+                embedding_dict=embedding_dict,
+                filter_on=None,
+                special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
+            )
+            dictionaries["m_map"] = m_map
+            extras["morph_lex_embeddings"] = (
+                torch.from_numpy(m_embedding).float().to(device)
+            )
+        if morphlex_extra_dim != -1:
+            m_emb = "extra"
+
+    # CHARACTER EMBEDDINGS
+    # By default we do not use character embeddings.
+    c_emb = "none"
+    if known_chars_file is not None:
+        # A file is given, use it.
+        c_emb = "standard"
+        char_vocab = data.read_vocab(known_chars_file)
+        dictionaries["c_map"] = data.VocabMap(
+            char_vocab,
+            special_tokens=[
+                (data.UNK, data.UNK_ID),
+                (data.PAD, data.PAD_ID),
+                (data.EOS, data.EOS_ID),
+                (data.SOS, data.SOS_ID),
+            ],
+        )
+
+    # TAGS (POS)
+    dictionaries["t_map"] = data.VocabMap(
+        data.get_vocab((y for x, y in train_ds)),
+        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
+    )
+
     model_parameters = {
         "w_emb": w_emb,
         "c_emb": c_emb,
@@ -271,18 +322,7 @@ def train_and_tag(
         "noise": 0.1,  # Noise to main_in, to main_bilstm
         "morphlex_freeze": morphlex_freeze,
     }
-    extras = {
-        "morph_lex_embeddings": torch.from_numpy(extras["morph_lex_embeddings"])
-        .float()
-        .to(device)
-        if m_emb == "standard" or m_emb == "extra"
-        else None,
-        "word_embeddings": torch.from_numpy(extras["word_embeddings"])
-        .float()
-        .to(device)
-        if w_emb == "pretrained"
-        else None,
-    }
+
     # Write all configuration to disk
     output_dir = pathlib.Path(output_dir)
     with output_dir.joinpath("hyperparamters.json").open(mode="+w") as f:
