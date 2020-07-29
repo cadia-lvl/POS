@@ -6,6 +6,10 @@ NAME="$1"
 # Move the arguments forward
 shift
 
+# --begin=now+8hour \
+#        --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+#        --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
+#        --morphlex_extra_dim 32 \
 FIRST_STEP=1
 LAST_STEP=1
 if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
@@ -22,9 +26,8 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
         $DATA_DIR/${fold}TM.plain \
         $DATA_DIR/${fold}PM.plain \
         $out_folder \
-        --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+        --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
         --morphlex_freeze \
-        --morphlex_extra_dim 32 \
         --word_embedding_dim 128 \
         --word_embedding_lr 0.2 \
         --final_dim 32 \

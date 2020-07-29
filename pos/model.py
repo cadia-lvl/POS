@@ -208,7 +208,7 @@ class ABLTagger(nn.Module):
         self.bilstm.flatten_parameters()
         main_out = self.main_bilstm_out_dropout(
             torch.nn.utils.rnn.pad_packed_sequence(
-                self.bilstm(
+                self.bilstm(  # type: ignore
                     torch.nn.utils.rnn.pack_padded_sequence(  # type: ignore
                         main_in,
                         batch_dict["lens"],

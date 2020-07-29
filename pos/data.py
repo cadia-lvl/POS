@@ -77,7 +77,7 @@ class Dataset(Tuple[TaggedSentence, ...]):
         return Dataset(sentences)
 
     def unpack(self) -> Tuple[SimpleDataset, SimpleDataset]:
-        """Unpack a Dataset to two DataSent(s); Tokens and Tags."""
+        """Unpack a Dataset to two SimpleDataset(s): Tokens and tags."""
         tokens = SimpleDataset(
             tokens for tokens, _ in self  # pylint: disable=not-an-iterable
         )
@@ -93,6 +93,25 @@ class PredictedSentence(Tuple[Symbols, Symbols, Symbols]):
 
 class PredictedDataset(Tuple[PredictedSentence, ...]):
     """A PredictedDataset is sequence of PredictedSentences."""
+
+    def unpack(self) -> Tuple[SimpleDataset, SimpleDataset, SimpleDataset]:
+        """Unpack a PredictedDataset to three SimpleDataset(s): Tokens, tags and predicted tags."""
+        tokens = SimpleDataset(
+            tokens for tokens, _, _ in self  # pylint: disable=not-an-iterable
+        )
+        tags = SimpleDataset(
+            tags for _, tags, _ in self  # pylint: disable=not-an-iterable
+        )
+        pred_tags = SimpleDataset(
+            pred_tags for _, _, pred_tags in self  # pylint: disable=not-an-iterable
+        )
+        return (tokens, tags, pred_tags)
+
+    def as_sequence(self) -> Iterable[Tuple[str, str, str, int, int]]:
+        """Represent the PredictedDataset as a sequence of predictions, along with sentence and word index (0-based)."""
+        for sent_index, sentence in enumerate(self):
+            for word_index, symbols in enumerate(zip(*sentence)):
+                yield symbols[0], symbols[1], symbols[2], sent_index, word_index
 
     @staticmethod
     def from_file(filepath):
