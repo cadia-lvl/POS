@@ -19,19 +19,20 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     --mem=10G \
     --wrap="./main.py \
     train-and-tag \
-    $RAW_DIR/otb/10TM.plain \
-    $RAW_DIR/otb/10PM.plain \
+    $RAW_DIR/mim/10TM.plain \
+    $RAW_DIR/mim/10PM.plain \
     $out_folder \
+    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+    --morphlex_extra_dim -1 \
+    --word_embedding_dim 128 \
+    --word_embedding_lr 0.2 \
+    --final_dim 64 \
+    --learning_rate 0.2 \
+    --optimizer sgd \
     --epochs 1 \
     --batch_size 16 \
-    --learning_rate 0.2 \
-    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
-    --word_embedding_lr 0.2 \
-    --morphlex_freeze \
-    --final_dim 32 \
     --save_vocab \
     --save_model \
     --gpu \
-    --optimizer sgd \
     $extra_params"
 fi
