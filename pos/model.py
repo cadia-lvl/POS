@@ -207,7 +207,17 @@ class ABLTagger(nn.Module):
         # (b, seq, f)
         self.bilstm.flatten_parameters()
         main_out = self.main_bilstm_out_dropout(
-            self.unpack_sequence(self.bilstm(self.pack_sequence(main_in)[0])[0])
+            torch.nn.utils.rnn.pad_packed_sequence(
+                self.bilstm(
+                    torch.nn.utils.rnn.pack_padded_sequence(  # type: ignore
+                        main_in,
+                        batch_dict["lens"],
+                        batch_first=True,
+                        enforce_sorted=False,
+                    )
+                )[0],
+                batch_first=True,
+            )[0]
         )
         # We map each word to our targets
         out = self.final(torch.tanh(self.linear(main_out)))

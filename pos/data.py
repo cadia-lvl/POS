@@ -253,10 +253,9 @@ def map_embedding(
         # We treat PAD as 0s
         if token == PAD:
             embedding_dict[token] = [0 for _ in range(length_of_embeddings)]
-        # Others we treat as -1, this is not perfect and the implications for BIN are unknown.
+        # Others we treat also as 0
         else:
-            # TODO: fix so that this is 0. To do this, we also need to read lens in model
-            embedding_dict[token] = [-1 for _ in range(length_of_embeddings)]
+            embedding_dict[token] = [0 for _ in range(length_of_embeddings)]
 
     embeddings = np.zeros(
         shape=(len(words_to_add) + len(special_tokens), length_of_embeddings)
