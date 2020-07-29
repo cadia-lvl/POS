@@ -5,8 +5,9 @@ import random
 import logging
 import json
 import pathlib
-from functools import partial
 from typing import Dict
+from functools import reduce
+from operator import add
 
 import click
 import torch
@@ -27,68 +28,48 @@ def cli(debug):
 
 
 @cli.command()
-@click.argument("inputs", nargs=-1)
+@click.argument("filepaths", nargs=-1)
 @click.argument("output", type=click.File("w+"))
-@click.option("--coarse", is_flag=True, help='Maps the tags "coarse".')
-def gather_tags(inputs, output, coarse):
+def gather_tags(filepaths, output):
     """Read all input tsv files and extract all tags in files."""
-    input_data = data.read_datasets(inputs)
-    tags = data.get_vocab(y for x, y in input_data)
-    for tag in sorted(list(tags)):
-        output.write(f"{tag}\n")
+    ds = reduce(add, (data.Dataset.from_file(filepath) for filepath in filepaths), (),)
+    tags = data.Vocab.from_symbols(y for x, y in ds)
+    for tag_ in sorted(list(tags)):
+        output.write(f"{tag_}\n")
 
 
 @cli.command()
-@click.argument("inputs", nargs=-1)
-def fix_known_toks(inputs):
-    """Add a known_toks.txt file in the directories provided in 'inputs'.
-
-    Reads the hyperparameters.json, grabs the training files, parses and writes the vocabulary out.
-    """
-    for input in inputs:
-        log.info(f"Fixing dir={input}")
-        with open(f"{input}/hyperparamters.json", "r") as f:
-            hyperparameters = json.load(f)
-        ds = data.read_datasets(hyperparameters["training_files"])
-        with open(f"{input}/known_toks.txt", "w+") as f:
-            for token in data.get_vocab(x for x, y in ds):
-                f.write(f"{token}\n")
-    log.info("Done!")
-
-
-@cli.command()
-@click.argument("inputs", nargs=-1)
+@click.argument("filepaths", nargs=-1)
 @click.argument("embedding", default=None)
 @click.argument("output", type=click.File("w+"))
-@click.argument("format", type=str)
-def filter_embedding(inputs, embedding, output, format):
+@click.argument("emb_format", type=str)
+def filter_embedding(filepaths, embedding, output, emb_format):
     """Filter an 'embedding' file based on the words which occur in the 'inputs' files.
 
     Result is written to the 'output' file with the same format as the embedding file.
 
-    inputs: Files to use for filtering (supports multiple files = globbing).
+    filepaths: Files to use for filtering (supports multiple files = globbing).
     Files should be .tsv, with two columns, the token and tag.
     embedding: The embedding file to filter.
     output: The file to write the result to.
     format: The format of the embedding file being read, 'bin' or 'wemb'.
     """
-    tokens = set()
-    log.info(f"Reading files={inputs}")
-    for input in inputs:
-        toks, _, _ = data.read_tsv(input)
-        tokens.update(*toks)
+    log.info(f"Reading files={filepaths}")
+    ds = reduce(add, (data.Dataset.from_file(filepath) for filepath in filepaths), (),)
+    tokens = data.Vocab.from_symbols(ds.unpack_dataset()[0])
+
     log.info(f"Number of tokens={len(tokens)}")
     with open(embedding) as f:
-        if format == "bin":
-            emb_dict = data.read_bin_embedding(f)
+        if emb_format == "bin":
+            emb_dict = data.emb_pairs_to_dict(f, data.bin_str_to_emb_pair)
             for token, value in emb_dict.items():
-                if token in tokens:
+                if token in tokens:  # pylint: disable=unsupported-membership-test
                     output.write(f"{token};[{','.join((str(x) for x in value))}]\n")
-        elif format == "wemb":
-            emb_dict = data.read_word_embedding(f)
+        elif emb_format == "wemb":
+            emb_dict = data.emb_pairs_to_dict(f, data.wemb_str_to_emb_pair)
             output.write("x x\n")
             for token, value in emb_dict.items():
-                if token in tokens:
+                if token in tokens:  # pylint: disable=unsupported-membership-test
                     output.write(f"{token} {' '.join((str(x) for x in value))}\n")
 
 
@@ -178,9 +159,6 @@ def train_and_tag(
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
-    # Tracking experiments and visualization
-    from torch.utils import tensorboard
-
     # Set the seed on all platforms
     SEED = 42
     if SEED:
@@ -215,8 +193,12 @@ def train_and_tag(
     }
 
     # Read train and test data
-    train_ds = data.read_datasets(training_files)
-    test_ds = data.read_datasets([test_file])
+    train_ds = reduce(
+        add,
+        (data.Dataset.from_file(training_file) for training_file in training_files),
+        (),
+    )
+    test_ds = data.Dataset.from_file(test_file)
 
     # DEBUG - read a subset of the data
     if DEBUG:
@@ -226,7 +208,7 @@ def train_and_tag(
         torch.set_num_threads(threads)
         log.info(f"Using {threads} CPU threads")
         train_ds = train_ds[:batch_size]
-        test_ds = test_ds[:batch_size]
+        test_ds = test_ds[:batch_size]  # pylint: disable=unsubscriptable-object
 
     # Set configuration values and create mappers
     dictionaries: Dict[str, data.VocabMap] = {}
@@ -254,7 +236,7 @@ def train_and_tag(
         # No file is given and the dimension is not -1 we train from scratch.
         w_emb = "standard"
         dictionaries["w_map"] = data.VocabMap(
-            data.get_vocab((x for x, y in train_ds)),
+            data.Vocab.from_symbols((x for x, y in train_ds)),
             special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
         )
 
@@ -273,7 +255,7 @@ def train_and_tag(
                 special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
             )
             dictionaries["m_map"] = m_map
-            extras["morph_lex_embeddings"] = (
+            extras["morphlex_embeddings"] = (
                 torch.from_numpy(m_embedding).float().to(device)
             )
         if morphlex_extra_dim != -1:
@@ -285,7 +267,7 @@ def train_and_tag(
     if known_chars_file is not None:
         # A file is given, use it.
         c_emb = "standard"
-        char_vocab = data.read_vocab(known_chars_file)
+        char_vocab = data.Vocab.from_file(known_chars_file)
         dictionaries["c_map"] = data.VocabMap(
             char_vocab,
             special_tokens=[
@@ -298,7 +280,7 @@ def train_and_tag(
 
     # TAGS (POS)
     dictionaries["t_map"] = data.VocabMap(
-        data.get_vocab((y for x, y in train_ds)),
+        data.Vocab.from_symbols((y for x, y in train_ds)),
         special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
     )
 
@@ -328,101 +310,16 @@ def train_and_tag(
     with output_dir.joinpath("hyperparamters.json").open(mode="+w") as f:
         json.dump({**parameters, **model_parameters}, f, indent=4)
 
-    from pos.model import ABLTagger
-
-    tagger = ABLTagger(**model_parameters, **extras).to(device)
-    log.info(tagger)
-
-    for name, tensor in tagger.state_dict().items():
-        log.info(f"{name}: {torch.numel(tensor)}")
-    log.info(
-        f"Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}"
-    )
-    log.info(
-        f"Not trainable parameters={sum(p.numel() for p in tagger.parameters() if not p.requires_grad)}"
-    )
-    if label_smoothing == 0.0:
-        criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID, reduction="sum")
-    else:
-        criterion = partial(
-            train.smooth_ce_loss, pad_idx=data.PAD_ID, smoothing=label_smoothing
-        )
-
-    reduced_lr_names = ["token_embedding.weight"]
-    params = [
-        {
-            "params": list(
-                param
-                for name, param in filter(
-                    lambda kv: kv[0] not in reduced_lr_names, tagger.named_parameters()
-                )
-            )
-        },
-        {
-            "params": list(
-                param
-                for name, param in filter(
-                    lambda kv: kv[0] in reduced_lr_names, tagger.named_parameters()
-                )
-            ),
-            "lr": parameters["word_embedding_lr"],
-        },
-    ]
-    if optimizer == "sgd":
-        optimizer = torch.optim.SGD(params, lr=parameters["learning_rate"])
-        log.info("Using SGD")
-    elif optimizer == "adam":
-        optimizer = torch.optim.Adam(params, lr=parameters["learning_rate"])
-        log.info("Using Adam")
-    else:
-        raise ValueError("Unknown optimizer")
-    if scheduler == "multiply":
-        scheduler = torch.optim.lr_scheduler.MultiplicativeLR(
-            optimizer, lr_lambda=lambda epoch: 0.95
-        )
-    elif scheduler == "plateau":
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer=optimizer,
-            mode="min",
-            factor=0.5,
-            patience=2,
-            verbose=True,
-            threshold=100.0,
-            threshold_mode="abs",
-            cooldown=0,
-        )
-    else:
-        raise ValueError("Unknown scheduler")
-
-    train.run_epochs(
-        model=tagger,
-        optimizer=optimizer,
-        criterion=criterion,
-        scheduler=scheduler,
-        train_loader=partial(
-            data.data_loader,
-            dataset=train_ds,
-            device=device,
-            shuffle=True,
-            w_emb=w_emb,
-            c_emb=c_emb,
-            m_emb=m_emb,
-            dictionaries=dictionaries,
-            batch_size=batch_size,
-        ),
-        test_loader=partial(
-            data.data_loader,
-            dataset=test_ds,
-            device=device,
-            shuffle=True,
-            w_emb=w_emb,
-            c_emb=c_emb,
-            m_emb=m_emb,
-            dictionaries=dictionaries,
-            batch_size=batch_size * 10,
-        ),
-        epochs=epochs,
-        writer=tensorboard.SummaryWriter(str(output_dir)),
+    # Train a model
+    tagger = train.run_training(
+        run_parameters=parameters,
+        model_parameters=model_parameters,
+        model_extras=extras,
+        dictionaries=dictionaries,
+        device=device,
+        train_ds=train_ds,
+        test_ds=test_ds,
+        output_dir=output_dir,
     )
     test_tags_tagged = train.tag_sents(
         model=tagger,
@@ -441,10 +338,12 @@ def train_and_tag(
     log.info("Writing predictions, dictionaries and model")
     data.write_tsv(
         str(output_dir.joinpath("predictions.tsv")),
-        (*data.unpack_dataset(test_ds), test_tags_tagged),
+        (*test_ds.unpack(), test_tags_tagged),
     )
     with (output_dir / "known_toks.txt").open("w+") as f:
-        for token in data.get_vocab(x for x, y in train_ds):
+        for token in data.Vocab.from_symbols(  # pylint: disable=not-an-iterable
+            x for x, y in train_ds
+        ):
             f.write(f"{token}\n")
     if save_vocab:
         save_location = output_dir.joinpath("dictionaries.pickle")
@@ -459,18 +358,18 @@ def train_and_tag(
 @cli.command()
 @click.argument("model_file")
 @click.argument("dictionaries_files")
-@click.argument("input", type=click.File("r"))
+@click.argument("data_in", type=click.File("r"))
 @click.argument("output", type=click.File("w+"))
 @click.option(
     "--device", default="cpu", help="The device to use, 'cpu' or 'cuda:0' for GPU."
 )
-def tag(model_file, dictionaries_files, input, output, device):
+def tag(model_file, dictionaries_files, data_in, output, device):
     """Tag tokens in a file.
 
     Args:
         model_file: A filepath to a trained model.
         dictionaries_file: A filepath to dictionaries (vocabulary mappings) for preprocessing.
-        input: A file or stdin (-), formatted as: token per line, sentences separated with newlines (empty line).
+        data: A file or stdin (-), formatted as: token per line, sentences separated with newlines (empty line).
         output: A file or stdout (-). Output is formatted like the input, but after each token there is a tab and then the tag.
     """
     log.info(f"Using device={device}")
@@ -481,11 +380,11 @@ def tag(model_file, dictionaries_files, input, output, device):
     with open(dictionaries_files, "rb") as f:
         dictionaries = pickle.load(f)
     log.info("Reading dataset")
-    datasent = data.read_datasent(input)
+    datasent = data_in.read_tsv(data_in, cols=1)
     log.info("Predicting tags")
     predicted_tags = train.tag_sents(
         model,
-        data.data_loader(
+        data_in.data_loader(
             datasent,
             device,
             dictionaries,
@@ -500,8 +399,8 @@ def tag(model_file, dictionaries_files, input, output, device):
 
     log.info("Writing results")
     for tokens, tags in zip(datasent, predicted_tags):
-        for token, tag in zip(tokens, tags):
-            output.write("\t".join([token, tag]) + "\n")
+        for token, pred_tag in zip(tokens, tags):
+            output.write("\t".join([token, pred_tag]) + "\n")
         output.write("\n")
     log.info("Done!")
 
@@ -509,4 +408,4 @@ def tag(model_file, dictionaries_files, input, output, device):
 if __name__ == "__main__":
     logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
     log = logging.getLogger()
-    cli()
+    cli()  # pylint: disable=no-value-for-parameter

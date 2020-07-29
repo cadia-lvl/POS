@@ -1,6 +1,5 @@
 """Data preparation and reading."""
 from dataclasses import dataclass
-from collections import Counter
 from typing import (
     List,
     Tuple,
@@ -9,7 +8,6 @@ from typing import (
     Optional,
     Union,
     Iterable,
-    NewType,
     cast,
     Sequence,
     Callable,
@@ -36,23 +34,74 @@ SOS = "<s>"
 SOS_ID = 3
 
 # Some types
-Sent = NewType("Sent", Tuple[str, ...])
-TaggedSent = NewType("TaggedSent", Tuple[Sent, Sent])
+
+Symbol = str
 
 
-class Vocab(set):
-    """A class to hold a vocabulary as an unordered set of symbols."""
+class Symbols(Tuple[Symbol, ...]):
+    """A Symbol is a sequence of symbols in a sentence: tokens or tags."""
 
 
-class Dataset(tuple):
-    """A class to hold tagged sentences: ( (tokens, tags), (tokens, tags), )."""
+class Vocab(Set[str]):
+    """A Vocab is an unordered set of symbols."""
+
+    @staticmethod
+    def from_symbols(sentences: Iterable[Symbols]):
+        """Create a Vocab from a sequence of Symbols."""
+        return Vocab((tok for sent in sentences for tok in sent))
+
+    @staticmethod
+    def from_file(filepath):
+        """Create a Vocab from a file with a sequence of Symbols."""
+        with open(filepath) as f:
+            return Vocab(
+                (symbol for line in f.readlines() for symbol in line.strip().split())
+            )
 
 
-class DataSent(tuple):
-    """A class to hold (untagged) sentences: ( tokens, tokens, )."""
+class SimpleDataset(Tuple[Symbols, ...]):
+    """A SimpleDataset is a sequence of Symbols: tokens or tags."""
 
 
-def write_tsv(output, data: Tuple[DataSent, ...]):
+class TaggedSentence(Tuple[Symbols, Symbols]):
+    """A TaggedSentence is pair of tokens and tags."""
+
+
+class Dataset(Tuple[TaggedSentence, ...]):
+    """A Dataset is a sequence of tagged sentences: ( (tokens, tags), (tokens, tags), )."""
+
+    @staticmethod
+    def from_file(filepath):
+        """Construct a Dataset from a file."""
+        sentences = read_tsv(filepath, cols=2)
+        return Dataset(sentences)
+
+    def unpack(self) -> Tuple[SimpleDataset, SimpleDataset]:
+        """Unpack a Dataset to two DataSent(s); Tokens and Tags."""
+        tokens = SimpleDataset(
+            tokens for tokens, _ in self  # pylint: disable=not-an-iterable
+        )
+        tags = SimpleDataset(
+            tags for _, tags in self  # pylint: disable=not-an-iterable
+        )
+        return (tokens, tags)
+
+
+class PredictedSentence(Tuple[Symbols, Symbols, Symbols]):
+    """A PredictedSentence is a tuple of tokens, gold-tags and predicted-tags."""
+
+
+class PredictedDataset(Tuple[PredictedSentence, ...]):
+    """A PredictedDataset is sequence of PredictedSentences."""
+
+    @staticmethod
+    def from_file(filepath):
+        """Construct a PredictedDataset from a file."""
+        sentences = read_tsv(filepath, cols=3)
+        return PredictedDataset(sentences)
+
+
+def write_tsv(output, data: Tuple[SimpleDataset, ...]):
     """Write a tsv in many columns."""
     with open(output, "w+") as f:
         for sent_tok_tags in zip(*data):
@@ -61,124 +110,57 @@ def write_tsv(output, data: Tuple[DataSent, ...]):
             f.write("\n")
 
 
-def read_tsv(input) -> Tuple[DataSent, DataSent, DataSent]:
-    """Read a tsv, two or three columns."""
-    tokens = []
-    tags = []
-    model_tags = []
-    with open(input) as f:
-        sent_tokens: List[str] = []
-        sent_tags: List[str] = []
-        sent_model_tags: List[str] = []
-        for line in f:
-            line = line.strip()
-            # We read a blank line - sentence has been read.
-            if not line:
-                tokens.append(Sent(tuple(sent_tokens)))
-                tags.append(Sent(tuple(sent_tags)))
-                model_tags.append(Sent(tuple(sent_model_tags)))
-                sent_tokens = []
-                sent_tags = []
-                sent_model_tags = []
-            else:
-                tok_tags = line.split()
-                sent_tokens.append(tok_tags[0])
-                sent_tags.append(tok_tags[1])
-                if len(tok_tags) == 3:
-                    sent_model_tags.append(tok_tags[2])
+def read_tsv(filepath, cols=2) -> List[Tuple[Symbols, ...]]:
+    """Read a single .tsv file with one, two or three columns and returns a list of the Symbols."""
 
-    # The file does not neccessarily end with a blank line
-    if len(sent_tokens) != 0:
-        tokens.append(Sent(tuple(sent_tokens)))
-        tags.append(Sent(tuple(sent_tags)))
-        model_tags.append(Sent(tuple(sent_model_tags)))
-    return (DataSent(tuple(tokens)), DataSent(tuple(tags)), DataSent(tuple(model_tags)))
+    def add_sentence(sent_tokens, sent_tags, model_tags):
+        """Add a sentence to the list. HAS SIDE-EFFECTS."""
+        if cols == 1:
+            sentences.append(Symbols(tuple(sent_tokens)))
+        if cols == 2:
+            sentences.append((Symbols(tuple(sent_tokens)), Symbols(tuple(sent_tags))))
+        elif cols == 3:
+            sentences.append(
+                (
+                    Symbols(tuple(sent_tokens)),
+                    Symbols(tuple(sent_tags)),
+                    Symbols(tuple(model_tags)),
+                )
+            )
+        else:
+            raise ValueError(f"Invalid number of cols={cols}")
 
-
-def read_pos_tsv(filepath) -> Dataset:
-    """Read a single .tsv file with two columns and returns a Dataset."""
-    sentences = []
+    sentences: List[Tuple[Symbols, ...]] = []
     with open(filepath) as f:
         sent_tokens: List[str] = []
         sent_tags: List[str] = []
+        model_tags: List[str] = []
         for line in f:
             line = line.strip()
             # We read a blank line and buffer is not empty - sentence has been read.
             if not line and len(sent_tokens) != 0:
-                sentences.append(
-                    TaggedSent((Sent(tuple(sent_tokens)), Sent(tuple(sent_tags))))
-                )
+                add_sentence(sent_tokens, sent_tags, model_tags)
                 sent_tokens = []
                 sent_tags = []
+                model_tags = []
             else:
-                token, tag = line.split()
-                sent_tokens.append(token)
-                sent_tags.append(tag)
+                symbols = line.split()
+                if cols >= 1:
+                    sent_tokens.append(symbols[0])
+                if cols >= 2:
+                    sent_tags.append(symbols[1])
+                if cols == 3:
+                    model_tags.append(symbols[2])
     # For the last sentence
     if len(sent_tokens) != 0:
         log.info("No newline at end of file, handling it.")
-        sentences.append(TaggedSent((Sent(tuple(sent_tokens)), Sent(tuple(sent_tags)))))
-    return Dataset(sentences)
-
-
-def read_datasent(file_stream) -> DataSent:
-    """Read a filestream, with token per line and new-line separating sentences."""
-    sentences = []
-    sent_tokens: List[str] = []
-    for line in file_stream:
-        line = line.strip()
-        # We read a blank line and buffer is not empty - sentence has been read.
-        if not line and len(sent_tokens) != 0:
-            sentences.append(Sent(tuple(sent_tokens)))
-            sent_tokens = []
-        else:
-            token = line
-            sent_tokens.append(token)
-    # For the last sentence
-    if len(sent_tokens) != 0:
-        log.info("No newline at end of file, handling it.")
-        sentences.append(Sent(tuple(sent_tokens)))
-    return DataSent(sentences)
-
-
-def get_vocab(sentences: Iterable[Sent]) -> Vocab:
-    """Iterate over sentences and extract tokens/tags."""
-    return Vocab((tok for sent in sentences for tok in sent))
-
-
-def get_tok_freq(sentences: Iterable[Sent]) -> Counter:
-    """Gather token/tag frequencies."""
-    return Counter((tok for sent in sentences for tok in sent))
-
-
-def read_vocab(vocab_file) -> Vocab:
-    """Read a vocab file and return Vocab."""
-    with open(vocab_file) as f:
-        return get_vocab([Sent(tuple(line.strip().split())) for line in f.readlines()])
-
-
-def read_datasets(data_paths: List[str]) -> Dataset:
-    """Read the given paths and returns a combined dataset of all paths.
-
-    The files should be .tsv with two columns, first column is the word, second column is the POS.
-    Sentences are separated with a blank line.
-    """
-    log.info(f"Reading files={data_paths}")
-    return Dataset(
-        (tagged_sent for path in data_paths for tagged_sent in read_pos_tsv(path))
-    )
-
-
-def unpack_dataset(dataset: Dataset) -> Tuple[DataSent, DataSent]:
-    """Unpack a Dataset to two DataSent(s); Tokens and Tags."""
-    tokens = DataSent(tokens for tokens, _ in dataset)
-    tags = DataSent(tags for _, tags in dataset)
-    return (tokens, tags)
+        add_sentence(sent_tokens, sent_tags, model_tags)
+    return sentences
 
 
 @dataclass()
 class VocabMap:
-    """For w2i and i2w storage for different dictionaries."""
+    """A VocabMap stores w2i and i2w for dictionaries."""
 
     w2i: Dict[str, int]
     i2w: Dict[int, str]
@@ -262,9 +244,9 @@ def map_embedding(
         for filter_word in filter_on:
             # If the word is present in the file we use it.
             if filter_word in embedding_dict:
-                words_to_add.add(filter_word)
+                words_to_add.add(filter_word)  # pylint: disable=no-member
     else:
-        words_to_add.update(embedding_dict.keys())
+        words_to_add.update(embedding_dict.keys())  # pylint: disable=no-member
     # All special tokens are treated equally as zeros
     # If the token is already present in the dict, we will overwrite it.
     for token, _ in special_tokens:
@@ -273,6 +255,7 @@ def map_embedding(
             embedding_dict[token] = [0 for _ in range(length_of_embeddings)]
         # Others we treat as -1, this is not perfect and the implications for BIN are unknown.
         else:
+            # TODO: fix so that this is 0. To do this, we also need to read lens in model
             embedding_dict[token] = [-1 for _ in range(length_of_embeddings)]
 
     embeddings = np.zeros(
@@ -288,7 +271,7 @@ def map_embedding(
 
 
 def data_loader(
-    dataset: Union[Dataset, DataSent],
+    dataset: Union[Dataset, SimpleDataset],
     device: torch.device,
     dictionaries: Dict[str, VocabMap],
     shuffle=True,
@@ -301,16 +284,18 @@ def data_loader(
     if shuffle:
         dataset_l = list(dataset)
         random.shuffle(dataset_l)
-        dataset = Dataset(dataset_l)
+        # TODO: fix constructor, we don't know that it is a Dataset
+        dataset = Dataset(dataset_l)  # type: ignore
     length = len(dataset)
     for ndx in range(0, length, batch_size):
         batch = dataset[ndx : min(ndx + batch_size, length)]
-        batch_y: Optional[DataSent] = None
+        batch_y: Optional[SimpleDataset] = None
         if type(dataset) is Dataset:
-            batch = cast(Dataset, batch)
-            batch_x, batch_y = unpack_dataset(batch)
-        elif type(dataset) is DataSent:
-            batch_x = DataSent(batch)
+            batch = Dataset(batch)
+            batch_x, batch_y = batch.unpack()
+        elif type(dataset) is SimpleDataset:
+            batch = cast(SimpleDataset, batch)
+            batch_x = batch
         else:
             raise ValueError(f"Unsupported dataset type={type(batch)}")
 
@@ -319,15 +304,15 @@ def data_loader(
         batch_m: Optional[torch.Tensor] = None
         batch_t: Optional[torch.Tensor] = None
         log.debug(batch_x)
-        batch_lens = torch.tensor([len(sent) for sent in batch_x]).to(
-            device, dtype=torch.int64
-        )
+        batch_lens = torch.tensor(  # pylint: disable=not-callable
+            [len(sent) for sent in batch_x]
+        ).to(device, dtype=torch.int64)
         if w_emb == "standard" or w_emb == "pretrained":
             # We need the w_map
             w2i = dictionaries["w_map"].w2i
             batch_w = torch.nn.utils.rnn.pad_sequence(
                 [
-                    torch.tensor(
+                    torch.tensor(  # pylint: disable=not-callable
                         [w2i[token] if token in w2i else w2i[UNK] for token in sent]
                     )
                     for sent in batch_x
@@ -345,7 +330,7 @@ def data_loader(
             w2i = dictionaries["m_map"].w2i
             batch_m = torch.nn.utils.rnn.pad_sequence(
                 [
-                    torch.tensor(
+                    torch.tensor(  # pylint: disable=not-callable
                         [w2i[token] if token in w2i else w2i[UNK] for token in sent]
                     )
                     for sent in batch_x
@@ -368,7 +353,7 @@ def data_loader(
                     sents_padded.append(
                         torch.nn.utils.rnn.pad_sequence(
                             [
-                                torch.tensor(
+                                torch.tensor(  # pylint: disable=not-callable
                                     [w2i[SOS]]
                                     + [
                                         w2i[char] if char in w2i else w2i[UNK]
@@ -405,7 +390,7 @@ def data_loader(
             w2i = dictionaries["t_map"].w2i
             batch_t = torch.nn.utils.rnn.pad_sequence(
                 [
-                    torch.tensor(
+                    torch.tensor(  # pylint: disable=not-callable
                         [w2i[token] if token in w2i else w2i[UNK] for token in sent]
                     )
                     for sent in batch_y

@@ -22,9 +22,7 @@ class ABLTagger(nn.Module):
         char_dim: int,  # The number of characters in dictionary
         token_dim: int,  # The number of tokens in dictionary
         tags_dim: int,  # The number of tags in dictionary - to predict
-        morph_lex_embeddings: torch.Tensor,
         morphlex_extra_dim: int,  # The dimension to map morphlex embeddings to. Only used if m_emb == "extra"
-        word_embeddings: torch.Tensor,
         emb_char_dim: int,  # The characters are mapped to this dim
         char_lstm_dim: int,  # The character LSTM will output with this dim
         char_lstm_layers: int,  # The character LSTM will output with this dim
@@ -36,6 +34,8 @@ class ABLTagger(nn.Module):
         input_dropouts: float,
         noise: float,
         morphlex_freeze: bool,
+        morphlex_embeddings: torch.Tensor = None,
+        word_embeddings: torch.Tensor = None,
     ):
         """Initialize the module given the parameters."""
         super(ABLTagger, self).__init__()
@@ -45,20 +45,22 @@ class ABLTagger(nn.Module):
         self.w_emb = w_emb
         # Morphlex embeddings
         main_bilstm_dim = 0
-        if m_emb == "standard" or m_emb == "extra":
-            self.morph_lex_embedding = nn.Embedding.from_pretrained(
-                morph_lex_embeddings, freeze=morphlex_freeze, padding_idx=data.PAD_ID,
+        if (
+            m_emb == "standard" or m_emb == "extra"
+        ) and morphlex_embeddings is not None:
+            self.morphlex_embedding = nn.Embedding.from_pretrained(
+                morphlex_embeddings, freeze=morphlex_freeze, padding_idx=data.PAD_ID,
             )
             if m_emb == "extra":
-                self.morph_lex_extra_layer = nn.Linear(
-                    self.morph_lex_embedding.weight.data.shape[1], morphlex_extra_dim
+                self.morphlex_extra_layer = nn.Linear(
+                    self.morphlex_embedding.weight.data.shape[1], morphlex_extra_dim
                 )
                 main_bilstm_dim += morphlex_extra_dim
             else:
-                main_bilstm_dim += self.morph_lex_embedding.weight.data.shape[1]
+                main_bilstm_dim += self.morphlex_embedding.weight.data.shape[1]
 
         # Word embeddings
-        if w_emb == "pretrained":
+        if w_emb == "pretrained" and word_embeddings is not None:
             self.token_embedding = nn.Embedding.from_pretrained(
                 word_embeddings, padding_idx=data.PAD_ID,
             )
@@ -120,15 +122,17 @@ class ABLTagger(nn.Module):
         nn.init.xavier_uniform_(self.final.weight)
         self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
 
-    def forward(self, input: Dict[str, Optional[torch.Tensor]]):
+    def forward(  # pylint: disable=arguments-differ
+        self, batch_dict: Dict[str, Optional[torch.Tensor]]
+    ):
         """Run a forward pass through the module. Input should be tensors."""
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # (b, seq, chars)
-        chars = input["c"]
+        chars = batch_dict["c"]
         # (b, seq)
-        w = input["w"]
+        w = batch_dict["w"]
         # (b, seq)
-        m = input["m"]
+        m = batch_dict["m"]
 
         main_in = None
         # Word embeddings
@@ -142,9 +146,9 @@ class ABLTagger(nn.Module):
         if self.m_emb == "standard" or self.m_emb == "extra":
             assert m is not None
             # (b, seq, f)
-            m_embs = self.morph_lex_embedding(m)
+            m_embs = self.morphlex_embedding(m)
             if self.m_emb == "extra":
-                m_embs = torch.tanh(self.morph_lex_extra_layer(m_embs))
+                m_embs = torch.tanh(self.morphlex_extra_layer(m_embs))
             if main_in is not None:
                 main_in = torch.cat((main_in, m_embs), dim=2)
             else:
@@ -217,7 +221,11 @@ class ABLTagger(nn.Module):
         lengths = torch.sum(torch.pow(padded_sequence, 2), dim=2)
         # lengths = (b)
         lengths = torch.sum(
-            lengths != torch.tensor([0.0]).to(padded_sequence.device), dim=1
+            lengths
+            != torch.tensor([0.0]).to(  # pylint: disable=not-callable
+                padded_sequence.device
+            ),
+            dim=1,
         )
         try:
             return (

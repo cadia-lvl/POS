@@ -2,12 +2,125 @@
 from typing import Iterable, Optional, Callable, Dict
 import logging
 import datetime
+from functools import partial
 
 import torch
+from torch.utils import tensorboard
 
 from . import data
+from .model import ABLTagger
 
 log = logging.getLogger()
+
+
+def run_training(
+    run_parameters,
+    model_parameters,
+    model_extras,
+    dictionaries,
+    device,
+    train_ds,
+    test_ds,
+    output_dir,
+) -> torch.nn.Module:
+    """Run a complete training cycle for a given model and return it."""
+    tagger = ABLTagger(**{**model_parameters, **model_extras}).to(device)
+    log.info(tagger)
+
+    for name, tensor in tagger.state_dict().items():
+        log.info(f"{name}: {torch.numel(tensor)}")
+    log.info(
+        f"Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}"
+    )
+    log.info(
+        f"Not trainable parameters={sum(p.numel() for p in tagger.parameters() if not p.requires_grad)}"
+    )
+    if run_parameters["label_smoothing"] == 0.0:
+        criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID, reduction="sum")
+    else:
+        criterion = partial(  # type: ignore
+            smooth_ce_loss,
+            pad_idx=data.PAD_ID,
+            smoothing=run_parameters["label_smoothing"],
+        )
+
+    reduced_lr_names = ["token_embedding.weight"]
+    params = [
+        {
+            "params": list(
+                param
+                for name, param in filter(
+                    lambda kv: kv[0] not in reduced_lr_names, tagger.named_parameters()
+                )
+            )
+        },
+        {
+            "params": list(
+                param
+                for name, param in filter(
+                    lambda kv: kv[0] in reduced_lr_names, tagger.named_parameters()
+                )
+            ),
+            "lr": run_parameters["word_embedding_lr"],
+        },
+    ]
+    if run_parameters["optimizer"] == "sgd":
+        optimizer = torch.optim.SGD(params, lr=run_parameters["learning_rate"])
+        log.info("Using SGD")
+    elif run_parameters["optimizer"] == "adam":
+        optimizer = torch.optim.Adam(params, lr=run_parameters["learning_rate"])  # type: ignore
+        log.info("Using Adam")
+    else:
+        raise ValueError("Unknown optimizer")
+    if run_parameters["scheduler"] == "multiply":
+        scheduler = torch.optim.lr_scheduler.MultiplicativeLR(  # type: ignore
+            optimizer, lr_lambda=lambda epoch: 0.95
+        )
+    elif run_parameters["scheduler"] == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer=optimizer,
+            mode="min",
+            factor=0.5,
+            patience=2,
+            verbose=True,
+            threshold=100.0,
+            threshold_mode="abs",
+            cooldown=0,
+        )
+    else:
+        raise ValueError("Unknown scheduler")
+
+    run_epochs(
+        model=tagger,
+        optimizer=optimizer,
+        criterion=criterion,
+        scheduler=scheduler,
+        train_loader=partial(
+            data.data_loader,
+            dataset=train_ds,
+            device=device,
+            shuffle=True,
+            w_emb=model_parameters["w_emb"],
+            c_emb=model_parameters["c_emb"],
+            m_emb=model_parameters["m_emb"],
+            dictionaries=dictionaries,
+            batch_size=run_parameters["batch_size"],
+        ),
+        test_loader=partial(
+            data.data_loader,
+            dataset=test_ds,
+            device=device,
+            shuffle=True,
+            w_emb=model_parameters["w_emb"],
+            c_emb=model_parameters["c_emb"],
+            m_emb=model_parameters["m_emb"],
+            dictionaries=dictionaries,
+            batch_size=run_parameters["batch_size"] * 10,
+        ),
+        epochs=run_parameters["epochs"],
+        writer=tensorboard.SummaryWriter(str(output_dir)),
+    )
+    return tagger
 
 
 def run_epochs(
@@ -114,7 +227,7 @@ def tag_sents(
     model,
     data_loader: Iterable[Dict[str, Optional[torch.Tensor]]],
     dictionaries: Dict[str, data.VocabMap],
-) -> data.DataSent:
+) -> data.SimpleDataset:
     """Tag (apply POS) on a given data set."""
     model.eval()
     with torch.no_grad():
@@ -131,10 +244,12 @@ def tag_sents(
                 # We use the fact that padding is placed BEHIND those features
                 sent_pred = sent_pred[:length, :]  # type: ignore
                 idxs = sent_pred.argmax(dim=1).tolist()
-                tags.append(tuple(dictionaries["t_map"].i2w[idx] for idx in idxs))
+                tags.append(
+                    data.Symbols(dictionaries["t_map"].i2w[idx] for idx in idxs)
+                )
     end = datetime.datetime.now()
     log.info(f"Tagging took={end-start} seconds")
-    return data.DataSent(tags)
+    return data.SimpleDataset(tags)
 
 
 def categorical_accuracy(preds, y):

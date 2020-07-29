@@ -46,9 +46,7 @@ class TagExamples:
         return errors
 
 
-def flatten_data(
-    in_data: Tuple[data.DataSent, data.DataSent, data.DataSent]
-) -> List[Example]:
+def flatten_data(in_data: data.PredictedDataset) -> List[Example]:
     """Flatten the predictions to a sequence of tokens along with their tags."""
     line_id = 0
     flat = []
@@ -128,7 +126,7 @@ class Experiment:
         """Initialize an experiment given a path. Read the predictions and vocabulary."""
         self.path = path
         self.examples = analyse_examples(
-            flatten_data(data.read_tsv(str(path / "predictions.tsv")))
+            flatten_data(data.PredictedDataset.from_file(str(path / "predictions.tsv")))
         )
         with (path / "dictionaries.pickle").open("rb") as f:
             self.dicts = pickle.load(f)
