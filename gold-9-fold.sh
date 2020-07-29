@@ -8,8 +8,12 @@ shift
 
 # --begin=now+8hour \
 #        --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
-#        --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
+#        --morphlex_freeze \
 #        --morphlex_extra_dim 32 \
+#        --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
+#        --known_chars_file data/extra/characters_training.txt \
+#        --label_smoothing 0.1 \
+#        --main_lstm_layers 2 \
 FIRST_STEP=1
 LAST_STEP=1
 if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
@@ -26,8 +30,9 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
         $DATA_DIR/${fold}TM.plain \
         $DATA_DIR/${fold}PM.plain \
         $out_folder \
+        --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+        --known_chars_file data/extra/characters_training.txt \
         --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
-        --morphlex_freeze \
         --word_embedding_dim 128 \
         --word_embedding_lr 0.2 \
         --final_dim 32 \
