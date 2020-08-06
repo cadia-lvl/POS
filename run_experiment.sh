@@ -23,10 +23,7 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     $RAW_DIR/mim/10PM.plain \
     $out_folder \
     --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
-    --morphlex_extra_dim -1 \
-    --word_embedding_dim 128 \
     --word_embedding_lr 0.2 \
-    --final_dim 64 \
     --learning_rate 0.2 \
     --optimizer sgd \
     --epochs 1 \

@@ -6,7 +6,7 @@ import logging
 import json
 import pathlib
 from typing import Dict
-from functools import reduce
+from functools import reduce, partial
 from operator import add
 
 import click
@@ -193,10 +193,12 @@ def train_and_tag(
     }
 
     # Read train and test data
-    train_ds = reduce(
-        add,
-        (data.Dataset.from_file(training_file) for training_file in training_files),
-        (),
+    train_ds = data.Dataset(
+        reduce(
+            add,
+            (data.Dataset.from_file(training_file) for training_file in training_files),
+            (),
+        )
     )
     test_ds = data.Dataset.from_file(test_file)
 
@@ -207,8 +209,12 @@ def train_and_tag(
         # Set the number of threads to use for CPU
         torch.set_num_threads(threads)
         log.info(f"Using {threads} CPU threads")
-        train_ds = train_ds[:batch_size]
-        test_ds = test_ds[:batch_size]  # pylint: disable=unsubscriptable-object
+        train_ds = data.Dataset(
+            train_ds[:batch_size]  # pylint: disable=unsubscriptable-object
+        )
+        test_ds = data.Dataset(
+            test_ds[:batch_size]  # pylint: disable=unsubscriptable-object
+        )
 
     # Set configuration values and create mappers
     dictionaries: Dict[str, data.VocabMap] = {}
@@ -311,35 +317,35 @@ def train_and_tag(
         json.dump({**parameters, **model_parameters}, f, indent=4)
 
     # Train a model
+    data_loader = partial(
+        data.data_loader,
+        device=device,
+        w_emb=w_emb,
+        c_emb=c_emb,
+        m_emb=m_emb,
+        dictionaries=dictionaries,
+    )
     tagger = train.run_training(
         run_parameters=parameters,
         model_parameters=model_parameters,
         model_extras=extras,
+        data_loader=data_loader,
         dictionaries=dictionaries,
         device=device,
         train_ds=train_ds,
         test_ds=test_ds,
         output_dir=output_dir,
     )
-    test_tags_tagged = train.tag_sents(
-        model=tagger,
-        data_loader=data.data_loader(
-            dataset=test_ds,
-            device=device,
-            shuffle=False,
-            w_emb=w_emb,
-            c_emb=c_emb,
-            m_emb=m_emb,
-            dictionaries=dictionaries,
-            batch_size=batch_size * 10,
+    test_tags_tagged = tagger.tag_sents(
+        data_loader=data_loader(
+            dataset=test_ds, shuffle=False, batch_size=batch_size * 10,
         ),
         dictionaries=dictionaries,
+        criterion=None,
     )
     log.info("Writing predictions, dictionaries and model")
-    data.write_tsv(
-        str(output_dir.joinpath("predictions.tsv")),
-        (*test_ds.unpack(), test_tags_tagged),
-    )
+    with (output_dir / "predictions.tsv").open("w") as f:
+        data.write_tsv(f, (*test_ds.unpack(), test_tags_tagged))
     with (output_dir / "known_toks.txt").open("w+") as f:
         for token in data.Vocab.from_symbols(  # pylint: disable=not-an-iterable
             x for x, y in train_ds
@@ -380,14 +386,14 @@ def tag(model_file, dictionaries_files, data_in, output, device):
     with open(dictionaries_files, "rb") as f:
         dictionaries = pickle.load(f)
     log.info("Reading dataset")
-    datasent = data_in.read_tsv(data_in, cols=1)
+    with open(data_in) as f:
+        ds = data.SimpleDataset.from_file(f)
     log.info("Predicting tags")
-    predicted_tags = train.tag_sents(
-        model,
-        data_in.data_loader(
-            datasent,
-            device,
-            dictionaries,
+    predicted_tags = model.tag_sents(
+        data.data_loader(
+            dataset=ds,
+            device=device,
+            dictionaries=dictionaries,
             shuffle=False,
             w_emb="pretrained",
             c_emb="standard",
@@ -395,13 +401,11 @@ def tag(model_file, dictionaries_files, data_in, output, device):
             batch_size=16,
         ),
         dictionaries=dictionaries,
+        criterion=None,
     )
 
     log.info("Writing results")
-    for tokens, tags in zip(datasent, predicted_tags):
-        for token, pred_tag in zip(tokens, tags):
-            output.write("\t".join([token, pred_tag]) + "\n")
-        output.write("\n")
+    data.write_tsv(f=output, data=(ds, predicted_tags))
     log.info("Done!")
 
 

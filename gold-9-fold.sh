@@ -14,6 +14,7 @@ shift
 #        --known_chars_file data/extra/characters_training.txt \
 #        --label_smoothing 0.1 \
 #        --main_lstm_layers 2 \
+#        --word_embedding_dim 128 \
 FIRST_STEP=1
 LAST_STEP=1
 if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
@@ -31,14 +32,12 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
         $DATA_DIR/${fold}PM.plain \
         $out_folder \
         --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
-        --known_chars_file data/extra/characters_training.txt \
+        --morphlex_freeze \
         --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
-        --word_embedding_dim 128 \
-        --word_embedding_lr 0.2 \
         --final_dim 32 \
         --learning_rate 0.2 \
         --optimizer sgd \
-        --epochs 25 \
+        --epochs 50 \
         --batch_size 16 \
         --save_vocab \
         --save_model \

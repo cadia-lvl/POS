@@ -1,6 +1,7 @@
 """The tagging Module."""
 import logging
-from typing import Optional, Dict
+from typing import Optional, Dict, Iterable, List, Tuple, Union
+import datetime
 
 import torch
 import torch.nn as nn
@@ -253,6 +254,47 @@ class ABLTagger(nn.Module):
         return torch.nn.utils.rnn.pad_packed_sequence(
             packed_sequence, batch_first=True
         )[0]
+
+    def tag_sents(
+        self,
+        data_loader: Iterable[Dict[str, Optional[torch.Tensor]]],
+        dictionaries: Dict[str, data.VocabMap],
+        criterion,
+    ) -> Union[data.SimpleDataset, Tuple[data.SimpleDataset, float]]:
+        """Tag (apply POS) on a given data set."""
+        start = datetime.datetime.now()
+        self.eval()
+        tags: List[data.Symbols] = []
+        loss = None
+        with torch.no_grad():
+            for batch in data_loader:
+                pred = self(batch)
+                # (b, seq, tag_features)
+                if criterion is not None and "t" in batch:
+                    tmp_loss = criterion(
+                        pred.view(-1, pred.shape[-1]),
+                        batch["t"].view(-1),  # type:ignore
+                    )
+                    loss = tmp_loss if loss is None else loss + tmp_loss
+                idxs = pred.argmax(dim=2).tolist()
+                tags.extend(
+                    (
+                        data.Symbols(
+                            [
+                                dictionaries["t_map"].i2w[tag_idx]
+                                for tag_idx in sent
+                                if tag_idx != data.PAD_ID
+                            ]
+                        )
+                        for sent in idxs
+                    )
+                )
+        end = datetime.datetime.now()
+        log.info(f"Tagged {sum((1 for sent in tags for token in sent))} tokens")
+        log.info(f"Tagging took={end-start} seconds")
+        if loss is None:
+            return data.SimpleDataset(tags)
+        return data.SimpleDataset(tags), loss.item()
 
 
 def copy_into_larger_tensor(

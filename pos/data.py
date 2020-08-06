@@ -13,6 +13,7 @@ from typing import (
     Callable,
 )
 import logging
+from copy import deepcopy
 
 from tqdm import tqdm
 import numpy as np
@@ -39,7 +40,7 @@ Symbol = str
 
 
 class Symbols(Tuple[Symbol, ...]):
-    """A Symbol is a sequence of symbols in a sentence: tokens or tags."""
+    """Symbols is a sequence of symbols in a sentence: tokens or tags."""
 
 
 class Vocab(Set[str]):
@@ -62,6 +63,13 @@ class Vocab(Set[str]):
 class SimpleDataset(Tuple[Symbols, ...]):
     """A SimpleDataset is a sequence of Symbols: tokens or tags."""
 
+    @staticmethod
+    def from_file(filepath):
+        """Construct a Dataset from a file."""
+        with open(filepath) as f:
+            sentences = read_tsv(f, cols=1)
+        return SimpleDataset(sentences)
+
 
 class TaggedSentence(Tuple[Symbols, Symbols]):
     """A TaggedSentence is pair of tokens and tags."""
@@ -73,7 +81,8 @@ class Dataset(Tuple[TaggedSentence, ...]):
     @staticmethod
     def from_file(filepath):
         """Construct a Dataset from a file."""
-        sentences = read_tsv(filepath, cols=2)
+        with open(filepath) as f:
+            sentences = read_tsv(f, cols=2)
         return Dataset(sentences)
 
     def unpack(self) -> Tuple[SimpleDataset, SimpleDataset]:
@@ -116,20 +125,20 @@ class PredictedDataset(Tuple[PredictedSentence, ...]):
     @staticmethod
     def from_file(filepath):
         """Construct a PredictedDataset from a file."""
-        sentences = read_tsv(filepath, cols=3)
+        with open(filepath) as f:
+            sentences = read_tsv(f, cols=3)
         return PredictedDataset(sentences)
 
 
-def write_tsv(output, data: Tuple[SimpleDataset, ...]):
+def write_tsv(f, data: Tuple[SimpleDataset, ...]):
     """Write a tsv in many columns."""
-    with open(output, "w+") as f:
-        for sent_tok_tags in zip(*data):
-            for tok_tags in zip(*sent_tok_tags):
-                f.write("\t".join(tok_tags) + "\n")
-            f.write("\n")
+    for sentence in zip(*data):
+        for tok_tags in zip(*sentence):
+            f.write("\t".join(tok_tags) + "\n")
+        f.write("\n")
 
 
-def read_tsv(filepath, cols=2) -> List[Tuple[Symbols, ...]]:
+def read_tsv(f, cols=2) -> List[Tuple[Symbols, ...]]:
     """Read a single .tsv file with one, two or three columns and returns a list of the Symbols."""
 
     def add_sentence(sent_tokens, sent_tags, model_tags):
@@ -150,26 +159,25 @@ def read_tsv(filepath, cols=2) -> List[Tuple[Symbols, ...]]:
             raise ValueError(f"Invalid number of cols={cols}")
 
     sentences: List[Tuple[Symbols, ...]] = []
-    with open(filepath) as f:
-        sent_tokens: List[str] = []
-        sent_tags: List[str] = []
-        model_tags: List[str] = []
-        for line in f:
-            line = line.strip()
-            # We read a blank line and buffer is not empty - sentence has been read.
-            if not line and len(sent_tokens) != 0:
-                add_sentence(sent_tokens, sent_tags, model_tags)
-                sent_tokens = []
-                sent_tags = []
-                model_tags = []
-            else:
-                symbols = line.split()
-                if cols >= 1:
-                    sent_tokens.append(symbols[0])
-                if cols >= 2:
-                    sent_tags.append(symbols[1])
-                if cols == 3:
-                    model_tags.append(symbols[2])
+    sent_tokens: List[str] = []
+    sent_tags: List[str] = []
+    model_tags: List[str] = []
+    for line in f:
+        line = line.strip()
+        # We read a blank line and buffer is not empty - sentence has been read.
+        if not line and len(sent_tokens) != 0:
+            add_sentence(sent_tokens, sent_tags, model_tags)
+            sent_tokens = []
+            sent_tags = []
+            model_tags = []
+        else:
+            symbols = line.split()
+            if cols >= 1:
+                sent_tokens.append(symbols[0])
+            if cols >= 2:
+                sent_tags.append(symbols[1])
+            if cols == 3:
+                model_tags.append(symbols[2])
     # For the last sentence
     if len(sent_tokens) != 0:
         log.info("No newline at end of file, handling it.")
@@ -181,8 +189,8 @@ def read_tsv(filepath, cols=2) -> List[Tuple[Symbols, ...]]:
 class VocabMap:
     """A VocabMap stores w2i and i2w for dictionaries."""
 
-    w2i: Dict[str, int]
-    i2w: Dict[int, str]
+    w2i: Dict[Symbol, int]
+    i2w: Dict[int, Symbol]
 
     def __init__(
         self, vocab: Vocab, special_tokens: Optional[List[Tuple[str, int]]] = None
@@ -292,15 +300,15 @@ def data_loader(
     dataset: Union[Dataset, SimpleDataset],
     device: torch.device,
     dictionaries: Dict[str, VocabMap],
-    shuffle=True,
-    w_emb="standard",
-    c_emb="standard",
-    m_emb="standard",
-    batch_size=16,
+    shuffle: bool,
+    w_emb: str,
+    c_emb: str,
+    m_emb: str,
+    batch_size: int,
 ) -> Iterable[Dict[str, Optional[torch.Tensor]]]:
     """Perpare the data according to parameters and return batched Tensors."""
     if shuffle:
-        dataset_l = list(dataset)
+        dataset_l = list(deepcopy(dataset))
         random.shuffle(dataset_l)
         # TODO: fix constructor, we don't know that it is a Dataset
         dataset = Dataset(dataset_l)  # type: ignore
