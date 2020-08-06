@@ -110,11 +110,11 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 )
 @click.option(
     "--word_embedding_dim",
-    default=128,
+    default=-1,
     help="The word/token embedding dimension. Set to -1 to disable word embeddings.",
 )
 @click.option(
-    "--word_embedding_lr", default=0.002, help="The word/token embedding learning rate."
+    "--word_embedding_lr", default=0.2, help="The word/token embedding learning rate."
 )
 @click.option(
     "--optimizer",
