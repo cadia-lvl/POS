@@ -205,22 +205,25 @@ def evaluate_model(
     with torch.no_grad():
         y_pred_total = None
         y_total = None
+        loss_total = None
         for batch in data_loader():
             y_pred = model(batch)
             y_pred = y_pred.view(-1, y_pred.shape[-1])
             assert batch["t"] is not None
             y = batch["t"].view(-1)
+            loss = criterion(y_pred, y)
             if y_pred_total is None:
                 y_pred_total = y_pred
                 y_total = y
+                loss_total = loss
             else:
                 y_pred_total = torch.cat([y_pred_total, y_pred], dim=0)
                 y_total = torch.cat([y_total, y], dim=0)
+                loss_total += loss
 
-        loss = criterion(y_pred_total, y_total)
         acc = categorical_accuracy(y_pred_total, y_total)
 
-    return loss.item(), acc.item()
+    return loss_total.item(), acc.item()  # type: ignore
 
 
 def tag_sents(
