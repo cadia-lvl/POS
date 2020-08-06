@@ -2,7 +2,6 @@
 from collections import Counter
 from typing import Tuple, List, Dict, Set
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 import pickle
 
@@ -110,36 +109,21 @@ def filter_examples(
     return filtered
 
 
-@dataclass(init=False)
 class Experiment:
-    """An Experiment holds information about an experiment, i.e. predicted tags and vocabularies.
-    
-    train_vocab: The vocabulary which was seen during training and is also present in testing.
-    """
+    """An Experiment holds information about an experiment, i.e. predicted tags and vocabularies."""
 
-    path: Path
-    examples: Dict[str, TagExamples]
-    dicts: Dict[str, data.VocabMap]
-    train_vocab: Set[str]
-    test_vocab: Set[str]
-
-    def __init__(self, path: Path):
-        """Initialize an experiment given a path. Read the predictions and vocabulary."""
-        self.path = path
-        log.info(f"Reading experiment={path}")
-        log.info("Reading predictions")
-        self.examples = analyse_examples(
-            flatten_data(data.PredictedDataset.from_file(str(path / "predictions.tsv")))
-        )
-        log.info("Reading dicts")
-        with (path / "dictionaries.pickle").open("rb") as f:
-            self.dicts = pickle.load(f)
+    def __init__(
+        self,
+        predictions: data.PredictedDataset,
+        train_vocab: data.Vocab,
+        dicts: Dict[str, data.VocabMap],
+    ):
+        """Initialize an experiment given the predictions and vocabulary."""
+        self.examples = analyse_examples(flatten_data(predictions))
         self.test_vocab = get_vocab(self.examples)
-        log.info("Reading known_vocab")
-        with (path / "known_toks.txt").open("r") as f_known:
-            self.known_vocab = set(line.strip() for line in f_known).intersection(
-                self.test_vocab
-            )
+        self.known_vocab = train_vocab.intersection(self.test_vocab)
+        self.dicts = dicts
+
         log.info("Creating vocabs")
         if "m_map" in self.dicts:
             morphlex_vocab = set(self.dicts["m_map"].w2i.keys()).intersection(
@@ -164,7 +148,20 @@ class Experiment:
         self.unknown_morphlex_vocab = self.unknown_vocab.intersection(morphlex_vocab).difference(wemb_vocab)
         self.unseen_vocab = self.unknown_vocab.difference(wemb_vocab).difference(morphlex_vocab)
         # fmt: on
+
+    @staticmethod
+    def from_file(path: Path):
+        """Create an Experiment from a given path of an experimental results."""
+        log.info(f"Reading experiment={path}")
+        log.info("Reading predictions")
+        predictions = data.PredictedDataset.from_file(str(path / "predictions.tsv"))
+        log.info("Reading dicts")
+        with (path / "dictionaries.pickle").open("rb") as f:
+            dicts = pickle.load(f)
+        log.info("Reading training vocab")
+        train_vocab = data.Vocab.from_file(path / "known_toks.txt")
         log.info(f"Done reading experiment={path}")
+        return Experiment(predictions=predictions, train_vocab=train_vocab, dicts=dicts)
 
     def accuracy(self, vocab: Set[str] = None) -> Tuple[float, int]:
         """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter."""
