@@ -307,16 +307,16 @@ def data_loader(
     batch_size: int,
 ) -> Iterable[Dict[str, Optional[torch.Tensor]]]:
     """Perpare the data according to parameters and return batched Tensors."""
-    if shuffle:
+    if shuffle and type(dataset) == Dataset:
         dataset_l = list(deepcopy(dataset))
         random.shuffle(dataset_l)
-        # TODO: fix constructor, we don't know that it is a Dataset
         dataset = Dataset(dataset_l)  # type: ignore
     length = len(dataset)
     for ndx in range(0, length, batch_size):
         batch = dataset[ndx : min(ndx + batch_size, length)]
         batch_y: Optional[SimpleDataset] = None
         if type(dataset) is Dataset:
+            batch = cast(Dataset, batch)
             batch = Dataset(batch)
             batch_x, batch_y = batch.unpack()
         elif type(dataset) is SimpleDataset:
