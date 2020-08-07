@@ -30,7 +30,8 @@ class ABLTagger(nn.Module):
         emb_token_dim: int,  # The tokens are mapped to this dim, ignored if pretrained
         main_lstm_dim: int,  # The main LSTM dim will output with this dim
         main_lstm_layers: int,  # The main LSTM layers
-        hidden_dim: int,  # The main LSTM time-steps will be mapped to this dim
+        final_layer: str,  # The layer type to use after main LSTM.
+        final_dim: int,  # The main LSTM time-steps will be mapped to this dim
         lstm_dropouts: float,
         input_dropouts: float,
         noise: float,
@@ -44,6 +45,7 @@ class ABLTagger(nn.Module):
         self.m_emb = m_emb
         self.c_emb = c_emb
         self.w_emb = w_emb
+        self.final_layer = final_layer
         # Morphlex embeddings
         main_bilstm_dim = 0
         if (
@@ -117,9 +119,19 @@ class ABLTagger(nn.Module):
             else:
                 raise ValueError("Unknown parameter in lstm={name}")
         # no bias in DyNet
-        self.linear = nn.Linear(main_lstm_dim * 2, hidden_dim)
-        nn.init.xavier_uniform_(self.linear.weight)
-        self.final = nn.Linear(hidden_dim, tags_dim)
+        to_final = main_lstm_dim * 2
+        if final_layer == "dense":
+            self.linear = nn.Linear(main_lstm_dim * 2, final_dim)
+            to_final = final_dim
+            nn.init.xavier_uniform_(self.linear.weight)
+        elif final_layer == "none":
+            # Nothing to do.
+            pass
+        elif final_layer == "attention":
+            pass
+        else:
+            raise ValueError(f"Unkown final_layer type={final_layer}")
+        self.final = nn.Linear(to_final, tags_dim)
         nn.init.xavier_uniform_(self.final.weight)
         self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
 
@@ -220,8 +232,18 @@ class ABLTagger(nn.Module):
                 batch_first=True,
             )[0]
         )
-        # We map each word to our targets
-        out = self.final(torch.tanh(self.linear(main_out)))
+        # We apply the final transformation
+        if self.final_layer == "none":
+            out = self.final(main_out)
+        elif self.final_layer == "dense":
+            # We map each word to our targets
+            out = self.final(torch.tanh(self.linear(main_out)))
+        elif self.final_layer == "attention":
+            out = None
+        else:
+            raise ValueError(
+                f"Unimplemented final transformation type={self.final_layer}"
+            )
         return out
 
     def pack_sequence(self, padded_sequence):

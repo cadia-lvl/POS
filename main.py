@@ -99,6 +99,12 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--batch_size", default=32)
 @click.option("--char_lstm_layers", default=1)
 @click.option("--main_lstm_layers", default=1)
+@click.option(
+    "--final_layer",
+    default="dense",
+    type=click.Choice(["dense", "none", "attention"], case_sensitive=False),
+    help="The type of final layer to use.",
+)
 @click.option("--final_dim", default=32)
 @click.option("--label_smoothing", default=0.0)
 @click.option("--learning_rate", default=0.20)
@@ -142,6 +148,7 @@ def train_and_tag(
     main_lstm_layers,
     char_lstm_layers,
     label_smoothing,
+    final_layer,
     final_dim,
     batch_size,
     save_model,
@@ -303,7 +310,8 @@ def train_and_tag(
         "emb_token_dim": word_embedding_dim,  # The tokens are mapped to this dim
         "main_lstm_dim": 64,  # The main LSTM dim will output with this dim
         "main_lstm_layers": main_lstm_layers,  # The main LSTM dim will output with this dim
-        "hidden_dim": final_dim,  # The main LSTM time-steps will be mapped to this dim
+        "final_layer": final_layer,
+        "final_dim": final_dim,  # The main LSTM time-steps will be mapped to this dim
         "morphlex_extra_dim": morphlex_extra_dim,
         "lstm_dropouts": 0.1,
         "input_dropouts": 0.0,
