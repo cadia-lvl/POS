@@ -128,7 +128,13 @@ class ABLTagger(nn.Module):
             # Nothing to do.
             pass
         elif final_layer == "attention":
-            pass
+            self.final_attention = nn.TransformerEncoderLayer(
+                d_model=to_final,
+                nhead=1,
+                dim_feedforward=final_dim,
+                dropout=0.1,
+                activation="relu",
+            )
         else:
             raise ValueError(f"Unkown final_layer type={final_layer}")
         self.final = nn.Linear(to_final, tags_dim)
@@ -218,33 +224,34 @@ class ABLTagger(nn.Module):
         if self.training and main_in is not None:
             main_in = main_in + torch.empty_like(main_in).normal_(0, self.noise)
         # (b, seq, f)
-        self.bilstm.flatten_parameters()
-        main_out = self.main_bilstm_out_dropout(
-            torch.nn.utils.rnn.pad_packed_sequence(
-                self.bilstm(  # type: ignore
-                    torch.nn.utils.rnn.pack_padded_sequence(  # type: ignore
-                        main_in,
-                        batch_dict["lens"],
-                        batch_first=True,
-                        enforce_sorted=False,
-                    )
-                )[0],
-                batch_first=True,
-            )[0]
+        # Pack the paddings
+        packed = torch.nn.utils.rnn.pack_padded_sequence(  # type: ignore
+            main_in, batch_dict["lens"], batch_first=True, enforce_sorted=False,
         )
+        # Make sure that the parameters are contiguous.
+        self.bilstm.flatten_parameters()
+        # Ignore the hidden outputs
+        packed_out, _ = self.bilstm(packed)
+        # Unpack and ignore the lengths
+        main_out, _ = torch.nn.utils.rnn.pad_packed_sequence(
+            packed_out, batch_first=True  # type: ignore
+        )
+        main_out = self.main_bilstm_out_dropout(main_out)
         # We apply the final transformation
         if self.final_layer == "none":
-            out = self.final(main_out)
+            out = main_out[0]
         elif self.final_layer == "dense":
             # We map each word to our targets
-            out = self.final(torch.tanh(self.linear(main_out)))
+            out = torch.tanh(self.linear(main_out[0]))
         elif self.final_layer == "attention":
-            out = None
+            out = batch_second_to_batch_first(
+                self.final_attention(src=batch_first_to_batch_second(main_out))
+            )
         else:
             raise ValueError(
                 f"Unimplemented final transformation type={self.final_layer}"
             )
-        return out
+        return self.final(out)
 
     def pack_sequence(self, padded_sequence):
         """Pack the PAD in a sequence. Assumes that PAD=0.0 and appended."""
@@ -326,3 +333,15 @@ def copy_into_larger_tensor(
     base = torch.zeros_like(like_tensor)
     base[: tensor.shape[0], : tensor.shape[1]] = tensor
     return base
+
+
+def batch_first_to_batch_second(tensor: torch.Tensor):
+    """Move the batch size from the first index to second. Only works for 3-D tensor."""
+    # Move the dimensions and fix the indices (with contiguous) so they can be used.
+    return tensor.permute(1, 0, 2).contiguous()
+
+
+def batch_second_to_batch_first(tensor: torch.Tensor):
+    """Move the batch size from the first index to second. Only works for 3-D tensor."""
+    # Move the dimensions and fix the indices (with contiguous) so they can be used.
+    return tensor.permute(1, 0, 2).contiguous()

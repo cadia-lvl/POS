@@ -7,11 +7,11 @@ def test_copy_into_larger_tensor():
     test = torch.arange(start=0, end=4).view(2, 2)
     print(test)
     bigger_tensor = torch.ones((3, 3))
-    assert torch.all(model.copy_into_larger_tensor(test, bigger_tensor).eq(torch.tensor([
-        [0, 1, 0],
-        [2, 3, 0],
-        [0, 0, 0]
-    ])))
+    assert torch.all(
+        model.copy_into_larger_tensor(test, bigger_tensor).eq(
+            torch.tensor([[0, 1, 0], [2, 3, 0], [0, 0, 0]])
+        )
+    )
 
 
 def test_loss():
@@ -30,8 +30,11 @@ def test_loss():
     assert loss2.item() == expected_loss2
 
     # self-made sum
-    assert expected_loss + expected_loss2 - \
-        0.01 <= (loss + loss2).item() <= expected_loss + expected_loss2
+    assert (
+        expected_loss + expected_loss2 - 0.01
+        <= (loss + loss2).item()
+        <= expected_loss + expected_loss2
+    )
     # pytorch sum
     test_score_combined = torch.cat((test_score, test_score2))
     test_idx_combined = torch.cat((test_idx, test_idx2))
@@ -56,3 +59,27 @@ def test_loss():
     loss_ignore = criterion(test_score_combined, test_idx_combined)
     assert loss_ignore.shape[0] == 2
     assert loss_ignore.sum().eq(loss2)
+
+
+def test_batch_first_to_batch_second():
+    test = torch.tensor(
+        [
+            [[1, 2, 3], [4, 5, 6],],  # first batch  # first word  # second word
+            [[7, 8, 9], [10, 11, 12],],  # second batch  # first word  # second word
+        ]
+    )
+    print(test)
+    test_b_2nd = model.batch_first_to_batch_second(test)
+    assert test_b_2nd.eq(
+        torch.tensor(
+            [
+                [[1, 2, 3], [7, 8, 9],],  # first word  # first batch  # second batch
+                [
+                    [4, 5, 6],
+                    [10, 11, 12],
+                ],  # second word  # first batch  # second batch
+            ]
+        )
+    ).all()
+
+    assert test.eq(model.batch_second_to_batch_first(test_b_2nd)).all()
