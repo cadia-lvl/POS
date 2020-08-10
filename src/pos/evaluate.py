@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 import pickle
 
-from . import data
+from .types import PredictedDataset, Vocab, VocabMap
 
 log = logging.getLogger()
 
@@ -14,14 +14,14 @@ class Experiment:
 
     def __init__(
         self,
-        predictions: data.PredictedDataset,
-        train_vocab: data.Vocab,
-        dicts: Dict[str, data.VocabMap],
+        predictions: PredictedDataset,
+        train_vocab: Vocab,
+        dicts: Dict[str, VocabMap],
     ):
         """Initialize an experiment given the predictions and vocabulary."""
         self.predictions = predictions
         # Get the tokens and retrive the vocab.
-        self.test_vocab = data.Vocab.from_symbols(self.predictions.unpack()[0])
+        self.test_vocab = Vocab.from_symbols(self.predictions.unpack()[0])
         self.known_vocab = train_vocab.intersection(self.test_vocab)
         self.dicts = dicts
 
@@ -55,12 +55,12 @@ class Experiment:
         """Create an Experiment from a given path of an experimental results."""
         log.info(f"Reading experiment={path}")
         log.info("Reading predictions")
-        predictions = data.PredictedDataset.from_file(str(path / "predictions.tsv"))
+        predictions = PredictedDataset.from_file(str(path / "predictions.tsv"))
         log.info("Reading dicts")
         with (path / "dictionaries.pickle").open("rb") as f:
             dicts = pickle.load(f)
         log.info("Reading training vocab")
-        train_vocab = data.Vocab.from_file(path / "known_toks.txt")
+        train_vocab = Vocab.from_file(path / "known_toks.txt")
         log.info(f"Done reading experiment={path}")
         return Experiment(predictions=predictions, train_vocab=train_vocab, dicts=dicts)
 

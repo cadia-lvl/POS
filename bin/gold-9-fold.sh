@@ -34,6 +34,7 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
         --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
         --morphlex_freeze \
         --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
+        --known_chars_file data/extra/characters_training.txt \
         --final_dim 32 \
         --learning_rate 0.2 \
         --optimizer sgd \

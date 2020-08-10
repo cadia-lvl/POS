@@ -1,6 +1,7 @@
 import torch
 
 from pos import data
+from pos.types import Dataset, PredictedDataset, Vocab, VocabMap
 
 
 def test_parse_bin_embedding():
@@ -29,19 +30,19 @@ def test_parse_wemb():
 
 
 def test_read_pos():
-    test_ds = data.Dataset.from_file("./tests/test.tsv")
+    test_ds = Dataset.from_file("./tests/test.tsv")
     assert len(test_ds) == 3
 
 
 def test_create_mappers_c_w_emb_only():
-    test_ds = data.Dataset.from_file("./tests/test.tsv")
+    test_ds = Dataset.from_file("./tests/test.tsv")
     d = {}
-    d["w_map"] = data.VocabMap(
-        data.Vocab.from_symbols((x for x, y in test_ds)),
+    d["w_map"] = VocabMap(
+        Vocab.from_symbols((x for x, y in test_ds)),
         special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
     )
-    d["c_map"] = data.VocabMap(
-        data.Vocab.from_symbols((tok for x, y in test_ds for tok in x)),
+    d["c_map"] = VocabMap(
+        Vocab.from_symbols((tok for x, y in test_ds for tok in x)),
         special_tokens=[
             (data.UNK, data.UNK_ID),
             (data.PAD, data.PAD_ID),
@@ -49,8 +50,8 @@ def test_create_mappers_c_w_emb_only():
             (data.SOS, data.SOS_ID),
         ],
     )
-    d["t_map"] = data.VocabMap(
-        data.Vocab.from_symbols((y for x, y in test_ds)),
+    d["t_map"] = VocabMap(
+        Vocab.from_symbols((y for x, y in test_ds)),
         special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
     )
     # We always read the tags as well
@@ -70,13 +71,13 @@ def test_create_mappers_c_w_emb_only():
 
 
 def test_unpack_dataset():
-    test_ds = data.Dataset.from_file("./tests/test.tsv")
+    test_ds = Dataset.from_file("./tests/test.tsv")
     tokens, _ = test_ds.unpack()
     assert tokens == (("Hæ",), ("Þetta", "er", "test"), ("Já", "Kannski"))
 
 
 def test_read_predicted():
-    pred_ds = data.PredictedDataset.from_file("./tests/test_pred.tsv")
+    pred_ds = PredictedDataset.from_file("./tests/test_pred.tsv")
     tokens, tags, pred_tags = pred_ds.unpack()
     assert tokens == (("Hæ",), ("Þetta", "er", "test"), ("Já", "Kannski"))
     assert tags == (("a",), ("f", "s", "n"), ("a", "a"))
@@ -84,14 +85,14 @@ def test_read_predicted():
 
 
 def test_data_loader_w_emb_only():
-    test_ds = data.Dataset.from_file("./tests/test.tsv")
+    test_ds = Dataset.from_file("./tests/test.tsv")
     d = {}
-    d["w_map"] = data.VocabMap(
-        data.Vocab.from_symbols((x for x, y in test_ds)),
+    d["w_map"] = VocabMap(
+        Vocab.from_symbols((x for x, y in test_ds)),
         special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
     )
-    d["t_map"] = data.VocabMap(
-        data.Vocab.from_symbols((y for x, y in test_ds)),
+    d["t_map"] = VocabMap(
+        Vocab.from_symbols((y for x, y in test_ds)),
         special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
     )
 
@@ -134,14 +135,14 @@ def test_data_loader_w_emb_only():
 
 
 def test_data_loader_c_w_emb():
-    test_ds = data.Dataset.from_file("./tests/test.tsv")
+    test_ds = Dataset.from_file("./tests/test.tsv")
     d = {}
-    d["w_map"] = data.VocabMap(
-        data.Vocab.from_symbols((x for x, y in test_ds)),
+    d["w_map"] = VocabMap(
+        Vocab.from_symbols((x for x, y in test_ds)),
         special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
     )
-    d["c_map"] = data.VocabMap(
-        data.Vocab.from_symbols((tok for x, y in test_ds for tok in x)),
+    d["c_map"] = VocabMap(
+        Vocab.from_symbols((tok for x, y in test_ds for tok in x)),
         special_tokens=[
             (data.UNK, data.UNK_ID),
             (data.PAD, data.PAD_ID),
@@ -149,8 +150,8 @@ def test_data_loader_c_w_emb():
             (data.SOS, data.SOS_ID),
         ],
     )
-    d["t_map"] = data.VocabMap(
-        data.Vocab.from_symbols((y for x, y in test_ds)),
+    d["t_map"] = VocabMap(
+        Vocab.from_symbols((y for x, y in test_ds)),
         special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
     )
 
@@ -198,14 +199,14 @@ def test_data_loader_c_w_emb():
 
 
 def test_data_loader_c_w_emb_b3():
-    test_ds = data.Dataset.from_file("./tests/test.tsv")
+    test_ds = Dataset.from_file("./tests/test.tsv")
     d = {}
-    d["w_map"] = data.VocabMap(
-        data.Vocab.from_symbols((x for x, y in test_ds)),
+    d["w_map"] = VocabMap(
+        Vocab.from_symbols((x for x, y in test_ds)),
         special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
     )
-    d["c_map"] = data.VocabMap(
-        data.Vocab.from_symbols((tok for x, y in test_ds for tok in x)),
+    d["c_map"] = VocabMap(
+        Vocab.from_symbols((tok for x, y in test_ds for tok in x)),
         special_tokens=[
             (data.UNK, data.UNK_ID),
             (data.PAD, data.PAD_ID),
@@ -213,8 +214,8 @@ def test_data_loader_c_w_emb_b3():
             (data.SOS, data.SOS_ID),
         ],
     )
-    d["t_map"] = data.VocabMap(
-        data.Vocab.from_symbols((y for x, y in test_ds)),
+    d["t_map"] = VocabMap(
+        Vocab.from_symbols((y for x, y in test_ds)),
         special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
     )
 
@@ -236,5 +237,31 @@ def test_data_loader_c_w_emb_b3():
         assert batch["c"] is not None
         assert batch["w"] is not None
         assert batch["m"] is None
+        assert batch["c"].shape == (3, 3, 9)
+        assert idx != 1
+
+
+def test_data_loader_wemb_electra():
+    test_ds = Dataset.from_file("./tests/test.tsv")
+    d = {}
+    d["t_map"] = VocabMap(
+        Vocab.from_symbols((y for x, y in test_ds)),
+        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
+    )
+
+    data_it = data.data_loader(
+        dataset=test_ds,
+        device=torch.device("cpu"),
+        shuffle=False,
+        w_emb="electra",
+        c_emb="none",
+        m_emb="none",
+        dictionaries=d,
+        batch_size=3,
+    )
+    for idx, batch in enumerate(data_it):
+        assert "w" in batch
+        assert "t" in batch
+        assert batch["w"].shape == (3, 3, 256)
         assert batch["c"].shape == (3, 3, 9)
         assert idx != 1

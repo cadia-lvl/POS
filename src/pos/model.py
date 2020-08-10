@@ -31,6 +31,7 @@ class ABLTagger(nn.Module):
         main_lstm_dim: int,  # The main LSTM dim will output with this dim
         main_lstm_layers: int,  # The main LSTM layers
         final_layer: str,  # The layer type to use after main LSTM.
+        final_layer_attention_heads: int,  # The number of attention heads to use in the attention layer.
         final_dim: int,  # The main LSTM time-steps will be mapped to this dim
         lstm_dropouts: float,
         input_dropouts: float,
@@ -120,6 +121,7 @@ class ABLTagger(nn.Module):
                 raise ValueError("Unknown parameter in lstm={name}")
         # no bias in DyNet
         to_final = main_lstm_dim * 2
+        # Final layer
         if final_layer == "dense":
             self.linear = nn.Linear(main_lstm_dim * 2, final_dim)
             to_final = final_dim
@@ -130,7 +132,7 @@ class ABLTagger(nn.Module):
         elif final_layer == "attention":
             self.final_attention = nn.TransformerEncoderLayer(
                 d_model=to_final,
-                nhead=1,
+                nhead=final_layer_attention_heads,
                 dim_feedforward=final_dim,
                 dropout=0.1,
                 activation="relu",

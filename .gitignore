@@ -9,3 +9,4 @@ slurm-*
 dmii.*
 igc*
 electra_model/
+**/*.egg-info

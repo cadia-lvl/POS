@@ -24,7 +24,7 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     --output="$out_folder/slurm-%j.out" \
     --gres=gpu \
     --mem=10G \
-    --wrap="./main.py \
+    --wrap="pos \
     train-and-tag \
     $RAW_DIR/mim/10TM.plain \
     $RAW_DIR/mim/10PM.plain \
@@ -34,6 +34,8 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
     --word_embedding_lr 0.2 \
     --known_chars_file data/extra/characters_training.txt \
+    --final_layer attention \
+    --final_layer_attention_heads 2 \
     --learning_rate 0.2 \
     --optimizer sgd \
     --epochs 25 \
