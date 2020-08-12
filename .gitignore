@@ -1,12 +1,12 @@
 .mypy_cache/
 .vscode/
-**/__pycache__/
+__pycache__/
 .pytest_cache/
 data/raw/*
-models/*
 out/*
 slurm-*
 dmii.*
 igc*
 electra_model/
-**/*.egg-info
+*.egg-info
+dist/
