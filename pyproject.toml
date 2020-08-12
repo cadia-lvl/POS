@@ -1,8 +1,29 @@
+[pydocstyle]
+match_dir = "pos"
+
+[mypy]
+ignore_missing_imports = true
+
+[tool.pylint.messages_control]
+disable = "C,logging-fstring-interpolation,global-statement"
+ignored-modules = "torch"
+
+[pytest]
+testpaths = "tests"
+
 [tool.poetry]
 name = "pos"
 version = "0.1.0"
 description = "A Part-of-Speech tagger for Icelandic"
 authors = ["Haukur <haukurpalljonsson@gmail.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/cadia-lvl/pos"
+packages = [
+    {include = "pos", from = "src"}
+]
+[tool.poetry.scripts]
+pos = "pos.main:cli"
 
 [tool.poetry.dependencies]
 python = ">=3.6.1"
