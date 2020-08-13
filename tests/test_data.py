@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from pos import data
@@ -241,6 +242,7 @@ def test_data_loader_c_w_emb_b3():
         assert idx != 1
 
 
+@pytest.mark.model
 def test_data_loader_wemb_electra():
     test_ds = Dataset.from_file("./tests/test.tsv")
     d = {}

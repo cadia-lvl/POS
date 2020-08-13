@@ -24,10 +24,10 @@ jobs:
     # Missing linting with pylint
     - name: Lint with mypy
       run: |
-        poetry run mypy .
+        poetry run mypy --ignore-missing-imports --pretty src/
     - name: Check documentation with pydocstyle
       run: |
-        poetry run pydocstyle
+        poetry run pydocstyle --match-dir src
     - name: Test with pytest
       run: |
-        poetry run pytest
+        poetry run pytest -m "not model"

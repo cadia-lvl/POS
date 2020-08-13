@@ -1,15 +1,20 @@
-[pydocstyle]
-match_dir = "pos"
+[pydocstyle] # Not supported
+match-dir = "src"
 
-[mypy]
+[mypy] # Not supported, yet
 ignore_missing_imports = true
 
 [tool.pylint.messages_control]
 disable = "C,logging-fstring-interpolation,global-statement"
 ignored-modules = "torch"
 
-[pytest]
-testpaths = "tests"
+[tool.pytest.ini_options]
+testpaths = [
+    "tests"
+]
+markers = [
+    "model"
+]
 
 [tool.poetry]
 name = "pos"
