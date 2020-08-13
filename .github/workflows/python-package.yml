@@ -23,14 +23,11 @@ jobs:
       run: poetry install
     # Missing linting with pylint
     - name: Lint with mypy
-      uses: abatilo/actions-poetry@v1.5.0
       run: |
         poetry run mypy .
     - name: Check documentation with pydocstyle
-      uses: abatilo/actions-poetry@v1.5.0
       run: |
         poetry run pydocstyle
     - name: Test with pytest
-      uses: abatilo/actions-poetry@v1.5.0
       run: |
         poetry run pytest
