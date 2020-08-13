@@ -15,8 +15,11 @@ import numpy as np
 
 from . import data
 from . import train
+from .types import write_tsv
 
 DEBUG = False
+logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
+log = logging.getLogger()
 
 
 @click.group()
@@ -85,19 +88,36 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     help="A file which contains the characters the model should know. Omit, to disable character embeddings. "
     + "File should be a single line, the line is split() to retrieve characters.",
 )
+@click.option("--char_lstm_layers", default=1)
 @click.option(
     "--morphlex_embeddings_file",
     default=None,
     help="A file which contains the morphological embeddings.",
+)
+@click.option("--morphlex_freeze", is_flag=True, default=False)
+@click.option(
+    "--morphlex_extra_dim",
+    default=-1,
+    help="The dimension to map morphlex embeddings to. -1 to disable.",
 )
 @click.option(
     "--pretrained_word_embeddings_file",
     default=None,
     help="A file which contains pretrained word embeddings. See implementation for supported formats.",
 )
-@click.option("--epochs", default=20)
-@click.option("--batch_size", default=32)
-@click.option("--char_lstm_layers", default=1)
+@click.option(
+    "--word_embedding_dim",
+    default=-1,
+    help="The word/token embedding dimension. Set to -1 to disable word embeddings.",
+)
+@click.option(
+    "--word_embedding_lr", default=0.2, help="The word/token embedding learning rate."
+)
+@click.option(
+    "--pretrained_model_folder",
+    default=None,
+    help="A folder which contains a pretrained BERT-like model.",
+)
 @click.option("--main_lstm_layers", default=1)
 @click.option(
     "--final_layer",
@@ -113,20 +133,8 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--final_dim", default=32)
 @click.option("--label_smoothing", default=0.0)
 @click.option("--learning_rate", default=0.20)
-@click.option("--morphlex_freeze", is_flag=True, default=False)
-@click.option(
-    "--morphlex_extra_dim",
-    default=-1,
-    help="The dimension to map morphlex embeddings to. -1 to disable.",
-)
-@click.option(
-    "--word_embedding_dim",
-    default=-1,
-    help="The word/token embedding dimension. Set to -1 to disable word embeddings.",
-)
-@click.option(
-    "--word_embedding_lr", default=0.2, help="The word/token embedding learning rate."
-)
+@click.option("--epochs", default=20)
+@click.option("--batch_size", default=32)
 @click.option(
     "--optimizer",
     default="sgd",
@@ -150,6 +158,7 @@ def train_and_tag(
     pretrained_word_embeddings_file,
     word_embedding_lr,
     word_embedding_dim,
+    pretrained_model_folder,
     main_lstm_layers,
     char_lstm_layers,
     label_smoothing,
@@ -251,6 +260,9 @@ def train_and_tag(
             )
             dictionaries["w_map"] = w_map
             extras["word_embeddings"] = torch.from_numpy(w_embedding).float().to(device)
+    # We are given a pretrained BERT like model, we use it.
+    elif pretrained_model_folder is not None:
+        w_emb = "electra"
     elif word_embedding_dim != -1:
         # No file is given and the dimension is not -1 we train from scratch.
         w_emb = "standard"
@@ -360,7 +372,7 @@ def train_and_tag(
     )
     log.info("Writing predictions, dictionaries and model")
     with (output_dir / "predictions.tsv").open("w") as f:
-        data.write_tsv(f, (*test_ds.unpack(), test_tags_tagged))
+        write_tsv(f, (*test_ds.unpack(), test_tags_tagged))
     with (output_dir / "known_toks.txt").open("w+") as f:
         for token in data.Vocab.from_symbols(  # pylint: disable=not-an-iterable
             x for x, y in train_ds
@@ -420,11 +432,5 @@ def tag(model_file, dictionaries_files, data_in, output, device):
     )
 
     log.info("Writing results")
-    data.write_tsv(f=output, data=(ds, predicted_tags))
+    write_tsv(f=output, data=(ds, predicted_tags))
     log.info("Done!")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
-    log = logging.getLogger()
-    cli()  # pylint: disable=no-value-for-parameter

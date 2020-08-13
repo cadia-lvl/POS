@@ -263,5 +263,4 @@ def test_data_loader_wemb_electra():
         assert "w" in batch
         assert "t" in batch
         assert batch["w"].shape == (3, 3, 256)
-        assert batch["c"].shape == (3, 3, 9)
         assert idx != 1

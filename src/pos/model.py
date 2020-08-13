@@ -6,6 +6,7 @@ import datetime
 import torch
 import torch.nn as nn
 
+from .types import Symbols, SimpleDataset, VocabMap
 from . import data
 
 
@@ -77,6 +78,8 @@ class ABLTagger(nn.Module):
             nn.init.xavier_uniform_(self.token_embedding.weight[1:, :])
             self.w_embs_dropout = nn.Dropout(p=input_dropouts)
             main_bilstm_dim += self.token_embedding.weight.data.shape[1]
+        elif w_emb == "electra":
+            main_bilstm_dim += 256
 
         # Character embeddings
         if c_emb == "standard":
@@ -162,6 +165,10 @@ class ABLTagger(nn.Module):
             # (b, seq, f)
             w_embs = self.w_embs_dropout(self.token_embedding(w))
             main_in = w_embs
+        elif self.w_emb == "electra":
+            assert w is not None
+            w_embs = w
+            main_in = w_embs
 
         # Morphlex embeddings
         if self.m_emb == "standard" or self.m_emb == "extra":
@@ -241,10 +248,10 @@ class ABLTagger(nn.Module):
         main_out = self.main_bilstm_out_dropout(main_out)
         # We apply the final transformation
         if self.final_layer == "none":
-            out = main_out[0]
+            out = main_out
         elif self.final_layer == "dense":
             # We map each word to our targets
-            out = torch.tanh(self.linear(main_out[0]))
+            out = torch.tanh(self.linear(main_out))
         elif self.final_layer == "attention":
             out = batch_second_to_batch_first(
                 self.final_attention(src=batch_first_to_batch_second(main_out))
@@ -289,13 +296,13 @@ class ABLTagger(nn.Module):
     def tag_sents(
         self,
         data_loader: Iterable[Dict[str, Optional[torch.Tensor]]],
-        dictionaries: Dict[str, data.VocabMap],
+        dictionaries: Dict[str, VocabMap],
         criterion,
-    ) -> Union[data.SimpleDataset, Tuple[data.SimpleDataset, float]]:
+    ) -> Union[SimpleDataset, Tuple[SimpleDataset, float]]:
         """Tag (apply POS) on a given data set."""
         start = datetime.datetime.now()
         self.eval()
-        tags: List[data.Symbols] = []
+        tags: List[Symbols] = []
         loss = None
         with torch.no_grad():
             for batch in data_loader:
@@ -310,7 +317,7 @@ class ABLTagger(nn.Module):
                 idxs = pred.argmax(dim=2).tolist()
                 tags.extend(
                     (
-                        data.Symbols(
+                        Symbols(
                             [
                                 dictionaries["t_map"].i2w[tag_idx]
                                 for tag_idx in sent
@@ -324,8 +331,8 @@ class ABLTagger(nn.Module):
         log.info(f"Tagged {sum((1 for sent in tags for token in sent))} tokens")
         log.info(f"Tagging took={end-start} seconds")
         if loss is None:
-            return data.SimpleDataset(tags)
-        return data.SimpleDataset(tags), loss.item()
+            return SimpleDataset(tags)
+        return SimpleDataset(tags), loss.item()
 
 
 def copy_into_larger_tensor(

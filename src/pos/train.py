@@ -10,6 +10,7 @@ from torch.utils import tensorboard
 
 from .evaluate import Experiment
 from . import data
+from .types import Dataset, Vocab, PredictedDataset, PredictedSentence, VocabMap
 from .model import ABLTagger
 
 log = logging.getLogger()
@@ -115,19 +116,19 @@ def run_epochs(
     criterion,
     scheduler: torch.optim.lr_scheduler._LRScheduler,  # pylint: disable=protected-access
     data_loader: Callable[
-        [data.Dataset, bool, int], Iterable[Dict[str, Optional[torch.Tensor]]]
+        [Dataset, bool, int], Iterable[Dict[str, Optional[torch.Tensor]]]
     ],
-    dictionaries: Dict[str, data.VocabMap],
+    dictionaries: Dict[str, VocabMap],
     batch_size: int,
     epochs: int,
-    train_ds: data.Dataset,
-    test_ds: data.Dataset,
+    train_ds: Dataset,
+    test_ds: Dataset,
     writer,
 ):
     """Run all the training epochs using the training data and evaluate on the test data."""
     best_validation_loss = inf
     # Get the tokens only
-    train_vocab = data.Vocab.from_symbols(train_ds.unpack()[0])
+    train_vocab = Vocab.from_symbols(train_ds.unpack()[0])
     for epoch in range(1, epochs + 1):
         # Time it
         start = datetime.datetime.now()
@@ -211,12 +212,12 @@ def train_model(
 def evaluate_model(
     model,
     data_loader: Callable[
-        [data.Dataset, bool, int], Iterable[Dict[str, Optional[torch.Tensor]]]
+        [Dataset, bool, int], Iterable[Dict[str, Optional[torch.Tensor]]]
     ],
-    dictionaries: Dict[str, data.VocabMap],
+    dictionaries: Dict[str, VocabMap],
     criterion,
-    test_ds: data.Dataset,
-    train_vocab: data.Vocab,
+    test_ds: Dataset,
+    train_vocab: Vocab,
     batch_size: int,
 ):
     """Evaluate a model on a given test set."""
@@ -227,8 +228,8 @@ def evaluate_model(
         dictionaries=dictionaries,
         criterion=criterion,
     )
-    predicted_ds = data.PredictedDataset(
-        data.PredictedSentence((tokens, tags, predicted_tags))
+    predicted_ds = PredictedDataset(
+        PredictedSentence((tokens, tags, predicted_tags))
         for tokens, tags, predicted_tags in zip(*test_ds.unpack(), test_tags)
     )
     return (
