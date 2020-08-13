@@ -203,9 +203,7 @@ def train_model(
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
         optimizer.step()
         if i % 10 == 0:
-            log.info(
-                log_prepend + f"batch={i}, acc={acc.item()}, loss={loss.item():.4f}"
-            )
+            log.info(log_prepend + f"batch={i}, acc={acc}, loss={loss.item():.4f}")
     return total_loss
 
 
@@ -246,9 +244,9 @@ def categorical_accuracy(preds, y):
         dim=1, keepdim=True
     )  # get the index of the max probability
     # nonzero to map to idexes again and filter out pads.
-    non_pad_elements = (y != data.PAD_ID).nonzero()
+    non_pad_elements = (y != data.PAD_ID).nonzero(as_tuple=False)
     correct = max_preds[non_pad_elements].squeeze(1).eq(y[non_pad_elements])
-    return correct.sum() / torch.FloatTensor([y[non_pad_elements].shape[0]])
+    return float(correct.sum().item()) / y[non_pad_elements].shape[0]
 
 
 def smooth_ce_loss(pred, gold, pad_idx, smoothing=0.1):
