@@ -5,7 +5,14 @@ match-dir = "src"
 ignore_missing_imports = true
 
 [tool.pylint.messages_control]
-disable = "C,logging-fstring-interpolation,global-statement"
+disable = [
+    "C",
+    "R",
+    "logging-fstring-interpolation",
+    "global-statement",
+    "abstract-method",
+    "eval-used"
+]
 ignored-modules = "torch"
 
 [tool.pytest.ini_options]

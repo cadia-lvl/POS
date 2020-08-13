@@ -21,7 +21,9 @@ jobs:
         version: 1.0.10
     - name: Install dependencies
       run: poetry install
-    # Missing linting with pylint
+    - name: Run Pylint
+      run: |
+        poetry run pylint pos
     - name: Lint with mypy
       run: |
         poetry run mypy --ignore-missing-imports --pretty src/
