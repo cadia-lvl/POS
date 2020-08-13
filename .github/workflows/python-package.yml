@@ -18,7 +18,7 @@ jobs:
     - name: Install Poetry
       uses: dschep/install-poetry-action@v1.3
       with:
-        version: 1.0.11
+        version: 1.0.10
     - name: Install dependencies
       run: poetry install
     # Missing linting with pylint
