@@ -391,19 +391,22 @@ def train_and_tag(
 @cli.command()
 @click.argument("model_file")
 @click.argument("dictionaries_files")
-@click.argument("data_in", type=click.File("r"))
-@click.argument("output", type=click.File("w+"))
+@click.argument("data_in", type=str)
+@click.argument("output", type=str)
 @click.option(
     "--device", default="cpu", help="The device to use, 'cpu' or 'cuda:0' for GPU."
 )
-def tag(model_file, dictionaries_files, data_in, output, device):
+@click.option(
+    "--contains_tags", is_flag=True, default=False, help="Does input data contain tags?"
+)
+def tag(model_file, dictionaries_files, data_in, output, device, contains_tags):
     """Tag tokens in a file.
 
     Args:
         model_file: A filepath to a trained model.
         dictionaries_file: A filepath to dictionaries (vocabulary mappings) for preprocessing.
-        data: A file or stdin (-), formatted as: token per line, sentences separated with newlines (empty line).
-        output: A file or stdout (-). Output is formatted like the input, but after each token there is a tab and then the tag.
+        data: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
+        output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
     """
     log.info(f"Using device={device}")
     device = torch.device(device)
@@ -413,8 +416,11 @@ def tag(model_file, dictionaries_files, data_in, output, device):
     with open(dictionaries_files, "rb") as f:
         dictionaries = pickle.load(f)
     log.info("Reading dataset")
-    with open(data_in) as f:
-        ds = data.SimpleDataset.from_file(f)
+    if contains_tags:
+        ds_with_tags = data.Dataset.from_file(data_in)
+        ds, gold = ds_with_tags.unpack()
+    else:
+        ds = data.SimpleDataset.from_file(data_in)
     log.info("Predicting tags")
     predicted_tags = model.tag_sents(
         data.data_loader(
@@ -432,5 +438,9 @@ def tag(model_file, dictionaries_files, data_in, output, device):
     )
 
     log.info("Writing results")
-    write_tsv(f=output, data=(ds, predicted_tags))
+    with open(output, "w+") as f:
+        if contains_tags:
+            write_tsv(f=f, data=(ds, gold, predicted_tags))
+        else:
+            write_tsv(f=f, data=(ds, predicted_tags))
     log.info("Done!")

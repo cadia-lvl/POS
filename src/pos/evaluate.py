@@ -51,11 +51,14 @@ class Experiment:
         # fmt: on
 
     @staticmethod
-    def from_file(path: Path):
-        """Create an Experiment from a given path of an experimental results."""
+    def from_file(path: Path, predictions=None):
+        """Create an Experiment from a given path of an experimental results. Optionally point to a specific prediction ds."""
         log.info(f"Reading experiment={path}")
         log.info("Reading predictions")
-        predictions = PredictedDataset.from_file(str(path / "predictions.tsv"))
+        if predictions:
+            predictions = PredictedDataset.from_file(predictions)
+        else:
+            predictions = PredictedDataset.from_file(str(path / "predictions.tsv"))
         log.info("Reading dicts")
         with (path / "dictionaries.pickle").open("rb") as f:
             dicts = pickle.load(f)
