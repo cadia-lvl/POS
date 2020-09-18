@@ -396,7 +396,10 @@ def train_and_tag(
     "--device", default="cpu", help="The device to use, 'cpu' or 'cuda:0' for GPU."
 )
 @click.option(
-    "--contains_tags", is_flag=True, default=False, help="Does input data contain tags?"
+    "--contains_tags",
+    is_flag=True,
+    default=False,
+    help="Does input data contain tags? Useful when predicting tags on a dataset which is already tagged (gold tags). All are written out: token\tgold\tpredicted",
 )
 def tag(model_file, dictionaries_file, data_in, output, device, contains_tags):
     """Tag tokens in a file.
