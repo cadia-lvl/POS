@@ -389,7 +389,7 @@ def train_and_tag(
 
 @cli.command()
 @click.argument("model_file")
-@click.argument("dictionaries_files")
+@click.argument("dictionaries_file")
 @click.argument("data_in", type=str)
 @click.argument("output", type=str)
 @click.option(
@@ -398,17 +398,17 @@ def train_and_tag(
 @click.option(
     "--contains_tags", is_flag=True, default=False, help="Does input data contain tags?"
 )
-def tag(model_file, dictionaries_files, data_in, output, device, contains_tags):
+def tag(model_file, dictionaries_file, data_in, output, device, contains_tags):
     """Tag tokens in a file.
 
     Args:
         model_file: A filepath to a trained model.
         dictionaries_file: A filepath to dictionaries (vocabulary mappings) for preprocessing.
-        data: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
+        data_in: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
         output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
     """
     tagger = api.Tagger(
-        model_path=model_file, dictionaries=dictionaries_files, device=device
+        model_file=model_file, dictionaries_file=dictionaries_file, device=device
     )
     log.info("Reading dataset")
     if contains_tags:

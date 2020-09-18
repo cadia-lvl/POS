@@ -126,7 +126,7 @@ def read_tsv(f, cols=2) -> List[Tuple[Symbols, ...]]:
         """Add a sentence to the list. HAS SIDE-EFFECTS."""
         if cols == 1:
             sentences.append(Symbols(tuple(sent_tokens)))
-        if cols == 2:
+        elif cols == 2:
             sentences.append((Symbols(tuple(sent_tokens)), Symbols(tuple(sent_tags))))
         elif cols == 3:
             sentences.append(

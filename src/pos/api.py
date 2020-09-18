@@ -6,7 +6,7 @@ import logging
 
 import torch
 
-from . import model, types
+from . import model, types, data
 
 log = logging.getLogger()
 
@@ -20,12 +20,12 @@ class Tagger:
         device: The (computational) device to use. Either "cpu" for CPU or "cuda:x" for GPU. X is an integer from 0 and up and refers to which GPU to use.
     """
 
-    def __init__(self, model_path=None, dictionaries=None, device="cpu"):
+    def __init__(self, model_file=None, dictionaries_file=None, device="cpu"):
         """Initialize a Tagger. Reads the given files."""
         log.info("Setting device.")
         self.device = torch.device(device)
         log.info("Reading dictionaries")
-        with open(dictionaries_files, "rb") as f:
+        with open(dictionaries_file, "rb") as f:
             self.dictionaries = pickle.load(f)
         log.info("Reading model file")
         self.model = torch.load(model_file, map_location=self.device)
