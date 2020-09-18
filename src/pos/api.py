@@ -6,7 +6,7 @@ import logging
 
 import torch
 
-from . import model, types, data
+from . import types, data
 
 log = logging.getLogger()
 

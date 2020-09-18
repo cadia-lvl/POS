@@ -6,7 +6,6 @@ from functools import partial
 from math import inf
 
 import torch
-from torch.utils import tensorboard
 
 from .evaluate import Experiment
 from . import data
@@ -28,6 +27,8 @@ def run_training(
     output_dir,
 ) -> torch.nn.Module:
     """Run a complete training cycle for a given model and return it."""
+    from torch.utils import tensorboard
+
     tagger = ABLTagger(**{**model_parameters, **model_extras}).to(device)
     log.info(tagger)
 
