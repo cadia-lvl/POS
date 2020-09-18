@@ -1,6 +1,7 @@
 """A collection of types and function used to evaluate the performance of a tagger."""
 from typing import Tuple, List, Dict, Set
 import logging
+from collections import Counter
 from pathlib import Path
 import pickle
 
@@ -120,6 +121,15 @@ class Experiment:
             self.accuracy(self.unknown_wemb_morphlex_vocab),
             self.accuracy(self.unknown_morphlex_vocab),
             self.accuracy(self.unseen_vocab),
+        )
+
+    def error_profile(self):
+        """Return an error profile with counts of errors (tagger > gold)."""
+        return Counter(
+            f"{predicted} > {gold}"
+            for tokens, gold_tags, predicted_tags in self.predictions
+            for token, gold, predicted in zip(tokens, gold_tags, predicted_tags)
+            if gold != predicted
         )
 
 
