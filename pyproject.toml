@@ -1,0 +1,58 @@
+[pydocstyle] # Not supported
+match-dir = "src"
+
+[mypy] # Not supported, yet
+ignore_missing_imports = true
+
+[tool.pylint.messages_control]
+disable = [
+    "C",
+    "R",
+    "logging-fstring-interpolation",
+    "global-statement",
+    "abstract-method",
+    "eval-used"
+]
+ignored-modules = "torch"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests"
+]
+markers = [
+    "model"
+]
+
+[tool.poetry]
+name = "pos"
+version = "1.0.0"
+description = "A Part-of-Speech tagger for Icelandic"
+authors = ["Haukur <haukurpalljonsson@gmail.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/cadia-lvl/pos"
+packages = [
+    {include = "pos", from = "src"}
+]
+[tool.poetry.scripts]
+pos = "pos.cli:cli"
+
+[tool.poetry.dependencies]
+python = ">=3.6.1"
+torch = "^1.6.0"
+tqdm = "^4.48.2"
+flair = "^0.5.1"
+
+[tool.poetry.dev-dependencies]
+black = "^19.10b0"
+mypy = "^0.782"
+pylint = "^2.5.3"
+pydocstyle = "^5.0.2"
+pytest = "^6.0.1"
+tensorboard = "^2.3.0"
+jupyter = "^1.0.0"
+rope = "^0.17.0"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"

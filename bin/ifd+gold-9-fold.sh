@@ -1,6 +1,6 @@
 #!/bin/bash
 FOLDS="01 02 03 04 05 06 07 08 09"
-DATA_DIR=./data/raw/otb
+DATA_DIR=./data/raw
 
 NAME="$1"
 # Move the arguments forward
@@ -16,19 +16,25 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
         --output="$out_folder/slurm-%j.out" \
         --gres=gpu \
         --mem=10G \
-        --wrap="./main.py \
+        --wrap="pos \
         train-and-tag \
-        $DATA_DIR/${fold}TM.plain \
-        $DATA_DIR/${fold}PM.plain \
+        $DATA_DIR/otb/${fold}TM.plain \
+        $DATA_DIR/otb/${fold}PM.plain \
+        $DATA_DIR/mim/${fold}TM.plain \
+        $DATA_DIR/mim/${fold}PM.plain \
         $out_folder \
-        --epochs 20 \
+        --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+        --morphlex_freeze \
+        --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
+        --known_chars_file data/extra/characters_training.txt \
+        --main_lstm_layers 2 \
+        --label_smoothing 0.1 \
+        --epochs 40 \
         --batch_size 16 \
         --save_vocab \
         --save_model \
         --gpu \
         --optimizer sgd \
-        --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
-        --final_dim 32 \
         --learning_rate 0.2"
     done
 fi

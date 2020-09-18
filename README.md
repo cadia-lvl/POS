@@ -2,13 +2,15 @@
 The goal of this project is to create a part-of-speech tagger for Icelandic using the revised fine-grained tagging schema for Icelandic.
 For further information about the schema see [MIM-GOLD on CLARIN-IS](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/40) (the description pdf).
 
-This work is based on the ABLTagger but with some model modifications and is compatible with PyTorch 1.5.1.
+This work is based on the ABLTagger (in [References](#references)) but with some model modifications and runs on PyTorch 1.6.0.
 
 # Table of Contents
 - [POS tagger for Icelandic](#pos-tagger-for-icelandic)
 - [Table of Contents](#table-of-contents)
 - [Installation](#installation)
-- [Running (Tagging text)](#running--tagging-text-)
+- [Command line usage](#command-line-usage)
+- [Python module](#python-module)
+- [Docker](#docker)
 - [License](#license)
 - [Authors](#authors)
   * [Acknowledgments](#acknowledgments)
@@ -25,66 +27,100 @@ This work is based on the ABLTagger but with some model modifications and is com
 
 
 # Installation
-Pretrained models are distributed with Docker, so follow the [official installation guide for Docker](https://www.docker.com/).
+The tagger expects input to be tokenized and a tokenizer is not bundled with this package. We reccomend [tokenizer](https://github.com/mideind/Tokenizer) version 2.0+.
+
+Installing the PoS tagger locally without using Docker:
+```
+# Using version 1.0.0
+pip install git+https://github.com/cadia-lvl/POS.git@1.0.0
+# Download the model & additional files
+curl ------
+# Test the installation
+pos path/to/tagger.pt path/to/dictonaries.pickle example.txt example_tagged.txt
+```
+
+For usage examples see next sections.
+
+For Docker installation see [Docker](#docker).
 
 For installation for further development see [Contributing](#Contributing).
 
-# Running (Tagging text)
+## Command line usage
+Note that current version of the tagger expects the input and output to be paths (i.e. not stdin or stdout).
+
+example.txt is correctly formatted input file: One token per line and sentences are separated with an empty line.
+```Bash
+cat example.txt
+Þetta
+er
+próf
+.
+
+Tvær
+setningar
+!
+```
+Tagging this file
+```Bash
+pos path/to/tagger.pt path/to/dictonaries.pickle example.txt example_tagged.txt
+2020-09-18 12:43:50,345 - Setting device.
+2020-09-18 12:43:50,346 - Reading dictionaries
+2020-09-18 12:43:52,955 - Reading model file
+2020-09-18 12:43:54,188 - Reading dataset
+2020-09-18 12:43:54,188 - No newline at end of file, handling it.
+2020-09-18 12:43:54,188 - Predicting tags
+2020-09-18 12:43:54,212 - Tagged 8 tokens
+2020-09-18 12:43:54,212 - Tagging took=0:00:00.023401 seconds
+2020-09-18 12:43:54,212 - Done predicting!
+2020-09-18 12:43:54,212 - Writing results
+2020-09-18 12:43:54,213 - Done!
+cat example_tagged.txt 
+Þetta   fahen
+er      sfg3en
+próf    nhen
+.       pl
+
+Tvær    tfvfn
+setningar       nvfn
+!       pl
+
+```
+For additional flags and further details see `pos tag --help`
+## Python module
+Usage example of the tagger in another Python module [example.py](example.py).
+```Python
+"""An example of the POS tagger as a module."""
+import pos
+
+# Initialize the tagger
+tagger = pos.Tagger(
+    model_file="path/to/tagger.pt",
+    dictionaries_file="path/to/dictionaries.pickle",
+    device="cpu",
+)
+
+# Tag a single tokenized sentence
+tags = tagger.tag_sent(["Þetta", "er", "setning", "."])
+print(tags)
+# ('fahen', 'sfg3en', 'nven', 'pl')
+
+# Tag a correctly formatted file.
+dataset = pos.SimpleDataset.from_file("example.txt")
+tags = tagger.tag_bulk(dataset=dataset)
+print(tags)
+# (('fahen', 'sfg3en', 'nhen', 'pl'), ('tfvfn', 'nvfn', 'pl', 'aa'))
+```
+For additional information, see the docstrings provided.
+# Docker
+Follow the [official installation guide for Docker](https://www.docker.com/).
+
+Trained models are distributed with Docker and then the command line client is exposed by default, so see instructions above.
+
 Before running the docker command be sure that the docker daemon has access to roughly 4GB of RAM.
 
-The docker image comes with a pretrained model. To tag tokens, execute the following command:
-```
-cat tokenized_untagged.tsv | docker run -i haukurp/pos - - > tagged.tsv
-```
-The file `tokenized_untagged.tsv` is tokenized and correctly formatter input text which should be tagged.
-The tagger expects the input to be one token per line and sentences should be separated by with an empty line.
-A tokenizer is not bundled with the tagger but we recommend [tokenizer](https://github.com/mideind/Tokenizer) version 2.0+.
-
-This input is piped to the docker command and read in by the tagger from stdin (`-`).
-The output is also piped out to stdout (`-`) and is then redirected to the file `tagged.tsv`.
-The output has the same format as the input file except that after each token there is a tab and then the corresponding tag.
-The output thus contains the original text as well as the tags.
-
-Input example (`tokenized_untagged.tsv`):
-```
-Við     
-höfum   
-góða    
-aðstöðu 
-fyrir   
-barnavagna
-og      
-kerrur  
-.       
-
-Börnin  
-geta    
-sofið   
-úti     
-ef      
-vill    
-.       
-```
-
-Output example (`tagged.tsv`):
-```
-Við     fp1fn
-höfum   sfg1fn
-góða    lveosf
-aðstöðu nveo
-fyrir   af
-barnavagna      nkfo
-og      c
-kerrur  nvfo
-.       pl
-
-Börnin  nhfng
-geta    sfg3fn
-sofið   sþghen
-úti     aa
-ef      c
-vill    sfg3en
-.       pl
+```Bash
+# Using version 1.0.0
+docker run -v $PWD:/data haukurp/pos:1.0.0 /data/example.txt /data/example_tagged.txt
 ```
 
 # License
@@ -109,13 +145,8 @@ This project was funded (partly) by the Language Technology Programme for Icelan
 For more involved installation instructions and how to train different models.
 
 ## Installation
-We assume that development is made with `conda`. Start by creating a new conda environment and setup all necessary development tools.
+We use poetry to manage dependencies and to build wheels. Install poetry and do `poetry install`.
 
-```
-conda create --name pos python==3.7.7
-conda activate pos
-conda install -c pytorch -c conda-forge --file requirements_dev.txt
-```
 ## Training data
 The training data is a text file wich contains PoS-tagged sentences. The file has one token per line, as well as its corresponding tag. The sentences are separated by an empty line. 
 
