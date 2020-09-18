@@ -13,8 +13,7 @@ import click
 import torch
 import numpy as np
 
-from . import data
-from . import train
+from . import data, train, api
 from .types import write_tsv
 
 DEBUG = False
@@ -408,35 +407,16 @@ def tag(model_file, dictionaries_files, data_in, output, device, contains_tags):
         data: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
         output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
     """
-    log.info(f"Using device={device}")
-    device = torch.device(device)
-    log.info("Reading model")
-    model = torch.load(model_file, map_location=device)
-    log.info("Reading dictionaries")
-    with open(dictionaries_files, "rb") as f:
-        dictionaries = pickle.load(f)
+    tagger = api.Tagger(
+        model_path=model_file, dictionaries=dictionaries_files, device=device
+    )
     log.info("Reading dataset")
     if contains_tags:
         ds_with_tags = data.Dataset.from_file(data_in)
         ds, gold = ds_with_tags.unpack()
     else:
         ds = data.SimpleDataset.from_file(data_in)
-    log.info("Predicting tags")
-    predicted_tags = model.tag_sents(
-        data.data_loader(
-            dataset=ds,
-            device=device,
-            dictionaries=dictionaries,
-            shuffle=False,
-            w_emb="pretrained",
-            c_emb="standard",
-            m_emb="standard",
-            batch_size=16,
-        ),
-        dictionaries=dictionaries,
-        criterion=None,
-    )
-
+    predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=16)
     log.info("Writing results")
     with open(output, "w+") as f:
         if contains_tags:

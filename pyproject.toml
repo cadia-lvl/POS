@@ -25,7 +25,7 @@ markers = [
 
 [tool.poetry]
 name = "pos"
-version = "0.1.0"
+version = "1.0.0"
 description = "A Part-of-Speech tagger for Icelandic"
 authors = ["Haukur <haukurpalljonsson@gmail.com>"]
 license = "Apache-2.0"
@@ -35,7 +35,7 @@ packages = [
     {include = "pos", from = "src"}
 ]
 [tool.poetry.scripts]
-pos = "pos.main:cli"
+pos = "pos.cli:cli"
 
 [tool.poetry.dependencies]
 python = ">=3.6.1"
