@@ -31,13 +31,13 @@ The tagger expects input to be tokenized and a tokenizer is not bundled with thi
 
 Installing the PoS tagger locally without using Docker:
 ```
-# Using version 1.0.0
-pip install git+https://github.com/cadia-lvl/POS.git@1.0.0
+# Using v1.0.0
+pip install git+https://github.com/cadia-lvl/POS.git@v1.0.0
 # Download the model & additional files
 wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/53/tagger.pt
 wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/53/dictionaries.pickle
 # Test the installation
-pos path/to/tagger.pt path/to/dictonaries.pickle example.txt example_tagged.txt
+pos tag path/to/tagger.pt path/to/dictionaries.pickle example.txt example_tagged.txt
 ```
 
 For usage examples see next sections.
