@@ -63,7 +63,7 @@ setningar
 ```
 Tagging this file
 ```Bash
-pos path/to/tagger.pt path/to/dictonaries.pickle example.txt example_tagged.txt
+pos tag path/to/tagger.pt path/to/dictionaries.pickle example.txt example_tagged.txt
 2020-09-18 12:43:50,345 - Setting device.
 2020-09-18 12:43:50,346 - Reading dictionaries
 2020-09-18 12:43:52,955 - Reading model file
