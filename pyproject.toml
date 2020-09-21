@@ -42,6 +42,7 @@ python = ">=3.6.1"
 torch = "^1.6.0"
 tqdm = "^4.48.2"
 flair = "^0.5.1"
+click = "^7.1.2"
 
 [tool.poetry.dev-dependencies]
 black = "^19.10b0"
