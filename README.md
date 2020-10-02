@@ -51,40 +51,113 @@ Note that current version of the tagger expects the input and output to be paths
 
 example.txt is correctly formatted input file: One token per line and sentences are separated with an empty line.
 ```Bash
-cat example.txt
-Þetta
+cat example.txt 
+Þar
+sem
+jökulinn
+ber
+við
+loft
+hættir
+landið
+að
+vera
+jarðneskt
+,
+en
+jörðin
+fær
+hlutdeild
+í
+himninum
+,
+þar
+búa
+ekki
+framar
+neinar
+sorgir
+og
+þess
+vegna
 er
-próf
+gleðin
+ekki
+nauðsynleg
+,
+þar
+ríkir
+fegurðin
+ein
+, 
+ofar
+hverri
+kröfu
 .
 
-Tvær
-setningar
-!
+Halldór
+Laxness
 ```
 Tagging this file
 ```Bash
 pos tag path/to/tagger.pt path/to/dictionaries.pickle example.txt example_tagged.txt
-2020-09-18 12:43:50,345 - Setting device.
-2020-09-18 12:43:50,346 - Reading dictionaries
-2020-09-18 12:43:52,955 - Reading model file
-2020-09-18 12:43:54,188 - Reading dataset
-2020-09-18 12:43:54,188 - No newline at end of file, handling it.
-2020-09-18 12:43:54,188 - Predicting tags
-2020-09-18 12:43:54,212 - Tagged 8 tokens
-2020-09-18 12:43:54,212 - Tagging took=0:00:00.023401 seconds
-2020-09-18 12:43:54,212 - Done predicting!
-2020-09-18 12:43:54,212 - Writing results
-2020-09-18 12:43:54,213 - Done!
+2020-10-02 15:56:06,463 - Setting device.
+2020-10-02 15:56:06,463 - Reading dictionaries
+2020-10-02 15:56:09,266 - Reading model file
+2020-10-02 15:56:18,891 - Reading dataset
+2020-10-02 15:56:18,893 - No newline at end of file, handling it.
+2020-10-02 15:56:18,893 - Predicting tags
+2020-10-02 15:56:19,030 - Tagged 84 tokens
+2020-10-02 15:56:19,030 - Tagging took=0:00:00.136156 seconds
+2020-10-02 15:56:19,030 - Done predicting!
+2020-10-02 15:56:19,031 - Writing results
+2020-10-02 15:56:19,032 - Done!!
 cat example_tagged.txt 
-Þetta   fahen
+Þar     aa
+sem     c
+jökulinn        nkeog
+ber     sfg3en
+við     af
+loft    nheo
+hættir  sfg3en
+landið  nheng
+að      cn
+vera    sng
+jarðneskt       lhensf
+,       pk
+en      c
+jörðin  nveng
+fær     sfg3en
+hlutdeild       nveo
+í       af
+himninum        nkeþg
+,       pk
+þar     aa
+búa     sfg3fn
+ekki    aa
+framar  aam
+neinar  fovfo
+sorgir  nvfo
+og      c
+þess    fphee
+vegna   af
 er      sfg3en
-próf    nhen
+gleðin  nveng
+ekki    aa
+nauðsynleg      lvensf
+,       pk
+þar     aa
+ríkir   sfg3en
+fegurðin        nveng
+ein     lvensf
+,       pk
+ofar    afm
+hverri  foveþ
+kröfu   nveþ
 .       pl
 
-Tvær    tfvfn
-setningar       nvfn
-!       pl
-
+Halldór nken-s
+Laxness nken-s
 ```
 For additional flags and further details see `pos tag --help`
 ## Python module
@@ -95,12 +168,10 @@ import pos
 
 # Initialize the tagger
 tagger = pos.Tagger(
-    model_file="path/to/tagger.pt",
-    dictionaries_file="path/to/dictionaries.pickle",
-    device="cpu",
+    model_file="tagger.pt", dictionaries_file="dictionaries.pickle", device="cpu",
 )
 
-# Tag a single tokenized sentence
+# Tag a single sentence
 tags = tagger.tag_sent(["Þetta", "er", "setning", "."])
 print(tags)
 # ('fahen', 'sfg3en', 'nven', 'pl')
@@ -109,7 +180,7 @@ print(tags)
 dataset = pos.SimpleDataset.from_file("example.txt")
 tags = tagger.tag_bulk(dataset=dataset)
 print(tags)
-# (('fahen', 'sfg3en', 'nhen', 'pl'), ('tfvfn', 'nvfn', 'pl', 'aa'))
+# (('aa', 'c', 'nkeog', 'sfg3en', 'af', 'nheo', 'sfg3en', 'nheng', 'cn', 'sng', 'lhensf', 'pk', 'c', 'nveng', 'sfg3en', 'nveo', 'af', 'nkeþg', 'pk', 'aa', 'sfg3fn', 'aa', 'aam', 'fovfo', 'nvfo', 'c', 'fphee', 'af', 'sfg3en', 'nveng', 'aa', 'lvensf', 'pk', 'aa', 'sfg3en', 'nveng', 'lvensf', 'pk', 'afm', 'foveþ', 'nveþ', 'pl'), ('nken-s', 'nken-s'))
 ```
 For additional information, see the docstrings provided.
 # Docker
