@@ -320,11 +320,12 @@ class ABLTagger(nn.Module):
                         Symbols(
                             [
                                 dictionaries["t_map"].i2w[tag_idx]
-                                for tag_idx in sent
-                                if tag_idx != data.PAD_ID
+                                for tag_num, tag_idx in enumerate(sent)
+                                # We do not want to map the PADs, so we compare the lengths
+                                if tag_num < batch["lens"][sent_idx]
                             ]
                         )
-                        for sent in idxs
+                        for sent_idx, sent in enumerate(idxs)
                     )
                 )
         end = datetime.datetime.now()
