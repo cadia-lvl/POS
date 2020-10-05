@@ -242,15 +242,18 @@ vill    sfg3en
 .       pl
 ```
 
-For Icelandic we used the [IDF](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/38) and [MIM-GOLD](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/40). We use the 10th fold in MIM-GOLD to evaluate the trained models.
+For Icelandic we used the [IDF](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/38) and [MIM-GOLD](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/40).
+We use the 10th for hyperparameter selection.
 
 We provide some additional data which is used to train the model:
-- `data/extra/characters_training.txt` contains all the characters which the model knows. Unknown characters are mapped to `<unk>`
+- `data/extra/characters_training.txt` contains all the characters which the model knows.
+Unknown characters are mapped to `<unk>`
 
 ## Additional training data (Morphological lexicon)
-We represent the information contained in the morphological lexicon with n-hot vectors. To generate the n-hot vectors, different scripts will have to be written for different morphological lexicons.
-We use the DIM morphological lexicon for Icelandic.
-The script, `pos/vectorize_dim.py` is used to create n-hot vectors from DIM.
+We represent the information contained in the morphological lexicon with n-hot vectors.
+To generate the n-hot vectors, different scripts will have to be written for different morphological lexicons.
+We use the DMII morphological lexicon for Icelandic.
+The script, `pos/vectorize_dim.py` is used to create n-hot vectors from DMII.
 We first [download the data in SHsnid format](https://bin.arnastofnun.is/django/api/nidurhal/?file=SHsnid.csv.zip).
 After unpacking the `SHsnid.csv` to `./data/extra`.
 To generate the n-hot vectors we run the script:
@@ -264,40 +267,35 @@ The script takes two parameters:
 | -o  --output          | ./data/extra/dmii.vectors           |The file containing the DIM n-hot vectors.
 
 ### Filtering the morphological lexicon
-Since the morphological lexicon contains more words than will be seen in the training and testing sets it is useful *when developing/experimenting* with models to filter
-out words which will not be seen during training and testing.
-
-To do this we filter out the morphological lexicon based on the training and test sets and use the filtered morphological lexicon when developing models.
+Since the morphological lexicon contains more words than will be seen during training and testing, it is useful to filter out unseen words.
 
 ```
-./main.py filter-embedding data/raw/mim/* data/raw/otb/* data/extra/dmii.vectors data/extra/dmii.vectors_filtered bin
+pos filter-embedding data/raw/mim/* data/raw/otb/* data/extra/dmii.vectors data/extra/dmii.vectors_filtered bin
 ```
-For explaination of the parameters run `./main.py filter-embedding --help`
+For explaination of the parameters run `pos filter-embedding --help`
 
 ## Training models
 A model can be trained by invoking the following command.
 ```
-main.py train-and-tag \
+pos train-and-tag \
   training_data/*.tsv \
   testing_data.tsv \
   out # A directory to write out training results
 ```
-For a description of all the arguments and options, run `main.py train-and-tag --help`.
+For a description of all the arguments and options, run `pos train-and-tag --help`.
 
 Parameters with default values (options) are prefixed with `--`.
 
-It is also useful to look at the BASH scripts provided in the main directory.
+It is also useful to look at the BASH scripts in `bin/`
 
 # Versions
-- 1.0.0 First release as a docker container.
+- 1.0.1 Bug fixes to Python module.
+- 1.0.0 First release.
 
 To see older versions we suggest looking through the git tags of the project.
 
 # References
-ABLTagger is a bidirectonal LSTM Part-of-Speech Tagger with combined Word and Character embeddings, augmented with a morphological lexicon and a lexical category identification step. The work is described in the paper [Augmenting a BiLSTM Tagger with a Morphological Lexicon and a Lexical Category Identification Step](https://www.aclweb.org/anthology/R19-1133/)
-
-The paper describes a method for achieving high accuracy in part-of-speech tagging a fine grained tagset. We show how the method is used to reach the highest accuracy reported for PoS-tagging Icelandic. The tagger is augmented by using a morphological lexicon, [The Database of Icelandic Morphology (DIM)](https://www.aclweb.org/anthology/W19-6116/), and by running a pre-tagging step using a very coarse grained tagset induced from the fine grained data.
-
+[Augmenting a BiLSTM Tagger with a Morphological Lexicon and a Lexical Category Identification Step](https://www.aclweb.org/anthology/R19-1133/)
 ```
 @inproceedings{steingrimsson-etal-2019-augmenting,
     title = "Augmenting a {B}i{LSTM} Tagger with a Morphological Lexicon and a Lexical Category Identification Step",
