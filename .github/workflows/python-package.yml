@@ -33,3 +33,6 @@ jobs:
     - name: Test with pytest
       run: |
         poetry run pytest
+    - name: Build with poetry
+      run: |
+        poetry build
