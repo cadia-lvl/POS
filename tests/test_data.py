@@ -1,3 +1,5 @@
+from os.path import isfile
+
 import pytest
 import torch
 
@@ -242,7 +244,9 @@ def test_data_loader_c_w_emb_b3():
         assert idx != 1
 
 
-@pytest.mark.model
+@pytest.mark.skipif(
+    not isfile("electra_model/model.pt"), reason="Model file not present"
+)
 def test_data_loader_wemb_electra():
     test_ds = Dataset.from_file("./tests/test.tsv")
     d = {}

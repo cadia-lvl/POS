@@ -1,9 +1,13 @@
+from os.path import isfile
+
 import pytest
 from pos import flair_embeddings
 from pos.types import Symbols
 
 
-@pytest.mark.model
+@pytest.mark.skipif(
+    not isfile("electra_model/model.pt"), reason="Model file not present"
+)
 def test_electra():
     test = Symbols(("Þetta", "er", "próf", "."))
     embedding = flair_embeddings.electra_embedding(test)

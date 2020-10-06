@@ -1,5 +1,6 @@
 """Test api.py functionality."""
 import pytest
+from os.path import isfile
 
 import pos
 from pos.types import Dataset
@@ -8,7 +9,7 @@ MODEL_LOCATION = "tagger.pt"
 DICT_LOCATION = "dictionaries.pickle"
 
 
-@pytest.mark.model
+@pytest.mark.skipif(not isfile(MODEL_LOCATION), reason="Model file not present")
 def test_tagger():
     """Test all methods of the Tagger."""
     # Initialize the tagger
