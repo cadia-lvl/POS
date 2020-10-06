@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Tuple, Set, Iterable, List, Dict, Optional
 import logging
 
-log = logging.getLogger()
+log = logging.getLogger(__name__)
 
 
 class w_emb(Enum):

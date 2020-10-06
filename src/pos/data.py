@@ -22,7 +22,8 @@ import random
 from . import flair_embeddings as flair
 from .types import Vocab, Dataset, SimpleDataset, VocabMap
 
-log = logging.getLogger()
+
+log = logging.getLogger(__name__)
 
 # To pad in batches
 PAD = "<pad>"

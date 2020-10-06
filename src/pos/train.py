@@ -12,7 +12,7 @@ from . import data
 from .types import Dataset, Vocab, PredictedDataset, PredictedSentence, VocabMap
 from .model import ABLTagger
 
-log = logging.getLogger()
+log = logging.getLogger(__name__)
 
 
 def run_training(

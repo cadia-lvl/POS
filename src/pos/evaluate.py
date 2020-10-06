@@ -7,7 +7,7 @@ import pickle
 
 from .types import PredictedDataset, Vocab, VocabMap
 
-log = logging.getLogger()
+log = logging.getLogger(__name__)
 
 
 class Experiment:
