@@ -8,7 +8,7 @@ import torch
 
 from . import types, data
 
-log = logging.getLogger()
+log = logging.getLogger(__name__)
 
 
 class Tagger:

@@ -3,9 +3,7 @@ import pos
 
 # Initialize the tagger
 tagger = pos.Tagger(
-    model_file="out/full-v2/tagger.pt",
-    dictionaries_file="out/full-v2/dictionaries.pickle",
-    device="cpu",
+    model_file="tagger.pt", dictionaries_file="dictionaries.pickle", device="cpu",
 )
 
 # Tag a single sentence
@@ -17,4 +15,4 @@ print(tags)
 dataset = pos.SimpleDataset.from_file("example.txt")
 tags = tagger.tag_bulk(dataset=dataset)
 print(tags)
-# (('fahen', 'sfg3en', 'nhen', 'pl'), ('tfvfn', 'nvfn', 'pl', 'aa'))
+# (('aa', 'c', 'nkeog', 'sfg3en', 'af', 'nheo', 'sfg3en', 'nheng', 'cn', 'sng', 'lhensf', 'pk', 'c', 'nveng', 'sfg3en', 'nveo', 'af', 'nkeþg', 'pk', 'aa', 'sfg3fn', 'aa', 'aam', 'fovfo', 'nvfo', 'c', 'fphee', 'af', 'sfg3en', 'nveng', 'aa', 'lvensf', 'pk', 'aa', 'sfg3en', 'nveng', 'lvensf', 'pk', 'afm', 'foveþ', 'nveþ', 'pl'), ('nken-s', 'nken-s',))

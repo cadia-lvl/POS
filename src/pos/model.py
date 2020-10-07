@@ -10,7 +10,7 @@ from .types import Symbols, SimpleDataset, VocabMap
 from . import data
 
 
-log = logging.getLogger()
+log = logging.getLogger(__name__)
 
 
 class ABLTagger(nn.Module):
@@ -306,25 +306,28 @@ class ABLTagger(nn.Module):
         loss = None
         with torch.no_grad():
             for batch in data_loader:
-                pred = self(batch)
+                softmax_out = self(batch)
                 # (b, seq, tag_features)
                 if criterion is not None and "t" in batch:
                     tmp_loss = criterion(
-                        pred.view(-1, pred.shape[-1]),
+                        softmax_out.view(-1, softmax_out.shape[-1]),
                         batch["t"].view(-1),  # type:ignore
                     )
                     loss = tmp_loss if loss is None else loss + tmp_loss
-                idxs = pred.argmax(dim=2).tolist()
+                idxs = softmax_out.argmax(dim=2).tolist()
                 tags.extend(
                     (
                         Symbols(
                             [
                                 dictionaries["t_map"].i2w[tag_idx]
-                                for tag_idx in sent
-                                if tag_idx != data.PAD_ID
+                                for token_count, tag_idx in enumerate(sent)
+                                # All sentences are padded (at the right end) to be of equal length.
+                                # We do not want to return tags for the paddings.
+                                # We check the information about lengths and paddings.
+                                if token_count < batch["lens"][sent_idx]  # type: ignore
                             ]
                         )
-                        for sent in idxs
+                        for sent_idx, sent in enumerate(idxs)
                     )
                 )
         end = datetime.datetime.now()

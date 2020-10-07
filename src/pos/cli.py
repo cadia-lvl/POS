@@ -17,14 +17,17 @@ from . import data, train, api
 from .types import write_tsv
 
 DEBUG = False
-logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
-log = logging.getLogger()
+log = logging.getLogger(__name__)
 
 
 @click.group()
 @click.option("--debug/--no-debug", default=False)
 def cli(debug):
     """Entrypoint to the program. --debug flag from command line is caught here."""
+    log_level = logging.INFO
+    if debug:
+        log_level = logging.DEBUG
+    logging.basicConfig(format="%(asctime)s - %(message)s", level=log_level)
     global DEBUG
     DEBUG = debug
 
