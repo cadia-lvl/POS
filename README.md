@@ -5,23 +5,26 @@ For further information about the schema see [MIM-GOLD on CLARIN-IS](https://rep
 This work is based on the ABLTagger (in [References](#references)) but with some model modifications and runs on PyTorch 1.6.0.
 
 # Table of Contents
-- [POS tagger for Icelandic](#pos-tagger-for-icelandic)
-- [Table of Contents](#table-of-contents)
 - [Installation](#installation)
-- [Command line usage](#command-line-usage)
-- [Python module](#python-module)
+  * [Command line usage](#command-line-usage)
+  * [Python module](#python-module)
 - [Docker](#docker)
 - [License](#license)
 - [Authors](#authors)
   * [Acknowledgments](#acknowledgments)
 - [Contributing](#contributing)
   * [Installation](#installation-1)
+  * [Running the tests](#running-the-tests)
+  * [Continuous integration](#continuous-integration)
   * [Training data](#training-data)
   * [Additional training data (Morphological lexicon)](#additional-training-data--morphological-lexicon-)
     + [Filtering the morphological lexicon](#filtering-the-morphological-lexicon)
   * [Training models](#training-models)
 - [Versions](#versions)
 - [References](#references)
+
+<small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
+
 
 <small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
 
