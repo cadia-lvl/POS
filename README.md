@@ -219,6 +219,21 @@ For more involved installation instructions and how to train different models.
 ## Installation
 We use poetry to manage dependencies and to build wheels. Install poetry and do `poetry install`.
 
+## Running the tests
+To run the tests simply run `pytest` within the `poetry` environment.
+To run without starting the environment, run `poetry run pytest`
+
+This will run all the unit-tests and skip a few tests which rely on external data (model files).
+
+To include these tests make sure to add additional options to the `pytest` command.
+- `pytest --electra_model electra_model/` a directory containing all necessary files to load an electra model.
+- `pytest --tagger tagger.pt --dictionaries dictionaries.pickle`, the necessary files to load a pretrained tagging model.
+
+## Continuous integration
+This project uses GitHub actions to run a number of checks (linting, testing) when a change is pushed to GitHub.
+If a change does not pass the checks, a code fix is expected.
+See `.github/workflows/python-package.yml` for the checks involved.
+
 ## Training data
 The training data is a text file wich contains PoS-tagged sentences. The file has one token per line, as well as its corresponding tag. The sentences are separated by an empty line. 
 
@@ -243,7 +258,7 @@ vill    sfg3en
 ```
 
 For Icelandic we used the [IDF](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/38) and [MIM-GOLD](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/40).
-We use the 10th for hyperparameter selection.
+We use the 10th fold (in either dataset) for hyperparameter selection.
 
 We provide some additional data which is used to train the model:
 - `data/extra/characters_training.txt` contains all the characters which the model knows.
@@ -272,7 +287,7 @@ Since the morphological lexicon contains more words than will be seen during tra
 ```
 pos filter-embedding data/raw/mim/* data/raw/otb/* data/extra/dmii.vectors data/extra/dmii.vectors_filtered bin
 ```
-For explaination of the parameters run `pos filter-embedding --help`
+For an explanation of the parameters run `pos filter-embedding --help`
 
 ## Training models
 A model can be trained by invoking the following command.

@@ -5,16 +5,14 @@ from os.path import isfile
 import pos
 from pos.types import Dataset
 
-MODEL_LOCATION = "tagger.pt"
-DICT_LOCATION = "dictionaries.pickle"
 
-
-@pytest.mark.skipif(not isfile(MODEL_LOCATION), reason="Model file not present")
-def test_tagger():
+def test_tagger(tagger, dictionaries):
     """Test all methods of the Tagger."""
+    if not tagger or not dictionaries:
+        pytest.skip("No --tagger or --dictionaries given")
     # Initialize the tagger
     tagger = pos.Tagger(
-        model_file=MODEL_LOCATION, dictionaries_file=DICT_LOCATION, device="cpu",
+        model_file=tagger, dictionaries_file=dictionaries, device="cpu",
     )
     # Tag a single sentence
     tags = tagger.tag_sent(["Þetta", "er", "setning", "."])

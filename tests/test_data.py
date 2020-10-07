@@ -244,10 +244,9 @@ def test_data_loader_c_w_emb_b3():
         assert idx != 1
 
 
-@pytest.mark.skipif(
-    not isfile("electra_model/model.pt"), reason="Model file not present"
-)
-def test_data_loader_wemb_electra():
+def test_data_loader_wemb_electra(electra_model):
+    if not electra_model:
+        pytest.skip("No --electra_model given")
     test_ds = Dataset.from_file("./tests/test.tsv")
     d = {}
     d["t_map"] = VocabMap(
