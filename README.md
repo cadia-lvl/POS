@@ -226,7 +226,7 @@ This will run all the unit-tests and skip a few tests which rely on external dat
 
 To include these tests make sure to add additional options to the `pytest` command.
 - `pytest --electra_model electra_model/` a directory containing all necessary files to load an electra model.
-- `pytest --tagger tagger.pt --dictionaries dictionaries.pickle`, the necessary files to load a pretrained tagging model.
+- `pytest --tagger="tagger.pt" --dictionaries="dictionaries.pickle"`, the necessary files to load a pretrained tagging model.
 
 ## Continuous integration
 This project uses GitHub actions to run a number of checks (linting, testing) when a change is pushed to GitHub.
