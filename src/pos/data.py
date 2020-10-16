@@ -19,8 +19,9 @@ import numpy as np
 import torch
 import random
 
-from . import flair_embeddings as flair
-from .types import Vocab, Dataset, SimpleDataset, VocabMap
+from flair.embeddings import TransformerWordEmbeddings
+from flair.data import Sentence
+from .types import Vocab, Dataset, SimpleDataset, VocabMap, Symbols
 
 
 log = logging.getLogger(__name__)
@@ -95,9 +96,9 @@ def map_embedding(
         for filter_word in filter_on:
             # If the word is present in the file we use it.
             if filter_word in embedding_dict:
-                words_to_add.add(filter_word)  # pylint: disable=no-member
+                words_to_add.add(filter_word)
     else:
-        words_to_add.update(embedding_dict.keys())  # pylint: disable=no-member
+        words_to_add.update(embedding_dict.keys())
     # All special tokens are treated equally as zeros
     # If the token is already present in the dict, we will overwrite it.
     for token, _ in special_tokens:
@@ -120,6 +121,21 @@ def map_embedding(
     return vocab_map, embeddings
 
 
+def embed_transformer(
+    transformer: TransformerWordEmbeddings, sentences: SimpleDataset,
+) -> torch.Tensor:
+    """Preprocess a tuple of sentences using a transformer."""
+    f_sentences = [Sentence(" ".join(sentence)) for sentence in sentences]
+    transformer.embed(f_sentences)
+    return torch.nn.utils.rnn.pad_sequence(
+        [
+            torch.stack([token.embedding for token in sentence])
+            for sentence in f_sentences
+        ],
+        batch_first=True,
+    )
+
+
 def data_loader(
     dataset: Union[Dataset, SimpleDataset],
     device: torch.device,
@@ -128,6 +144,7 @@ def data_loader(
     w_emb: str,
     c_emb: str,
     m_emb: str,
+    transformer_embedding: TransformerWordEmbeddings,
     batch_size: int,
 ) -> Iterable[Dict[str, Optional[torch.Tensor]]]:
     """Perpare the data according to parameters and return batched Tensors."""
@@ -175,12 +192,7 @@ def data_loader(
             # Nothing to do.
             pass
         elif w_emb == "electra":
-            batch_w = torch.nn.utils.rnn.pad_sequence(
-                [flair.electra_embedding(sent) for sent in batch_x],
-                batch_first=True,
-                padding_value=0.0,  # Pad with 0.0
-            ).to(device)
-
+            batch_w = embed_transformer(transformer_embedding, batch_x).to(device)
         else:
             raise ValueError(f"Unsupported w_emb={w_emb}")
         if m_emb == "standard" or m_emb == "extra":

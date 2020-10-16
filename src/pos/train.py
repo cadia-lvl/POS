@@ -1,5 +1,5 @@
 """Train, evaluate and tag using a certain model."""
-from typing import Iterable, Optional, Callable, Dict
+from typing import Iterable, Optional, Callable, Dict, List
 import logging
 import datetime
 from functools import partial
@@ -15,47 +15,15 @@ from .model import ABLTagger
 log = logging.getLogger(__name__)
 
 
-def run_training(
-    run_parameters,
-    model_parameters,
-    model_extras,
-    data_loader,
-    dictionaries,
-    device,
-    train_ds,
-    test_ds,
-    output_dir,
-) -> torch.nn.Module:
-    """Run a complete training cycle for a given model and return it."""
-    from torch.utils import tensorboard
-
-    tagger = ABLTagger(**{**model_parameters, **model_extras}).to(device)
-    log.info(tagger)
-
-    for name, tensor in tagger.state_dict().items():
-        log.info(f"{name}: {torch.numel(tensor)}")
-    log.info(
-        f"Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}"
-    )
-    log.info(
-        f"Not trainable parameters={sum(p.numel() for p in tagger.parameters() if not p.requires_grad)}"
-    )
-    if run_parameters["label_smoothing"] == 0.0:
-        criterion = torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID, reduction="sum")
-    else:
-        criterion = partial(  # type: ignore
-            smooth_ce_loss,
-            pad_idx=data.PAD_ID,
-            smoothing=run_parameters["label_smoothing"],
-        )
-
+def get_parameter_groups(parameters, **kwargs) -> List[Dict]:
+    """Return the parameters groups with differing learning rates."""
     reduced_lr_names = ["token_embedding.weight"]
     params = [
         {
             "params": list(
                 param
                 for name, param in filter(
-                    lambda kv: kv[0] not in reduced_lr_names, tagger.named_parameters()
+                    lambda kv: kv[0] not in reduced_lr_names, parameters
                 )
             )
         },
@@ -63,27 +31,50 @@ def run_training(
             "params": list(
                 param
                 for name, param in filter(
-                    lambda kv: kv[0] in reduced_lr_names, tagger.named_parameters()
+                    lambda kv: kv[0] in reduced_lr_names, parameters
                 )
             ),
-            "lr": run_parameters["word_embedding_lr"],
+            "lr": kwargs["word_embedding_lr"],
         },
     ]
-    if run_parameters["optimizer"] == "sgd":
-        optimizer = torch.optim.SGD(params, lr=run_parameters["learning_rate"])
-        log.info("Using SGD")
-    elif run_parameters["optimizer"] == "adam":
-        optimizer = torch.optim.Adam(params, lr=run_parameters["learning_rate"])  # type: ignore
-        log.info("Using Adam")
+    return params
+
+
+def get_optimizer(parameters, **kwargs) -> torch.optim.Optimizer:
+    """Return the optimizer to use based on options."""
+    optimizer = kwargs.get("optimizer", "sgd")
+    lr = kwargs["learning_rate"]
+    log.info(f"Setting optmizer={optimizer}")
+    if optimizer == "sgd":
+        return torch.optim.SGD(parameters, lr=lr)
+    elif optimizer == "adam":
+        return torch.optim.Adam(parameters, lr=lr)
     else:
         raise ValueError("Unknown optimizer")
-    if run_parameters["scheduler"] == "multiply":
-        scheduler = torch.optim.lr_scheduler.MultiplicativeLR(  # type: ignore
-            optimizer, lr_lambda=lambda epoch: 0.95
+
+
+def get_criterion(**kwargs):
+    """Return the criterion to use based on options."""
+    label_smoothing = kwargs.get("label_smoothing", 0.0)
+    log.info(f"Label smoothing={label_smoothing}")
+    if not label_smoothing:
+        return torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID, reduction="sum")
+    else:
+        return partial(  # type: ignore
+            smooth_ce_loss, pad_idx=data.PAD_ID, smoothing=label_smoothing,
         )
-    elif run_parameters["scheduler"] == "plateau":
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer=optimizer,
+
+
+def get_scheduler(torch_optimizer, **kwargs):
+    """Return the training scheduler to use based on options."""
+    scheduler = kwargs.get("scheduler", "multiply")
+    if scheduler == "multiply":
+        return torch.optim.lr_scheduler.MultiplicativeLR(
+            torch_optimizer, lr_lambda=lambda epoch: 0.95
+        )
+    elif scheduler == "plateau":
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer=torch_optimizer,
             mode="min",
             factor=0.5,
             patience=2,
@@ -95,20 +86,18 @@ def run_training(
     else:
         raise ValueError("Unknown scheduler")
 
-    run_epochs(
-        model=tagger,
-        optimizer=optimizer,
-        criterion=criterion,
-        scheduler=scheduler,
-        data_loader=data_loader,
-        dictionaries=dictionaries,
-        batch_size=run_parameters["batch_size"],
-        epochs=run_parameters["epochs"],
-        train_ds=train_ds,
-        test_ds=test_ds,
-        writer=tensorboard.SummaryWriter(str(output_dir)),
+
+def print_tagger(tagger: torch.nn.Module):
+    """Print all information about the model."""
+    log.info(tagger)
+    for name, tensor in tagger.state_dict().items():
+        log.info(f"{name}: {torch.numel(tensor)}")
+    log.info(
+        f"Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}"
     )
-    return tagger
+    log.info(
+        f"Not trainable parameters={sum(p.numel() for p in tagger.parameters() if not p.requires_grad)}"
+    )
 
 
 def run_epochs(
@@ -124,9 +113,13 @@ def run_epochs(
     epochs: int,
     train_ds: Dataset,
     test_ds: Dataset,
-    writer,
+    output_dir,
 ):
     """Run all the training epochs using the training data and evaluate on the test data."""
+    from torch.utils import tensorboard
+
+    writer = tensorboard.SummaryWriter(str(output_dir))
+
     best_validation_loss = inf
     # Get the tokens only
     train_vocab = Vocab.from_symbols(train_ds.unpack()[0])

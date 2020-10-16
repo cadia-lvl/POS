@@ -3,14 +3,58 @@ import logging
 from typing import Optional, Dict, Iterable, List, Tuple, Union
 import datetime
 
+from flair.embeddings import TransformerWordEmbeddings
+from flair.data import Sentence
 import torch
 import torch.nn as nn
 
 from .types import Symbols, SimpleDataset, VocabMap
-from . import data
+from .data import (
+    emb_pairs_to_dict,
+    map_embedding,
+    wemb_str_to_emb_pair,
+    UNK,
+    UNK_ID,
+    PAD,
+    PAD_ID,
+)
 
 
 log = logging.getLogger(__name__)
+
+
+class PretrainedWordEmbeddings(nn.Embedding):
+    """A wrapper for constructing pretrained word embeddings."""
+
+    def __init__(self, file_path):
+        """Initialize a pretrained word embedding."""
+        with open(file_path) as f:
+            it = iter(f)
+            # pop the number of vectors and dimension
+            next(it)
+            embedding_dict = emb_pairs_to_dict(it, wemb_str_to_emb_pair)
+        w_map, w_embedding = map_embedding(
+            embedding_dict=embedding_dict,
+            filter_on=None,
+            special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
+        )
+        self.map = w_map
+        embedding = torch.from_numpy(w_embedding).float()
+        super().from_pretrained(
+            embedding, padding_idx=PAD_ID,
+        )
+
+
+def load_transformer_embeddings(file_path, **kwargs) -> TransformerWordEmbeddings:
+    """Return a torch.nn.Module which can accept a list of tokens as input."""
+    return TransformerWordEmbeddings(
+        file_path,
+        layers=kwargs.get("transformer_layers", "-1"),
+        use_scalar_mix=kwargs.get("transformer_use_scalar_mix", False),
+        allow_long_sentences=kwargs.get("transformer_allow_long_sentences", True),
+        fine_tune=True,
+        batch_size=kwargs.get("batch_size", 1),
+    )
 
 
 class ABLTagger(nn.Module):
@@ -39,7 +83,8 @@ class ABLTagger(nn.Module):
         noise: float,
         morphlex_freeze: bool,
         morphlex_embeddings: torch.Tensor = None,
-        word_embeddings: torch.Tensor = None,
+        pretrained_word_embeddings: nn.Embedding = None,
+        transformer_embedding=None,
     ):
         """Initialize the module given the parameters."""
         super(ABLTagger, self).__init__()
@@ -48,43 +93,44 @@ class ABLTagger(nn.Module):
         self.c_emb = c_emb
         self.w_emb = w_emb
         self.final_layer = final_layer
+        self.use_bilstm = not main_lstm_layers == 0
         # Morphlex embeddings
-        main_bilstm_dim = 0
+        input_dim_tagger = 0
         if (
             m_emb == "standard" or m_emb == "extra"
         ) and morphlex_embeddings is not None:
             self.morphlex_embedding = nn.Embedding.from_pretrained(
-                morphlex_embeddings, freeze=morphlex_freeze, padding_idx=data.PAD_ID,
+                morphlex_embeddings, freeze=morphlex_freeze, padding_idx=PAD_ID,
             )
             if m_emb == "extra":
                 self.morphlex_extra_layer = nn.Linear(
                     self.morphlex_embedding.weight.data.shape[1], morphlex_extra_dim
                 )
-                main_bilstm_dim += morphlex_extra_dim
+                input_dim_tagger += morphlex_extra_dim
             else:
-                main_bilstm_dim += self.morphlex_embedding.weight.data.shape[1]
+                input_dim_tagger += self.morphlex_embedding.weight.data.shape[1]
 
         # Word embeddings
-        if w_emb == "pretrained" and word_embeddings is not None:
-            self.token_embedding = nn.Embedding.from_pretrained(
-                word_embeddings, padding_idx=data.PAD_ID,
-            )
+        if w_emb == "pretrained" and pretrained_word_embeddings is not None:
             self.w_embs_dropout = nn.Dropout(p=input_dropouts)
-            main_bilstm_dim += self.token_embedding.weight.data.shape[1]
+            self.pretrained_word_embeddings = pretrained_word_embeddings
+            input_dim_tagger += self.pretrained_word_embeddings.weight.data.shape[1]
         elif w_emb == "standard":
             self.token_embedding = nn.Embedding(
-                token_dim, emb_token_dim, padding_idx=data.PAD_ID
+                token_dim, emb_token_dim, padding_idx=PAD_ID
             )
             nn.init.xavier_uniform_(self.token_embedding.weight[1:, :])
             self.w_embs_dropout = nn.Dropout(p=input_dropouts)
-            main_bilstm_dim += self.token_embedding.weight.data.shape[1]
+            input_dim_tagger += self.token_embedding.weight.data.shape[1]
         elif w_emb == "electra":
-            main_bilstm_dim += 256
+            # The electra embeddings are 256 dimensions
+            self.transformer_embedding = transformer_embedding
+            input_dim_tagger += 256
 
         # Character embeddings
         if c_emb == "standard":
             self.character_embedding = nn.Embedding(
-                char_dim, emb_char_dim, padding_idx=data.PAD_ID
+                char_dim, emb_char_dim, padding_idx=PAD_ID
             )
             nn.init.xavier_uniform_(self.character_embedding.weight[1:, :])
             # The character BiLSTM
@@ -105,46 +151,42 @@ class ABLTagger(nn.Module):
                     raise ValueError("Unknown parameter in lstm={name}")
             self.c_embs_dropout = nn.Dropout(p=input_dropouts)
             self.char_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
-            main_bilstm_dim += 2 * char_lstm_dim
+            input_dim_tagger += 2 * char_lstm_dim
 
-        self.bilstm = nn.LSTM(
-            input_size=main_bilstm_dim,
-            hidden_size=main_lstm_dim,
-            num_layers=main_lstm_layers,
-            dropout=lstm_dropouts,
-            batch_first=True,
-            bidirectional=True,
-        )
-        for name, param in self.bilstm.named_parameters():
-            if "bias" in name:
-                nn.init.constant_(param, 0.0)
-            elif "weight" in name:
-                nn.init.xavier_uniform_(param)
-            else:
-                raise ValueError("Unknown parameter in lstm={name}")
-        # no bias in DyNet
-        to_final = main_lstm_dim * 2
-        # Final layer
+        # BiLSTM over all inputs
+        if self.use_bilstm:
+            self.bilstm = nn.LSTM(
+                input_size=input_dim_tagger,
+                hidden_size=main_lstm_dim,
+                num_layers=main_lstm_layers,
+                dropout=lstm_dropouts,
+                batch_first=True,
+                bidirectional=True,
+            )
+            for name, param in self.bilstm.named_parameters():
+                if "bias" in name:
+                    nn.init.constant_(param, 0.0)
+                elif "weight" in name:
+                    nn.init.xavier_uniform_(param)
+                else:
+                    raise ValueError("Unknown parameter in lstm={name}")
+            input_dim_tagger = main_lstm_dim * 2
+        self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
+
+        # Extra mapping after BiLSTM
         if final_layer == "dense":
-            self.linear = nn.Linear(main_lstm_dim * 2, final_dim)
-            to_final = final_dim
+            self.linear = nn.Linear(input_dim_tagger, final_dim)
             nn.init.xavier_uniform_(self.linear.weight)
+            input_dim_tagger = final_dim
         elif final_layer == "none":
             # Nothing to do.
             pass
-        elif final_layer == "attention":
-            self.final_attention = nn.TransformerEncoderLayer(
-                d_model=to_final,
-                nhead=final_layer_attention_heads,
-                dim_feedforward=final_dim,
-                dropout=0.1,
-                activation="relu",
-            )
         else:
             raise ValueError(f"Unkown final_layer type={final_layer}")
-        self.final = nn.Linear(to_final, tags_dim)
-        nn.init.xavier_uniform_(self.final.weight)
-        self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
+
+        # Tagger
+        self.tagger = nn.Linear(input_dim_tagger, tags_dim)
+        nn.init.xavier_uniform_(self.tagger.weight)
 
     def forward(  # pylint: disable=arguments-differ
         self, batch_dict: Dict[str, Optional[torch.Tensor]]
@@ -160,10 +202,13 @@ class ABLTagger(nn.Module):
 
         main_in = None
         # Word embeddings
-        if self.w_emb == "standard" or self.w_emb == "pretrained":
+        if self.w_emb == "standard":
             assert w is not None
-            # (b, seq, f)
             w_embs = self.w_embs_dropout(self.token_embedding(w))
+            main_in = w_embs
+        elif self.w_emb == "pretrained":
+            assert w is not None
+            w_embs = self.w_embs_dropout(self.pretrained_word_embeddings(w))
             main_in = w_embs
         elif self.w_emb == "electra":
             assert w is not None
@@ -233,34 +278,35 @@ class ABLTagger(nn.Module):
         if self.training and main_in is not None:
             main_in = main_in + torch.empty_like(main_in).normal_(0, self.noise)
         # (b, seq, f)
-        # Pack the paddings
-        packed = torch.nn.utils.rnn.pack_padded_sequence(  # type: ignore
-            main_in, batch_dict["lens"], batch_first=True, enforce_sorted=False,
-        )
-        # Make sure that the parameters are contiguous.
-        self.bilstm.flatten_parameters()
-        # Ignore the hidden outputs
-        packed_out, _ = self.bilstm(packed)
-        # Unpack and ignore the lengths
-        main_out, _ = torch.nn.utils.rnn.pad_packed_sequence(
-            packed_out, batch_first=True  # type: ignore
-        )
-        main_out = self.main_bilstm_out_dropout(main_out)
+
+        if self.use_bilstm:
+            # Pack the paddings
+            packed = torch.nn.utils.rnn.pack_padded_sequence(  # type: ignore
+                main_in, batch_dict["lens"], batch_first=True, enforce_sorted=False,
+            )
+            # Make sure that the parameters are contiguous.
+            self.bilstm.flatten_parameters()
+            # Ignore the hidden outputs
+            packed_out, _ = self.bilstm(packed)
+            # Unpack and ignore the lengths
+            main_out, _ = torch.nn.utils.rnn.pad_packed_sequence(
+                packed_out, batch_first=True  # type: ignore
+            )
+            main_out = self.main_bilstm_out_dropout(main_out)
+        else:
+            main_out = main_in
+
         # We apply the final transformation
         if self.final_layer == "none":
             out = main_out
         elif self.final_layer == "dense":
             # We map each word to our targets
             out = torch.tanh(self.linear(main_out))
-        elif self.final_layer == "attention":
-            out = batch_second_to_batch_first(
-                self.final_attention(src=batch_first_to_batch_second(main_out))
-            )
         else:
             raise ValueError(
                 f"Unimplemented final transformation type={self.final_layer}"
             )
-        return self.final(out)
+        return self.tagger(out)
 
     def pack_sequence(self, padded_sequence):
         """Pack the PAD in a sequence. Assumes that PAD=0.0 and appended."""
@@ -317,15 +363,13 @@ class ABLTagger(nn.Module):
                 idxs = softmax_out.argmax(dim=2).tolist()
                 tags.extend(
                     (
-                        Symbols(
-                            [
-                                dictionaries["t_map"].i2w[tag_idx]
-                                for token_count, tag_idx in enumerate(sent)
-                                # All sentences are padded (at the right end) to be of equal length.
-                                # We do not want to return tags for the paddings.
-                                # We check the information about lengths and paddings.
-                                if token_count < batch["lens"][sent_idx]  # type: ignore
-                            ]
+                        tuple(
+                            dictionaries["t_map"].i2w[tag_idx]
+                            for token_count, tag_idx in enumerate(sent)
+                            # All sentences are padded (at the right end) to be of equal length.
+                            # We do not want to return tags for the paddings.
+                            # We check the information about lengths and paddings.
+                            if token_count < batch["lens"][sent_idx]  # type: ignore
                         )
                         for sent_idx, sent in enumerate(idxs)
                     )

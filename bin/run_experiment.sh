@@ -23,7 +23,6 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     # dt=$(date '+%Y-%m-%d_%H-%M-%S');
     out_folder=./out/"$NAME"
     mkdir -p "$out_folder"
-    extra_params="$*"
     sbatch \
     --output="$out_folder/slurm-%j.out" \
     --gres=gpu \
@@ -33,18 +32,15 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     $RAW_DIR/mim/10TM.plain \
     $RAW_DIR/mim/10PM.plain \
     $out_folder \
-    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
-    --morphlex_freeze \
-    --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
-    --known_chars_file data/extra/characters_training.txt \
-    --final_layer attention \
-    --final_layer_attention_heads 2 \
-    --learning_rate 0.2 \
-    --optimizer sgd \
+    --bert_encoder electra_model \
+    --main_lstm_layers 0 \
+    --final_layer none \
+    --label_smoothing 0.1 \
     --epochs 25 \
     --batch_size 16 \
     --save_vocab \
     --save_model \
     --gpu \
-    $extra_params"
+    --optimizer adam \
+    --learning_rate 5e-5"
 fi

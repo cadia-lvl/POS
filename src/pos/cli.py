@@ -5,16 +5,48 @@ import random
 import logging
 import json
 import pathlib
-from typing import Dict
+from typing import Dict, List
 from functools import reduce, partial
 from operator import add
 
 import click
+import flair
 import torch
 import numpy as np
 
-from . import data, train, api
-from .types import write_tsv
+from .data import (
+    bin_str_to_emb_pair,
+    emb_pairs_to_dict,
+    wemb_str_to_emb_pair,
+    map_embedding,
+    EOS,
+    EOS_ID,
+    SOS,
+    SOS_ID,
+    PAD,
+    PAD_ID,
+    UNK,
+    UNK_ID,
+    data_loader as d_data_loader,
+)
+from .types import (
+    Vocab,
+    VocabMap,
+    Dataset,
+    SimpleDataset,
+    TaggedSentence,
+    write_tsv,
+)
+from .model import ABLTagger, PretrainedWordEmbeddings, load_transformer_embeddings
+from .train import (
+    print_tagger,
+    get_criterion,
+    get_parameter_groups,
+    get_optimizer,
+    get_scheduler,
+    run_epochs,
+)
+from .api import Tagger
 
 DEBUG = False
 log = logging.getLogger(__name__)
@@ -22,10 +54,11 @@ log = logging.getLogger(__name__)
 
 @click.group()
 @click.option("--debug/--no-debug", default=False)
-def cli(debug):
+@click.option("--log/--no-log", default=False)
+def cli(debug, log):
     """Entrypoint to the program. --debug flag from command line is caught here."""
     log_level = logging.INFO
-    if debug:
+    if debug or log:
         log_level = logging.DEBUG
     logging.basicConfig(format="%(asctime)s - %(message)s", level=log_level)
     global DEBUG
@@ -34,11 +67,11 @@ def cli(debug):
 
 @cli.command()
 @click.argument("filepaths", nargs=-1)
-@click.argument("output", type=click.File("w+"))
+@click.argument("output", type=click.File("w"))
 def gather_tags(filepaths, output):
     """Read all input tsv files and extract all tags in files."""
-    ds = reduce(add, (data.Dataset.from_file(filepath) for filepath in filepaths), (),)
-    tags = data.Vocab.from_symbols(y for x, y in ds)
+    ds = read_dataset(filepaths)
+    tags = Vocab.from_symbols(y for x, y in ds)
     for tag_ in sorted(list(tags)):
         output.write(f"{tag_}\n")
 
@@ -60,18 +93,18 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     format: The format of the embedding file being read, 'bin' or 'wemb'.
     """
     log.info(f"Reading files={filepaths}")
-    ds = reduce(add, (data.Dataset.from_file(filepath) for filepath in filepaths), (),)
-    tokens = data.Vocab.from_symbols(ds.unpack_dataset()[0])
+    ds = read_dataset(filepaths)
+    tokens = Vocab.from_symbols(ds.unpack_dataset()[0])
 
     log.info(f"Number of tokens={len(tokens)}")
     with open(embedding) as f:
         if emb_format == "bin":
-            emb_dict = data.emb_pairs_to_dict(f, data.bin_str_to_emb_pair)
+            emb_dict = emb_pairs_to_dict(f, bin_str_to_emb_pair)
             for token, value in emb_dict.items():
                 if token in tokens:  # pylint: disable=unsupported-membership-test
                     output.write(f"{token};[{','.join((str(x) for x in value))}]\n")
         elif emb_format == "wemb":
-            emb_dict = data.emb_pairs_to_dict(f, data.wemb_str_to_emb_pair)
+            emb_dict = emb_pairs_to_dict(f, wemb_str_to_emb_pair)
             output.write("x x\n")
             for token, value in emb_dict.items():
                 if token in tokens:  # pylint: disable=unsupported-membership-test
@@ -116,7 +149,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     "--word_embedding_lr", default=0.2, help="The word/token embedding learning rate."
 )
 @click.option(
-    "--pretrained_model_folder",
+    "--bert_encoder",
     default=None,
     help="A folder which contains a pretrained BERT-like model.",
 )
@@ -149,33 +182,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     type=click.Choice(["multiply", "plateau"], case_sensitive=False),
     help="The learning rate scheduler to use.",
 )
-def train_and_tag(
-    training_files,
-    test_file,
-    output_dir,
-    known_chars_file,
-    morphlex_embeddings_file,
-    morphlex_freeze,
-    morphlex_extra_dim,
-    pretrained_word_embeddings_file,
-    word_embedding_lr,
-    word_embedding_dim,
-    pretrained_model_folder,
-    main_lstm_layers,
-    char_lstm_layers,
-    label_smoothing,
-    final_layer,
-    final_layer_attention_heads,
-    final_dim,
-    batch_size,
-    save_model,
-    save_vocab,
-    gpu,
-    optimizer,
-    learning_rate,
-    epochs,
-    scheduler,
-):
+def train_and_tag(**kwargs):
     """Train a POS tagger on intpus and write out the tagged the test files.
 
     training_files: Files to use for training (supports multiple files = globbing).
@@ -183,138 +190,82 @@ def train_and_tag(
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
-    # Set the seed on all platforms
-    SEED = 42
-    if SEED:
-        random.seed(SEED)
-        np.random.seed(SEED)
-        torch.manual_seed(SEED)
-        torch.backends.cudnn.deterministic = True  # type: ignore
-
-    if torch.cuda.is_available() and gpu:
-        device = torch.device("cuda")
-        # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
-        # --gres=gpu:titanx:2
-        log.info(f"Using {torch.cuda.device_count()} GPUs")
-    else:
-        device = torch.device("cpu")
-        threads = 1
-        # Set the number of threads to use for CPU
-        torch.set_num_threads(threads)
-        log.info(f"Using {threads} CPU threads")
-
-    # Run parameters
-    parameters = {
-        "training_files": training_files,
-        "test_file": test_file,
-        "epochs": epochs,
-        "batch_size": batch_size,
-        "learning_rate": learning_rate,
-        "word_embedding_lr": word_embedding_lr,
-        "scheduler": scheduler,
-        "label_smoothing": label_smoothing,
-        "optimizer": optimizer,
-    }
+    print(kwargs)
+    set_seed()
+    device = set_device(gpu_flag=kwargs["gpu"])
 
     # Read train and test data
-    train_ds = data.Dataset(
-        reduce(
-            add,
-            (data.Dataset.from_file(training_file) for training_file in training_files),
-            (),
-        )
-    )
-    test_ds = data.Dataset.from_file(test_file)
-
-    # DEBUG - read a subset of the data
-    if DEBUG:
-        device = torch.device("cpu")
-        threads = 1
-        # Set the number of threads to use for CPU
-        torch.set_num_threads(threads)
-        log.info(f"Using {threads} CPU threads")
-        train_ds = data.Dataset(
-            train_ds[:batch_size]  # pylint: disable=unsubscriptable-object
-        )
-        test_ds = data.Dataset(
-            test_ds[:batch_size]  # pylint: disable=unsubscriptable-object
-        )
+    train_ds = read_dataset(kwargs["training_files"], max_length=128)
+    test_ds = read_dataset([kwargs["test_file"]], max_length=128)
 
     # Set configuration values and create mappers
-    dictionaries: Dict[str, data.VocabMap] = {}
+    dictionaries: Dict[str, VocabMap] = {}
     extras: Dict[str, np.array] = {}
 
     # WORD EMBEDDINGS
     # By default we do not use word-embeddings.
     w_emb = "none"
-    if pretrained_word_embeddings_file is not None:
-        # If a file is provided, we use it.
+    if kwargs["pretrained_word_embeddings_file"] is not None:
         w_emb = "pretrained"
-        with open(pretrained_word_embeddings_file) as f:
-            it = iter(f)
-            # pop the number of vectors and dimension
-            next(it)
-            embedding_dict = data.emb_pairs_to_dict(it, data.wemb_str_to_emb_pair)
-            w_map, w_embedding = data.map_embedding(
-                embedding_dict=embedding_dict,
-                filter_on=None,
-                special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
-            )
-            dictionaries["w_map"] = w_map
-            extras["word_embeddings"] = torch.from_numpy(w_embedding).float().to(device)
+        word_emb_module = PretrainedWordEmbeddings(
+            kwargs["pretrained_word_embeddings_file"]
+        )
     # We are given a pretrained BERT like model, we use it.
-    elif pretrained_model_folder is not None:
+    elif kwargs["bert_encoder"] is not None:
         w_emb = "electra"
-    elif word_embedding_dim != -1:
+        transformer_embedding = load_transformer_embeddings(
+            kwargs["bert_encoder"], **kwargs
+        )
+    elif kwargs["word_embedding_dim"] != -1:
         # No file is given and the dimension is not -1 we train from scratch.
         w_emb = "standard"
-        dictionaries["w_map"] = data.VocabMap(
-            data.Vocab.from_symbols((x for x, y in train_ds)),
-            special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
+        dictionaries["w_map"] = VocabMap(
+            Vocab.from_symbols((x for x, y in train_ds)),
+            special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID)],
         )
 
     # MORPHLEX EMBEDDINGS
     # By default we do not use morphlex embeddings.
     m_emb = "none"
-    if morphlex_embeddings_file is not None:
+    if kwargs["morphlex_embeddings_file"] is not None:
         # File is provided, use it.
         m_emb = "standard"
-        with open(morphlex_embeddings_file) as f:
+        with open(kwargs["morphlex_embeddings_file"]) as f:
             it = iter(f)
-            embedding_dict = data.emb_pairs_to_dict(it, data.bin_str_to_emb_pair)
-            m_map, m_embedding = data.map_embedding(
+            embedding_dict = emb_pairs_to_dict(it, bin_str_to_emb_pair)
+            m_map, m_embedding = map_embedding(
                 embedding_dict=embedding_dict,
                 filter_on=None,
-                special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
+                special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
             )
             dictionaries["m_map"] = m_map
             extras["morphlex_embeddings"] = (
                 torch.from_numpy(m_embedding).float().to(device)
             )
-        if morphlex_extra_dim != -1:
+        if kwargs["morphlex_extra_dim"] != -1:
             m_emb = "extra"
 
     # CHARACTER EMBEDDINGS
     # By default we do not use character embeddings.
     c_emb = "none"
-    if known_chars_file is not None:
+    if kwargs["known_chars_file"] is not None:
         # A file is given, use it.
         c_emb = "standard"
-        char_vocab = data.Vocab.from_file(known_chars_file)
-        dictionaries["c_map"] = data.VocabMap(
+        char_vocab = Vocab.from_file(kwargs["known_chars_file"])
+        dictionaries["c_map"] = VocabMap(
             char_vocab,
             special_tokens=[
-                (data.UNK, data.UNK_ID),
-                (data.PAD, data.PAD_ID),
-                (data.EOS, data.EOS_ID),
-                (data.SOS, data.SOS_ID),
+                (UNK, UNK_ID),
+                (PAD, PAD_ID),
+                (EOS, EOS_ID),
+                (SOS, SOS_ID),
             ],
         )
 
     # TAGS (POS)
-    dictionaries["t_map"] = data.VocabMap(
-        data.Vocab.from_symbols((y for x, y in train_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
+    dictionaries["t_map"] = VocabMap(
+        Vocab.from_symbols((y for x, y in train_ds)),
+        special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID),],
     )
 
     model_parameters = {
@@ -326,48 +277,81 @@ def train_and_tag(
         "tags_dim": len(dictionaries["t_map"]),
         "emb_char_dim": 20,  # The characters are mapped to this dim
         "char_lstm_dim": 64,  # The character LSTM will output with this dim
-        "char_lstm_layers": char_lstm_layers,  # The character LSTM will output with this dim
-        "emb_token_dim": word_embedding_dim,  # The tokens are mapped to this dim
+        "char_lstm_layers": kwargs[
+            "char_lstm_layers"
+        ],  # The character LSTM will output with this dim
+        "emb_token_dim": kwargs[
+            "word_embedding_dim"
+        ],  # The tokens are mapped to this dim
         "main_lstm_dim": 64,  # The main LSTM dim will output with this dim
-        "main_lstm_layers": main_lstm_layers,  # The main LSTM dim will output with this dim
-        "final_layer": final_layer,
-        "final_layer_attention_heads": final_layer_attention_heads,
-        "final_dim": final_dim,  # The main LSTM time-steps will be mapped to this dim
-        "morphlex_extra_dim": morphlex_extra_dim,
+        "main_lstm_layers": kwargs[
+            "main_lstm_layers"
+        ],  # The main LSTM dim will output with this dim
+        "final_layer": kwargs["final_layer"],
+        "final_layer_attention_heads": kwargs["final_layer_attention_heads"],
+        "final_dim": kwargs[
+            "final_dim"
+        ],  # The main LSTM time-steps will be mapped to this dim
+        "morphlex_extra_dim": kwargs["morphlex_extra_dim"],
+        "transformer_embedding": transformer_embedding,
         "lstm_dropouts": 0.1,
         "input_dropouts": 0.0,
         "noise": 0.1,  # Noise to main_in, to main_bilstm
-        "morphlex_freeze": morphlex_freeze,
+        "morphlex_freeze": kwargs["morphlex_freeze"],
+    }
+
+    # Run parameters
+    parameters = {
+        "training_files": kwargs["training_files"],
+        "test_file": kwargs["test_file"],
+        "epochs": kwargs["epochs"],
+        "batch_size": kwargs["batch_size"],
+        "learning_rate": kwargs["learning_rate"],
+        "word_embedding_lr": kwargs["word_embedding_lr"],
+        "scheduler": kwargs["scheduler"],
+        "label_smoothing": kwargs["label_smoothing"],
+        "optimizer": kwargs["optimizer"],
     }
 
     # Write all configuration to disk
-    output_dir = pathlib.Path(output_dir)
-    with output_dir.joinpath("hyperparamters.json").open(mode="+w") as f:
-        json.dump({**parameters, **model_parameters}, f, indent=4)
-
+    output_dir = pathlib.Path(kwargs["output_dir"])
+    write_hyperparameters(
+        output_dir / "hyperparamters.json", dict(parameters).update(model_parameters)
+    )
     # Train a model
     data_loader = partial(
-        data.data_loader,
+        d_data_loader,
         device=device,
         w_emb=w_emb,
         c_emb=c_emb,
         m_emb=m_emb,
+        transformer_embedding=transformer_embedding,
         dictionaries=dictionaries,
     )
-    tagger = train.run_training(
-        run_parameters=parameters,
-        model_parameters=model_parameters,
-        model_extras=extras,
+    tagger = ABLTagger(**{**model_parameters, **extras}).to(device)
+    print_tagger(tagger)
+
+    criterion = get_criterion(**kwargs)
+    parameter_groups = get_parameter_groups(tagger.named_parameters(), **kwargs)
+    optimizer = get_optimizer(parameter_groups, **kwargs)
+    scheduler = get_scheduler(optimizer, **kwargs)
+
+    run_epochs(
+        model=tagger,
+        optimizer=optimizer,
+        criterion=criterion,
+        scheduler=scheduler,
         data_loader=data_loader,
         dictionaries=dictionaries,
-        device=device,
+        batch_size=kwargs["batch_size"],
+        epochs=kwargs["epochs"],
         train_ds=train_ds,
         test_ds=test_ds,
         output_dir=output_dir,
     )
     test_tags_tagged = tagger.tag_sents(
         data_loader=data_loader(
-            dataset=test_ds, shuffle=False, batch_size=batch_size * 10,
+            dataset=test_ds, shuffle=False, batch_size=kwargs["batch_size"] * 10,
         ),
         dictionaries=dictionaries,
         criterion=None,
@@ -376,18 +360,71 @@ def train_and_tag(
     with (output_dir / "predictions.tsv").open("w") as f:
         write_tsv(f, (*test_ds.unpack(), test_tags_tagged))
     with (output_dir / "known_toks.txt").open("w+") as f:
-        for token in data.Vocab.from_symbols(  # pylint: disable=not-an-iterable
+        for token in Vocab.from_symbols(  # pylint: disable=not-an-iterable
             x for x, y in train_ds
         ):
             f.write(f"{token}\n")
-    if save_vocab:
+    if kwargs["save_vocab"]:
         save_location = output_dir.joinpath("dictionaries.pickle")
         with save_location.open("wb+") as f:
             pickle.dump(dictionaries, f)
-    if save_model:
+    if kwargs["save_model"]:
         save_location = output_dir.joinpath("tagger.pt")
         torch.save(tagger, str(save_location))
     log.info("Done!")
+
+
+def read_dataset(file_paths: List[str], max_length=-1) -> Dataset:
+    """Read tagged datasets from multiple files."""
+    ds = Dataset(
+        reduce(
+            add, (Dataset.from_file(training_file) for training_file in file_paths), (),
+        )
+    )
+    if max_length != -1:
+        # We want to filter out sentences which are too long (and throw them away, for now)
+        ds = Dataset(TaggedSentence((x, y)) for x, y in ds if len(x) <= max_length)
+    # DEBUG - read a subset of the data
+    if DEBUG:
+        debug_size = 100
+        ds = Dataset(ds[:debug_size])
+    return ds
+
+
+def set_seed(seed=42):
+    """Set the seed on all platforms. 0 for need specific seeding."""
+    if seed:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True  # type: ignore
+
+
+def write_hyperparameters(path, hyperparameters):
+    """Write hyperparameters to disk."""
+    with path.open(mode="w") as f:
+        json.dump(hyperparameters, f, indent=4)
+
+
+def set_device(gpu_flag=False):
+    """Set the torch device."""
+    if DEBUG:
+        # We do not use GPU when debugging
+        gpu_flag = False
+    if torch.cuda.is_available() and gpu_flag:
+        device = torch.device("cuda")
+        # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
+        # --gres=gpu:titanx:2
+        flair.device = device
+        log.info(f"Using {torch.cuda.device_count()} GPUs")
+    else:
+        device = torch.device("cpu")
+        threads = 1
+        # Set the number of threads to use for CPU
+        torch.set_num_threads(threads)
+        flair.device = device
+        log.info(f"Using {threads} CPU threads")
+    return device
 
 
 @cli.command()
@@ -413,15 +450,15 @@ def tag(model_file, dictionaries_file, data_in, output, device, contains_tags):
         data_in: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
         output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
     """
-    tagger = api.Tagger(
+    tagger = Tagger(
         model_file=model_file, dictionaries_file=dictionaries_file, device=device
     )
     log.info("Reading dataset")
     if contains_tags:
-        ds_with_tags = data.Dataset.from_file(data_in)
+        ds_with_tags = Dataset.from_file(data_in)
         ds, gold = ds_with_tags.unpack()
     else:
-        ds = data.SimpleDataset.from_file(data_in)
+        ds = SimpleDataset.from_file(data_in)
     predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=16)
     log.info("Writing results")
     with open(output, "w+") as f:

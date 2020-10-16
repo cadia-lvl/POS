@@ -18,13 +18,10 @@ class w_emb(Enum):
 # Some types
 
 Symbol = str
+Symbols = Tuple[Symbol, ...]
 
 
-class Symbols(Tuple[Symbol, ...]):
-    """Symbols is a sequence of symbols in a sentence: tokens or tags."""
-
-
-class Vocab(Set[str]):
+class Vocab(set):
     """A Vocab is an unordered set of symbols."""
 
     @staticmethod
@@ -41,7 +38,7 @@ class Vocab(Set[str]):
             )
 
 
-class SimpleDataset(Tuple[Symbols, ...]):
+class SimpleDataset(tuple):
     """A SimpleDataset is a sequence of Symbols: tokens or tags."""
 
     @staticmethod
@@ -52,11 +49,11 @@ class SimpleDataset(Tuple[Symbols, ...]):
         return SimpleDataset(sentences)
 
 
-class TaggedSentence(Tuple[Symbols, Symbols]):
+class TaggedSentence(tuple):
     """A TaggedSentence is pair of tokens and tags."""
 
 
-class Dataset(Tuple[TaggedSentence, ...]):
+class Dataset(tuple):
     """A Dataset is a sequence of tagged sentences: ( (tokens, tags), (tokens, tags), )."""
 
     @staticmethod
@@ -122,20 +119,16 @@ def write_tsv(f, data: Tuple[SimpleDataset, ...]):
 def read_tsv(f, cols=2) -> List[Tuple[Symbols, ...]]:
     """Read a single .tsv file with one, two or three columns and returns a list of the Symbols."""
 
-    def add_sentence(sent_tokens, sent_tags, model_tags):
+    def add_sentence(
+        sent_tokens: List[str], sent_tags: List[str], model_tags: List[str]
+    ):
         """Add a sentence to the list. HAS SIDE-EFFECTS."""
         if cols == 1:
-            sentences.append(Symbols(tuple(sent_tokens)))
+            sentences.append((tuple(sent_tokens),))
         elif cols == 2:
-            sentences.append((Symbols(tuple(sent_tokens)), Symbols(tuple(sent_tags))))
+            sentences.append((tuple(sent_tokens), tuple(sent_tags)))
         elif cols == 3:
-            sentences.append(
-                (
-                    Symbols(tuple(sent_tokens)),
-                    Symbols(tuple(sent_tags)),
-                    Symbols(tuple(model_tags)),
-                )
-            )
+            sentences.append((tuple(sent_tokens), tuple(sent_tags), tuple(model_tags),))
         else:
             raise ValueError(f"Invalid number of cols={cols}")
 

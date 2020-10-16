@@ -7,7 +7,7 @@ ignore_missing_imports = true
 [tool.pylint.messages_control]
 disable = [
     "C",
-    "R",
+    #"R",
     "logging-fstring-interpolation",
     "global-statement",
     "abstract-method",
