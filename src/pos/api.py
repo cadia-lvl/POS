@@ -1,12 +1,12 @@
 """The API for the tagging model."""
 import pickle
-from typing import Union, List, Tuple, cast
+from typing import Union, List, Tuple, cast, Sequence
 from functools import partial
 import logging
 
 import torch
 
-from . import types, data
+from .core import TokenizedDataset
 
 log = logging.getLogger(__name__)
 
@@ -30,60 +30,18 @@ class Tagger:
         log.info("Reading model file")
         self.model = torch.load(model_file, map_location=self.device)
 
-    def initialize_dataloader(self, batch_size=16):
-        """
-        Initialize a dataloader, which preprocesses the data before sending it to the model.
-        
-        This function can be extended or adjusted using inheritance.
-        """
-        # We set all the parameters to the function except the "dataset".
-        return partial(
-            data.data_loader,
-            device=self.device,
-            dictionaries=self.dictionaries,
-            shuffle=False,
-            w_emb="pretrained",
-            c_emb="standard",
-            m_emb="standard",
-            batch_size=batch_size,
-        )
-
-    def tag_sent(self, sent: Union[Tuple[str], List[str], types.SimpleDataset]):
+    def tag_sent(self, sent: Sequence[str]) -> Sequence[str]:
         """Tag a (single) sentence. To tag multiple sentences at once (faster) use "tag_bulk".
         
         Args:
-            sent: A tokenized sentence; a List[str], Tuple[str] or SimpleDataset.
+            sent: A tokenized sentence; a Sequence[str].
             
-        Returns: The POS tags a Tuple[str] or SimpleDataset.
+        Returns: The POS tags a Sequence[str].
         """
-        # Convert list/tuple to SimpleDataset
-        if type(sent) == types.SimpleDataset:
-            pass
-        elif type(sent) == list or type(sent) == tuple:
-            sent = cast(list, sent)  # Either is fine for mypy
-            sent = types.SimpleDataset((types.Symbols(sent),))
-        else:
-            raise TypeError(f"Invalid type={type(sent)} to taggin model")
-
-        log.info("Predicting tags")
-        predicted_tags = self.model.tag_sents(
-            self.initialize_dataloader(batch_size=1)(dataset=sent),
-            dictionaries=self.dictionaries,
-            criterion=None,
-        )
-        log.info("Done predicting!")
-        # If we were given a single sentence, let's unpack it.
-        if len(predicted_tags) == 1:
-            return predicted_tags[0]
-        # Otherwise we just return the SimpleDataset
-        else:
-            predicted_tags = cast(types.SimpleDataset, predicted_tags)
-            return predicted_tags
+        return self.tag_bulk([sent], batch_size=1)[0]
 
     def tag_bulk(
-        self,
-        dataset: Union[Tuple[Tuple[str]], List[List[str]], types.SimpleDataset],
-        batch_size=16,
+        self, dataset: Union[Sequence[Sequence[str]], TokenizedDataset], batch_size=16,
     ):
         """Tag multiple sentence. This is a faster alternative to "tag_sent", used for batch processing.
         
@@ -92,22 +50,27 @@ class Tagger:
             
         Returns: The POS tags a Tuple[Tuple[str]] or SimpleDataset.
         """
-        # Convert list/tuple to SimpleDataset
-        if type(dataset) == types.SimpleDataset:
-            pass
-        elif type(dataset) == list or type(dataset) == tuple:
-            dataset = cast(list, dataset)  # Either is fine for mypy
-            dataset = types.SimpleDataset((types.Symbols(sent) for sent in dataset))
-        else:
-            raise TypeError(f"Invalid type={type(dataset)} to taggin model")
-
+        dataset = cast_types(dataset)
         log.info("Predicting tags")
+        # Initialize DataLoader
+        # with collate_fn - that function needs the dict
+        # The dict needs to be loaded based on some files
         predicted_tags = self.model.tag_sents(
             self.initialize_dataloader(batch_size=batch_size)(dataset=dataset),
             dictionaries=self.dictionaries,
             criterion=None,
         )
         log.info("Done predicting!")
-        predicted_tags = cast(types.SimpleDataset, predicted_tags)
         return predicted_tags
 
+
+def cast_types(
+    sentences: Union[Sequence[Sequence[str]], TokenizedDataset]
+) -> TokenizedDataset:
+    """Convert list/tuple to TokenizedDataset."""
+    if type(sentences) == TokenizedDataset:
+        return sentences
+    elif type(sentences) == list or type(sentences) == tuple:
+        return TokenizedDataset(sentences)
+    else:
+        raise TypeError(f"Invalid type={type(sentences)} to taggin model")

@@ -1,4 +1,10 @@
-"""Train, evaluate and tag using a certain model."""
+"""Train a model.
+
+During training this module handles:
+- Logging and monitoring.
+- Epochs (iterations) and evaluation.
+- Schedulers and optimizers. 
+"""
 from typing import Iterable, Optional, Callable, Dict, List
 import logging
 import datetime
@@ -6,10 +12,17 @@ from functools import partial
 from math import inf
 
 import torch
+from torch.utils.data import DataLoader
 
 from .evaluate import Experiment
-from . import data
-from .types import Dataset, Vocab, PredictedDataset, PredictedSentence, VocabMap
+from .data import (
+    tag_batch,
+    tag_data_loader,
+    PAD_ID,
+    run_batch,
+    Modules,
+)
+from .core import Vocab, VocabMap, TokenizedDataset
 from .model import ABLTagger
 
 log = logging.getLogger(__name__)
@@ -58,10 +71,10 @@ def get_criterion(**kwargs):
     label_smoothing = kwargs.get("label_smoothing", 0.0)
     log.info(f"Label smoothing={label_smoothing}")
     if not label_smoothing:
-        return torch.nn.CrossEntropyLoss(ignore_index=data.PAD_ID, reduction="sum")
+        return torch.nn.CrossEntropyLoss(ignore_index=PAD_ID, reduction="sum")
     else:
         return partial(  # type: ignore
-            smooth_ce_loss, pad_idx=data.PAD_ID, smoothing=label_smoothing,
+            smooth_ce_loss, pad_idx=PAD_ID, smoothing=label_smoothing,
         )
 
 
@@ -100,19 +113,34 @@ def print_tagger(tagger: torch.nn.Module):
     )
 
 
+def train_model(
+    model, optimizer, criterion, data_loader: DataLoader, log_prepend: str,
+) -> float:
+    """Run a single training epoch and evaluate the model."""
+    model.train()
+    total_loss = 0.0
+
+    for i, batch in enumerate(data_loader, start=1):
+        y_pred, loss = run_batch(model, batch, criterion, optimizer)
+        total_loss += loss
+        acc = categorical_accuracy(y_pred, batch[Modules.FullTag])
+        if i % 10 == 0:
+            log.info(
+                f"{log_prepend}batch={i}/{len(data_loader)}, acc={acc}, loss={loss:.4f}"
+            )
+    return total_loss
+
+
 def run_epochs(
     model,
     optimizer,
     criterion,
-    scheduler: torch.optim.lr_scheduler._LRScheduler,  # pylint: disable=protected-access
-    data_loader: Callable[
-        [Dataset, bool, int], Iterable[Dict[str, Optional[torch.Tensor]]]
-    ],
-    dictionaries: Dict[str, VocabMap],
-    batch_size: int,
+    scheduler,
+    evaluator,
+    train_data_loader: DataLoader,
+    test_data_loader: DataLoader,
+    dictionaries: Dict[Modules, VocabMap],
     epochs: int,
-    train_ds: Dataset,
-    test_ds: Dataset,
     output_dir,
 ):
     """Run all the training epochs using the training data and evaluate on the test data."""
@@ -122,7 +150,6 @@ def run_epochs(
 
     best_validation_loss = inf
     # Get the tokens only
-    train_vocab = Vocab.from_symbols(train_ds.unpack()[0])
     for epoch in range(1, epochs + 1):
         # Time it
         start = datetime.datetime.now()
@@ -133,103 +160,46 @@ def run_epochs(
             model=model,
             optimizer=optimizer,
             criterion=criterion,
-            data_loader=data_loader(  # type: ignore
-                dataset=train_ds, shuffle=True, batch_size=batch_size,
-            ),
+            data_loader=train_data_loader,
             log_prepend=f"Epoch={epoch}/{epochs}, ",
         )
         end = datetime.datetime.now()
         log.info(f"Training took={end-start} seconds")
         # We just run the validation using a larger batch size
-        val_loss, accuracies = evaluate_model(
-            model=model,
-            data_loader=data_loader,
-            test_ds=test_ds,
-            batch_size=batch_size,
-            dictionaries=dictionaries,
-            train_vocab=train_vocab,
+        tags, val_loss = tag_data_loader(
+            model,
+            data_loader=test_data_loader,
+            tag_map=dictionaries[Modules.FullTag],
             criterion=criterion,
         )
+        accuracies = evaluator(tags).all_accuracy()
         log.info(f"Validation acc={accuracies[0][0]}, loss={val_loss}")
-        writer.add_scalar("Loss/Train", train_loss, epoch)
-        writer.add_scalar("Loss/Val", val_loss, epoch)
-        writer.add_scalar("Accuracy/Total", accuracies[0][0], epoch)
-        writer.add_scalar("Accuracy/Unknown", accuracies[1][0], epoch)
-        writer.add_scalar("Accuracy/Known", accuracies[2][0], epoch)
-        writer.add_scalar("Accuracy/Wemb", accuracies[3][0], epoch)
-        writer.add_scalar("Accuracy/Wemb+M", accuracies[4][0], epoch)
-        writer.add_scalar("Accuracy/M", accuracies[5][0], epoch)
-        writer.add_scalar("Accuracy/Seen", accuracies[6][0], epoch)
-        writer.add_scalar("Accuracy/Unknown-Wemb", accuracies[7][0], epoch)
-        writer.add_scalar("Accuracy/Unknown-Wemb+M", accuracies[8][0], epoch)
-        writer.add_scalar("Accuracy/Unknown-M", accuracies[9][0], epoch)
-        writer.add_scalar("Accuracy/Unseen", accuracies[10][0], epoch)
+        write_scalars(writer, accuracies, train_loss, val_loss, epoch)
         if val_loss < best_validation_loss:
             best_validation_loss = val_loss
             # torch.save(pos_model.state_dict(), 'model.pt')
-        scheduler.step(val_loss)
+        if type(scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:
+            scheduler.step(val_loss)
+        else:
+            scheduler.step()
     # model.load_state_dict(torch.load('model.pt'))
 
 
-def train_model(
-    model,
-    optimizer,
-    criterion,
-    data_loader: Iterable[Dict[str, Optional[torch.Tensor]]],
-    log_prepend: str,
-) -> float:
-    """Run a single training epoch and evaluate the model."""
-    model.train()
-    total_loss = 0.0
-
-    for i, batch in enumerate(data_loader, start=1):
-        optimizer.zero_grad()
-        y_pred = model(batch)
-        y_pred = y_pred.view(-1, y_pred.shape[-1])
-        assert batch["t"] is not None
-        y = batch["t"].view(-1)
-
-        loss = criterion(y_pred, y)
-        acc = categorical_accuracy(y_pred, y)
-        total_loss += loss.item()
-        loss.backward()
-        # Clip gardients like in DyNet
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
-        optimizer.step()
-        if i % 10 == 0:
-            log.info(log_prepend + f"batch={i}, acc={acc}, loss={loss.item():.4f}")
-    return total_loss
-
-
-def evaluate_model(
-    model,
-    data_loader: Callable[
-        [Dataset, bool, int], Iterable[Dict[str, Optional[torch.Tensor]]]
-    ],
-    dictionaries: Dict[str, VocabMap],
-    criterion,
-    test_ds: Dataset,
-    train_vocab: Vocab,
-    batch_size: int,
-):
-    """Evaluate a model on a given test set."""
-    test_tags, test_loss = model.tag_sents(
-        data_loader=data_loader(  # type: ignore
-            dataset=test_ds, shuffle=False, batch_size=batch_size * 10
-        ),
-        dictionaries=dictionaries,
-        criterion=criterion,
-    )
-    predicted_ds = PredictedDataset(
-        PredictedSentence((tokens, tags, predicted_tags))
-        for tokens, tags, predicted_tags in zip(*test_ds.unpack(), test_tags)
-    )
-    return (
-        test_loss,
-        Experiment(
-            predicted_ds, train_vocab=train_vocab, dicts=dictionaries
-        ).all_accuracy(),
-    )
+def write_scalars(writer, accuracies, train_loss, val_loss, epoch):
+    """Print evaluation results to tensorboard."""
+    writer.add_scalar("Loss/Train", train_loss, epoch)
+    writer.add_scalar("Loss/Val", val_loss, epoch)
+    writer.add_scalar("Accuracy/Total", accuracies[0][0], epoch)
+    writer.add_scalar("Accuracy/Unknown", accuracies[1][0], epoch)
+    writer.add_scalar("Accuracy/Known", accuracies[2][0], epoch)
+    writer.add_scalar("Accuracy/Wemb", accuracies[3][0], epoch)
+    writer.add_scalar("Accuracy/Wemb+M", accuracies[4][0], epoch)
+    writer.add_scalar("Accuracy/M", accuracies[5][0], epoch)
+    writer.add_scalar("Accuracy/Seen", accuracies[6][0], epoch)
+    writer.add_scalar("Accuracy/Unknown-Wemb", accuracies[7][0], epoch)
+    writer.add_scalar("Accuracy/Unknown-Wemb+M", accuracies[8][0], epoch)
+    writer.add_scalar("Accuracy/Unknown-M", accuracies[9][0], epoch)
+    writer.add_scalar("Accuracy/Unseen", accuracies[10][0], epoch)
 
 
 def categorical_accuracy(preds, y):
@@ -238,7 +208,7 @@ def categorical_accuracy(preds, y):
         dim=1, keepdim=True
     )  # get the index of the max probability
     # nonzero to map to idexes again and filter out pads.
-    non_pad_elements = (y != data.PAD_ID).nonzero(as_tuple=False)
+    non_pad_elements = (y != PAD_ID).nonzero(as_tuple=False)
     correct = max_preds[non_pad_elements].squeeze(1).eq(y[non_pad_elements])
     return float(correct.sum().item()) / y[non_pad_elements].shape[0]
 

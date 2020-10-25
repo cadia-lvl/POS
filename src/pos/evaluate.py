@@ -1,11 +1,12 @@
 """A collection of types and function used to evaluate the performance of a tagger."""
-from typing import Tuple, List, Dict, Set
+from typing import Tuple, List, Dict, Set, Any
 import logging
 from collections import Counter
 from pathlib import Path
 import pickle
 
-from .types import PredictedDataset, Vocab, VocabMap
+from .core import DoubleTaggedDataset, Vocab, VocabMap, SequenceTaggingDataset
+from .data import Modules
 
 log = logging.getLogger(__name__)
 
@@ -15,9 +16,9 @@ class Experiment:
 
     def __init__(
         self,
-        predictions: PredictedDataset,
+        predictions: DoubleTaggedDataset,
         train_vocab: Vocab,
-        dicts: Dict[str, VocabMap],
+        dicts: Dict[Modules, VocabMap],
     ):
         """Initialize an experiment given the predictions and vocabulary."""
         self.predictions = predictions
@@ -27,18 +28,12 @@ class Experiment:
         self.dicts = dicts
 
         log.info("Creating vocabs")
-        if "m_map" in self.dicts:
-            morphlex_vocab = set(self.dicts["m_map"].w2i.keys()).intersection(
-                self.test_vocab
-            )
-        else:
-            morphlex_vocab = set()
-        if "w_map" in self.dicts:
-            wemb_vocab = set(self.dicts["w_map"].w2i.keys()).intersection(
-                self.test_vocab
-            )
-        else:
-            wemb_vocab = set()
+        morphlex_vocab = get_by_key_backup(
+            "m_map", Modules.MorphLex, self.dicts
+        ).intersection(self.test_vocab)
+        wemb_vocab = get_by_key_backup(
+            "w_map", Modules.WordEmbeddings, self.dicts
+        ).intersection(self.test_vocab)
         # fmt: off
         self.unknown_vocab = self.test_vocab.difference(self.known_vocab)  # pylint: disable=no-member
         self.known_wemb_vocab = self.known_vocab.intersection(wemb_vocab).difference(morphlex_vocab)
@@ -57,9 +52,9 @@ class Experiment:
         log.info(f"Reading experiment={path}")
         log.info("Reading predictions")
         if predictions:
-            predictions = PredictedDataset.from_file(predictions)
+            predictions = DoubleTaggedDataset.from_file(predictions)
         else:
-            predictions = PredictedDataset.from_file(str(path / "predictions.tsv"))
+            predictions = DoubleTaggedDataset.from_file(str(path / "predictions.tsv"))
         log.info("Reading dicts")
         with (path / "dictionaries.pickle").open("rb") as f:
             dicts = pickle.load(f)
@@ -67,6 +62,18 @@ class Experiment:
         train_vocab = Vocab.from_file(path / "known_toks.txt")
         log.info(f"Done reading experiment={path}")
         return Experiment(predictions=predictions, train_vocab=train_vocab, dicts=dicts)
+
+    @staticmethod
+    def from_predictions(
+        predicted_tags, test_ds: SequenceTaggingDataset, dicts: Dict[Modules, VocabMap]
+    ):
+        """Create an Experiment from predicted tags, test_dataset and dictionaries."""
+        train_vocab = Vocab(dicts[Modules.WordEmbeddings].w2i.keys())
+        predicted_ds = DoubleTaggedDataset(
+            tuple((tokens, tags, predicted_tags))
+            for tokens, tags, predicted_tags in zip(*test_ds.unpack(), predicted_tags)
+        )
+        return Experiment(predicted_ds, train_vocab=train_vocab, dicts=dicts)
 
     def accuracy(self, vocab: Set[str] = None) -> Tuple[float, int]:
         """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter."""
@@ -131,6 +138,16 @@ class Experiment:
             for token, gold, predicted in zip(tokens, gold_tags, predicted_tags)
             if gold != predicted
         )
+
+
+def get_by_key_backup(key1, key2, dictionary: Dict[Any, VocabMap]) -> Set:
+    """Fetch value from dict by key1 first, then key2 or return empty set."""
+    if key1 in dictionary:
+        return set(dictionary[key1].w2i.keys())
+    elif key2 in dictionary:
+        return set(dictionary[key2].w2i.keys())
+    else:
+        return set()
 
 
 def get_average(accuracies: List[Tuple[float, int]]) -> Tuple[float, int]:

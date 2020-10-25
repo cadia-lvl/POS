@@ -1,6 +1,8 @@
 """Data preparation and reading."""
+from enum import Enum
 from typing import (
     List,
+    Any,
     Tuple,
     Set,
     Dict,
@@ -11,17 +13,38 @@ from typing import (
     Sequence,
     Callable,
 )
+from functools import partial
 import logging
 from copy import deepcopy
+from datetime import datetime
+import random
 
 from tqdm import tqdm
 import numpy as np
-import torch
-import random
-
+from torch import Tensor, stack, no_grad, from_numpy
+from torch.utils.data import DataLoader
+from torch.nn import Module
+from torch.nn.utils import clip_grad_norm_
+from torch.nn.utils.rnn import pad_sequence
 from flair.embeddings import TransformerWordEmbeddings
 from flair.data import Sentence
-from .types import Vocab, Dataset, SimpleDataset, VocabMap, Symbols
+
+from .model import (
+    copy_into_larger_tensor,
+    PretrainedEmbedding,
+    load_transformer_embeddings,
+    ClassingWordEmbedding,
+    CharacterAsWordEmbedding,
+)
+from .utils import read_tsv
+from .core import (
+    Vocab,
+    VocabMap,
+    Tokens,
+    Tags,
+    SequenceTaggingDataset,
+    TokenizedDataset,
+)
 
 
 log = logging.getLogger(__name__)
@@ -37,6 +60,191 @@ EOS = "</s>"
 EOS_ID = 2
 SOS = "<s>"
 SOS_ID = 3
+
+
+class Modules(Enum):
+    """An enum to hold all possible input preprocessing required for the model and corresponds to parts of the model."""
+
+    BERT = "bert"
+    CharsAsWord = "c_map"
+    Pretrained = "p_map"
+    FullTag = "t_map"
+    WordEmbeddings = "w_map"
+    MorphLex = "m_map"
+    Lengths = "lens"
+
+
+def pad_dict_tensors(batch_of_dicts: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
+    """Pad the tensors in a dict."""
+    # Convert List[Dict] to Dict[List]
+    result = {}
+    a_dict = {key: [d[key] for d in batch_of_dicts] for key in batch_of_dicts[0]}
+    for key, value in a_dict.items():
+        result[key] = pad_sequence(value, batch_first=True)
+    return result
+
+
+def batch_preprocess(
+    batch: Sequence[Tuple[Tokens, Tags]],
+    x_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
+    y_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
+):
+    """Ekki viss hvað það gerir, en þetta er fallið sem ég set inn í DataLoader.
+    
+    Padda.
+    Halda utan um öll input/output í gegnum dict
+    """
+    tokens, tags = SequenceTaggingDataset(batch).unpack()
+    processed = batch_preprocess_input(tokens, x_mappings)
+    return processed.update(batch_preprocess_input(tags, y_mappings))
+
+
+def batch_preprocess_input(
+    batch: Sequence[Tokens], mappings: Dict[Modules, Callable[[Tokens], Tensor]]
+) -> Dict[Modules, Tensor]:
+    """Process a batch of inputs."""
+    processed = {}
+    for key, mapping in mappings.items():
+        processed[key] = pad_sequence([mapping(x) for x in batch], batch_first=True)
+    # Also add the lengths
+    processed[Modules.Lengths] = Tensor([len(x) for x in batch])
+    return processed
+
+
+def map_to_index(sequence: Tokens, w2i: Dict[str, int]) -> Tensor:
+    """Map a sequence to indices."""
+    return Tensor([w2i[token] if token in w2i else w2i[UNK] for token in sequence])
+
+
+def embed_transformer(
+    transformer: TransformerWordEmbeddings, sentence: Tokens,
+) -> Tensor:
+    """Preprocess a tuple of sentences using a transformer."""
+    f_sentence = Sentence(" ".join(sentence))
+    transformer.embed(f_sentence)
+    return stack([token.embedding for token in f_sentence])
+
+
+def embed_transformer_bulk(
+    transformer: TransformerWordEmbeddings, sentences: Sequence[Tokens],
+) -> Tensor:
+    """Preprocess a tuple of sentences using a transformer."""
+    f_sentences = [Sentence(" ".join(sentence)) for sentence in sentences]
+    transformer.embed(f_sentences)
+    return pad_sequence(
+        [stack([token.embedding for token in sentence]) for sentence in f_sentences],
+        batch_first=True,
+    )
+
+
+def get_input_mappings(
+    transformer: TransformerWordEmbeddings,
+) -> Dict[Modules, Callable[[Tokens], Tensor]]:
+    """Return the input mappings for the model."""
+    return {Modules.BERT: partial(embed_transformer, transformer=transformer)}
+
+
+def get_target_mappings(
+    tag_vocab_map: VocabMap,
+) -> Dict[Modules, Callable[[Tokens], Tensor]]:
+    """Return the target mappings for the model."""
+    return {Modules.FullTag: partial(map_to_index, w2i=tag_vocab_map.w2i)}
+
+
+def character_mapping(w2i, batch_x):
+    """Old code for character mapping."""
+    sents_padded = []
+    for sent in batch_x:
+        sents_padded.append(
+            pad_sequence(
+                [
+                    Tensor(
+                        [w2i[SOS]]
+                        + [w2i[char] if char in w2i else w2i[UNK] for char in token]
+                        + [w2i[EOS]]
+                    )
+                    for token in sent
+                ],
+                batch_first=True,
+                padding_value=w2i[PAD],
+            )
+        )
+    max_words = max((t.shape[0] for t in sents_padded))
+    max_chars = max((t.shape[1] for t in sents_padded))
+    sents_padded = [
+        copy_into_larger_tensor(t, t.new_zeros(size=(max_words, max_chars)))
+        for t in sents_padded
+    ]
+    return pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
+
+
+def run_batch(
+    model: Module, batch: Dict[Modules, Tensor], criterion=None, optimizer=None,
+) -> Tuple[Tensor, float]:
+    """Run a batch through the model.
+    
+    If criterion is given, it will be applied and returned (as float).
+    If optimizer is given, it will be used to update parameters in conjunction with the criterion.
+    """
+    if optimizer is not None:
+        optimizer.zero_grad()
+    model_out = model(batch)
+    # (b, seq, tag_features)
+    loss = 0.0
+    if criterion is not None and Modules.FullTag in batch:
+        t_loss = criterion(
+            model_out.view(-1, model_out.shape[-1]), batch[Modules.FullTag].view(-1)
+        )
+        if optimizer is not None:
+            t_loss.backward()
+            clip_grad_norm_(model.parameters(), 5)
+            optimizer.step()
+        loss = t_loss.item()
+    return model_out, loss
+
+
+def tag_batch(
+    model: Module,
+    batch: Dict[Modules, Tensor],
+    tag_map: VocabMap,
+    criterion=None,
+    optimizer=None,
+) -> Tuple[Iterable[Sequence[str]], float]:
+    """Tag (apply POS) on a given data set."""
+    preds, loss = run_batch(model, batch, criterion, optimizer)
+    idxs = preds.argmax(dim=2).tolist()
+
+    tags = [
+        tuple(
+            tag_map.i2w[tag_idx]
+            for token_count, tag_idx in enumerate(sent)
+            # All sentences are padded (at the right end) to be of equal length.
+            # We do not want to return tags for the paddings.
+            # We check the information about lengths and paddings.
+            if token_count < batch[Modules.Lengths][sent_idx]
+        )
+        for sent_idx, sent in enumerate(idxs)
+    ]
+    return tags, loss
+
+
+def tag_data_loader(
+    model: Module, data_loader: DataLoader, tag_map: VocabMap, criterion=None,
+) -> Tuple[List[Sequence[str]], float]:
+    """Tag (apply POS) on a given data set. Sets the model to evaluation mode."""
+    tags: List[Sequence[str]] = []
+    loss = 0.0
+    model.eval()
+    with no_grad():
+        start = datetime.now()
+        for batch in data_loader:
+            b_tags, b_loss = tag_batch(model, batch, tag_map, criterion)
+            loss += b_loss
+            tags.extend(b_tags)
+        end = datetime.now()
+    log.info(f"Tagged {sum((1 for sent in tags for token in sent))} tokens")
+    log.info(f"Tagging took={end-start} seconds")
+    return tags, loss
 
 
 def wemb_str_to_emb_pair(line: str) -> Tuple[str, List[float]]:
@@ -64,7 +272,7 @@ def bin_str_to_emb_pair(line: str) -> Tuple[str, List[float]]:
 
 
 def emb_pairs_to_dict(
-    lines: Sequence[str], f: Callable[[str], Tuple[str, List[float]]]
+    lines: Iterable[str], f: Callable[[str], Tuple[str, List[float]]]
 ) -> Dict[str, List[float]]:
     """Map a sequence of strings which are embeddings using f to dictionary."""
     embedding_dict: Dict[str, List[float]] = dict()
@@ -121,156 +329,101 @@ def map_embedding(
     return vocab_map, embeddings
 
 
-def embed_transformer(
-    transformer: TransformerWordEmbeddings, sentences: SimpleDataset,
-) -> torch.Tensor:
-    """Preprocess a tuple of sentences using a transformer."""
-    f_sentences = [Sentence(" ".join(sentence)) for sentence in sentences]
-    transformer.embed(f_sentences)
-    return torch.nn.utils.rnn.pad_sequence(
-        [
-            torch.stack([token.embedding for token in sentence])
-            for sentence in f_sentences
-        ],
-        batch_first=True,
+def read_morphlex(filepath: str) -> Tuple[VocabMap, Tensor]:
+    """Read the MorphLex embeddings. Return the VocabMap and embeddings."""
+    with open(filepath) as f:
+        it = iter(f)
+        embedding_dict = emb_pairs_to_dict(it, bin_str_to_emb_pair)
+    m_map, m_embedding = map_embedding(
+        embedding_dict=embedding_dict,  # type: ignore
+        filter_on=None,
+        special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
+    )
+    m_embedding = from_numpy(m_embedding).float()
+    return m_map, m_embedding
+
+
+def read_pretrained_word_embeddings(filepath: str) -> Tuple[VocabMap, Tensor]:
+    """Read the pretrained word embeddings."""
+    with open(filepath) as f:
+        it = iter(f)
+        # pop the number of vectors and dimension
+        next(it)
+        embedding_dict = emb_pairs_to_dict(it, wemb_str_to_emb_pair)
+    w_map, w_embedding = map_embedding(
+        embedding_dict=embedding_dict,  # type: ignore
+        filter_on=None,
+        special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
+    )
+    w_embedding = from_numpy(w_embedding).float()
+    return w_map, w_embedding
+
+
+def vocab_map_from_dataset(dataset: TokenizedDataset):
+    """Create a VocabMap given a Dataset."""
+    return VocabMap(
+        Vocab.from_symbols((x for x in dataset)),
+        special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID)],
     )
 
 
-def data_loader(
-    dataset: Union[Dataset, SimpleDataset],
-    device: torch.device,
-    dictionaries: Dict[str, VocabMap],
-    shuffle: bool,
-    w_emb: str,
-    c_emb: str,
-    m_emb: str,
-    transformer_embedding: TransformerWordEmbeddings,
-    batch_size: int,
-) -> Iterable[Dict[str, Optional[torch.Tensor]]]:
-    """Perpare the data according to parameters and return batched Tensors."""
-    if shuffle and type(dataset) == Dataset:
-        dataset_l = list(deepcopy(dataset))
-        random.shuffle(dataset_l)
-        dataset = Dataset(dataset_l)  # type: ignore
-    length = len(dataset)
-    for ndx in range(0, length, batch_size):
-        batch = dataset[ndx : min(ndx + batch_size, length)]
-        batch_y: Optional[SimpleDataset] = None
-        if type(dataset) is Dataset:
-            batch = cast(Dataset, batch)
-            batch = Dataset(batch)
-            batch_x, batch_y = batch.unpack()
-        elif type(dataset) is SimpleDataset:
-            batch = cast(SimpleDataset, batch)
-            batch_x = batch
-        else:
-            raise ValueError(f"Unsupported dataset type={type(batch)}")
+def load_modules(train_ds, **kwargs):
+    """Load all the modules for the model."""
+    modules: Dict[Modules, Any] = {}
+    dictionaries: Dict[Modules, Dict[str, VocabMap]] = {}
 
-        batch_w: Optional[torch.Tensor] = None
-        batch_c: Optional[torch.Tensor] = None
-        batch_m: Optional[torch.Tensor] = None
-        batch_t: Optional[torch.Tensor] = None
-        log.debug(batch_x)
-        batch_lens = torch.tensor(  # pylint: disable=not-callable
-            [len(sent) for sent in batch_x]
-        ).to(device, dtype=torch.int64)
-        if w_emb == "standard" or w_emb == "pretrained":
-            # We need the w_map
-            w2i = dictionaries["w_map"].w2i
-            batch_w = torch.nn.utils.rnn.pad_sequence(
-                [
-                    torch.tensor(  # pylint: disable=not-callable
-                        [w2i[token] if token in w2i else w2i[UNK] for token in sent]
-                    )
-                    for sent in batch_x
-                ],
-                batch_first=True,
-                padding_value=w2i[PAD],
-            ).to(device)
-            # First pad, then map to index
-        elif w_emb == "none":
-            # Nothing to do.
-            pass
-        elif w_emb == "electra":
-            batch_w = embed_transformer(transformer_embedding, batch_x).to(device)
-        else:
-            raise ValueError(f"Unsupported w_emb={w_emb}")
-        if m_emb == "standard" or m_emb == "extra":
-            w2i = dictionaries["m_map"].w2i
-            batch_m = torch.nn.utils.rnn.pad_sequence(
-                [
-                    torch.tensor(  # pylint: disable=not-callable
-                        [w2i[token] if token in w2i else w2i[UNK] for token in sent]
-                    )
-                    for sent in batch_x
-                ],
-                batch_first=True,
-                padding_value=w2i[PAD],
-            ).to(device)
-        elif m_emb == "none":
-            # Nothing to do.
-            pass
-        else:
-            raise ValueError(f"Unsupported m_emb={m_emb}")
-        if c_emb == "standard":
-            from . import model
+    # Pretrained
+    if kwargs["pretrained_word_embeddings_file"] is not None:
+        m_map, m_embedding = read_pretrained_word_embeddings(
+            kwargs["pretrained_word_embeddings_file"]
+        )
+        modules[Modules.Pretrained] = PretrainedEmbedding(m_embedding)
+        dictionaries[Modules.Pretrained] = m_map
 
-            w2i = dictionaries["c_map"].w2i
-            sents_padded = []
-            for sent in batch_x:
-                try:
-                    sents_padded.append(
-                        torch.nn.utils.rnn.pad_sequence(
-                            [
-                                torch.tensor(  # pylint: disable=not-callable
-                                    [w2i[SOS]]
-                                    + [
-                                        w2i[char] if char in w2i else w2i[UNK]
-                                        for char in token
-                                    ]
-                                    + [w2i[EOS]]
-                                )
-                                for token in sent
-                            ],
-                            batch_first=True,
-                            padding_value=w2i[PAD],
-                        )
-                    )
-                except IndexError:
-                    log.error(f"Invalid sequence={sent}, in batch={batch_x}")
-            max_words = max((t.shape[0] for t in sents_padded))
-            max_chars = max((t.shape[1] for t in sents_padded))
-            sents_padded = [
-                model.copy_into_larger_tensor(
-                    t, t.new_zeros(size=(max_words, max_chars))
-                )
-                for t in sents_padded
-            ]
-            batch_c = torch.nn.utils.rnn.pad_sequence(
-                sents_padded, batch_first=True, padding_value=w2i[PAD]
-            ).to(device)
-        elif c_emb == "none":
-            # Nothing to do.
-            pass
-        else:
-            raise ValueError(f"Unsupported c_emb={c_emb}")
+    # pretrained BERT like model, we use it.
+    if kwargs["bert_encoder"] is not None:
+        transformer_embedding = load_transformer_embeddings(
+            kwargs["bert_encoder"], **kwargs
+        )
+        modules[Modules.BERT] = transformer_embedding
 
-        if batch_y is not None:
-            w2i = dictionaries["t_map"].w2i
-            batch_t = torch.nn.utils.rnn.pad_sequence(
-                [
-                    torch.tensor(  # pylint: disable=not-callable
-                        [w2i[token] if token in w2i else w2i[UNK] for token in sent]
-                    )
-                    for sent in batch_y
-                ],
-                batch_first=True,
-                padding_value=w2i[PAD],
-            ).to(device)
-        yield {
-            "w": batch_w,
-            "c": batch_c,
-            "m": batch_m,
-            "t": batch_t,
-            "lens": batch_lens,
-        }
+    if kwargs["word_embedding_dim"] != -1:
+        # The word embedding dimension is not -1 we train word-embeddings from scratch.
+        w_map = vocab_map_from_dataset((x for x, y in train_ds))
+        modules[Modules.WordEmbeddings] = ClassingWordEmbedding(
+            len(w_map), kwargs["word_embedding_dim"]
+        )
+        dictionaries[Modules.WordEmbeddings] = w_map
+
+    # MorphLex
+    if kwargs["morphlex_embeddings_file"] is not None:
+        # File is provided, use it.
+        m_map, m_embedding = read_morphlex(kwargs["morphlex_embeddings_file"])
+        modules[Modules.MorphLex] = PretrainedEmbedding(
+            m_embedding, freeze=True
+        )  # Currently hard-coded
+        dictionaries[Modules.MorphLex] = m_map
+
+    # Character embeddings.
+    if kwargs["known_chars_file"] is not None:
+        char_vocab = Vocab.from_file(kwargs["known_chars_file"])
+        c_map = VocabMap(
+            char_vocab,
+            special_tokens=[
+                (UNK, UNK_ID),
+                (PAD, PAD_ID),
+                (EOS, EOS_ID),
+                (SOS, SOS_ID),
+            ],
+        )
+        modules[Modules.CharsAsWord] = CharacterAsWordEmbedding(
+            len(c_map), -1, -1, -1
+        )  # TODO: Fix!
+        dictionaries[Modules.CharsAsWord] = c_map
+
+    # TAGS (POS)
+    t_map = VocabMap(
+        Vocab.from_symbols((y for x, y in train_ds)),
+        special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID),],
+    )
+    dictionaries[Modules.FullTag] = t_map

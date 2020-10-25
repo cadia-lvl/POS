@@ -1,8 +1,6 @@
 """Fixtures for tests."""
 from pytest import fixture
 
-print("aaa")
-
 
 def pytest_addoption(parser):
     """Add extra command-line options to pytest."""
@@ -27,3 +25,9 @@ def electra_model(request):
 def tagger(request):
     """Exposes the command-line option to a test case."""
     return request.config.getoption("--tagger")
+
+
+@fixture()
+def test_tsv_file():
+    """Return the filepath of the test tsv file."""
+    return "./tests/test.tsv"
