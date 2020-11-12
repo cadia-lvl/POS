@@ -191,7 +191,7 @@ def train_and_tag(**kwargs):
     modules, dicts = load_modules(
         train_ds=train_ds,
         pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
-        bert_encoder=kwargs["bert_encoder"],
+        bert_model=kwargs["bert_encoder"],
         word_embedding_dim=kwargs["word_embedding_dim"],
         morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
         known_chars_file=kwargs["known_chars_file"],
