@@ -188,15 +188,7 @@ def train_and_tag(**kwargs):
     test_ds = read_datasets([kwargs["test_file"]], max_sent_length=128)
 
     # Set configuration values and create mappers
-    modules, dicts = load_modules(
-        train_ds=train_ds,
-        pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
-        bert_model=kwargs["bert_encoder"],
-        word_embedding_dim=kwargs["word_embedding_dim"],
-        morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
-        known_chars_file=kwargs["known_chars_file"],
-        **kwargs,
-    )
+    modules, dicts = load_modules(train_ds=train_ds, **kwargs,)
 
     input_mappings = get_input_mappings(dicts)
     target_mappings = get_target_mappings(dicts)

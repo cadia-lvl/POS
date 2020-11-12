@@ -428,7 +428,7 @@ def vocab_map_from_dataset(dataset: TokenizedDataset) -> VocabMap:
 def load_modules(
     train_ds,
     pretrained_word_embeddings_file=None,
-    bert_model=None,
+    bert_encoder=None,
     word_embedding_dim=0,
     morphlex_embeddings_file=None,
     known_chars_file=None,
@@ -447,8 +447,8 @@ def load_modules(
         dictionaries[Modules.Pretrained] = m_map
 
     # pretrained BERT like model, we use it.
-    if bert_model:
-        transformer_embedding = load_transformer_embeddings(bert_model, **kwargs)
+    if bert_encoder:
+        transformer_embedding = load_transformer_embeddings(bert_encoder, **kwargs)
         modules[Modules.BERT] = transformer_embedding
         dictionaries[
             Modules.BERT
