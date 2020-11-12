@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 """The main entrypoint to training and running a POS-tagger."""
 import pickle
+from pprint import pprint
 import random
 import logging
 import json
 import pathlib
 from typing import Dict, List
-from functools import reduce, partial
-from operator import add
+from functools import partial
 
 import click
 import flair
@@ -17,6 +17,7 @@ import numpy as np
 
 from .data import (
     load_modules,
+    read_datasets,
     get_encoder,
     get_tagger,
     get_input_mappings,
@@ -69,7 +70,7 @@ def cli(debug, log):
 @click.argument("output", type=click.File("w"))
 def gather_tags(filepaths, output):
     """Read all input tsv files and extract all tags in files."""
-    ds = read_dataset(filepaths)
+    ds = read_datasets(filepaths)
     tags = Vocab.from_symbols(y for x, y in ds)
     for tag_ in sorted(list(tags)):
         output.write(f"{tag_}\n")
@@ -92,7 +93,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     format: The format of the embedding file being read, 'bin' or 'wemb'.
     """
     log.info(f"Reading files={filepaths}")
-    ds = read_dataset(filepaths)
+    ds = read_datasets(filepaths)
     tokens = Vocab.from_symbols(ds.unpack_dataset()[0])
 
     log.info(f"Number of tokens={len(tokens)}")
@@ -178,13 +179,13 @@ def train_and_tag(**kwargs):
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
-    print(kwargs)
+    pprint(kwargs)
     set_seed()
     device = set_device(gpu_flag=kwargs["gpu"])
 
     # Read train and test data
-    train_ds = read_dataset(kwargs["training_files"], max_length=128)
-    test_ds = read_dataset([kwargs["test_file"]], max_length=128)
+    train_ds = read_datasets(kwargs["training_files"], max_sent_length=128)
+    test_ds = read_datasets([kwargs["test_file"]], max_sent_length=128)
 
     # Set configuration values and create mappers
     modules, dicts = load_modules(
@@ -265,28 +266,6 @@ def train_and_tag(**kwargs):
         save_location = output_dir.joinpath("tagger.pt")
         torch.save(abl_tagger, str(save_location))
     log.info("Done!")
-
-
-def read_dataset(file_paths: List[str], max_length=-1) -> SequenceTaggingDataset:
-    """Read tagged datasets from multiple files."""
-    ds = SequenceTaggingDataset(
-        reduce(
-            add,
-            (
-                SequenceTaggingDataset.from_file(training_file)
-                for training_file in file_paths
-            ),
-            (),
-        )
-    )
-    if max_length != -1:
-        # We want to filter out sentences which are too long (and throw them away, for now)
-        ds = SequenceTaggingDataset([(x, y) for x, y in ds if len(x) <= max_length])
-    # DEBUG - read a subset of the data
-    if DEBUG:
-        debug_size = 100
-        ds = ds[:debug_size]
-    return ds
 
 
 def set_seed(seed=42):

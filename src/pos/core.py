@@ -46,6 +46,10 @@ class SequenceTaggingDataset(Dataset):
         """Support iteration."""
         return iter(self.examples)
 
+    def __add__(self, other):
+        """Support addition."""
+        return SequenceTaggingDataset(self.examples + other.examples)
+
     @staticmethod
     def from_file(filepath: str,):
         """Initialize a dataset given a filepath."""

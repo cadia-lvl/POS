@@ -9,6 +9,7 @@ from pos.utils import read_tsv, tokens_to_sentences
 from pos.data import (
     emb_pairs_to_dict,
     pad_dict_tensors,
+    read_datasets,
     load_modules,
     map_to_index,
     get_input_mappings,
@@ -87,6 +88,17 @@ def test_sequence_tagging_dataset_from_file(test_tsv_file):
     print(tmp)
     assert tmp == (("Hæ",), ("a",))
     assert len(test_ds) == 3
+
+
+def test_read_datasets(test_tsv_file):
+    test_ds = read_datasets([test_tsv_file])
+    assert len(test_ds) == 3
+    test_ds = read_datasets([test_tsv_file], max_lines=2)
+    assert len(test_ds) == 2
+    test_ds = read_datasets([test_tsv_file], max_sent_length=2)
+    assert len(test_ds) == 2
+    test_ds = read_datasets([test_tsv_file], max_lines=2, max_sent_length=2)
+    assert len(test_ds) == 2
 
 
 def test_create_mappers_c_w_emb_only(test_tsv_file):

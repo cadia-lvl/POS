@@ -13,7 +13,8 @@ from typing import (
     Sequence,
     Callable,
 )
-from functools import partial
+from functools import partial, reduce
+from operator import add
 import logging
 from copy import deepcopy
 from datetime import datetime
@@ -274,6 +275,34 @@ def tag_data_loader(
     log.info(f"Tagged {sum((1 for sent in tags for token in sent))} tokens")
     log.info(f"Tagging took={end-start} seconds")
     return tags, loss
+
+
+def read_datasets(
+    file_paths: List[str], max_sent_length=0, max_lines=0
+) -> SequenceTaggingDataset:
+    """Read tagged datasets from multiple files.
+    
+    Args:
+        max_sent_length: Sentences longer than "max_sent_length" are thrown away.
+        max_lines: Will only keep the first "max_lines" sentences.
+    """
+    ds = reduce(
+        add,
+        (
+            SequenceTaggingDataset.from_file(training_file)
+            for training_file in file_paths
+        ),
+        SequenceTaggingDataset(tuple()),
+    )
+    if max_sent_length:
+        # We want to filter out sentences which are too long (and throw them away, for now)
+        ds = SequenceTaggingDataset(
+            [(x, y) for x, y in ds if len(x) <= max_sent_length]
+        )
+    # DEBUG - read a subset of the data
+    if max_lines:
+        ds = ds[:max_lines]
+    return ds
 
 
 def wemb_str_to_emb_pair(line: str) -> Tuple[str, List[float]]:
