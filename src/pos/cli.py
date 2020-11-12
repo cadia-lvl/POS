@@ -196,11 +196,7 @@ def train_and_tag(**kwargs):
         batch_preprocess, x_mappings=input_mappings, y_mappings=target_mappings
     )
     train_dl = torch.utils.data.DataLoader(
-        train_ds,
-        shuffle=True,
-        pin_memory=True,
-        batch_size=kwargs["batch_size"],
-        collate_fn=collate_fn,
+        train_ds, shuffle=True, batch_size=kwargs["batch_size"], collate_fn=collate_fn,
     )
     test_dl = torch.utils.data.DataLoader(
         test_ds,
