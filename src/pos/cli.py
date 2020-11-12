@@ -205,7 +205,6 @@ def train_and_tag(**kwargs):
     test_dl = torch.utils.data.DataLoader(
         test_ds,
         shuffle=False,
-        pin_memory=True,
         batch_size=kwargs["batch_size"] * 10,
         collate_fn=collate_fn,
     )
