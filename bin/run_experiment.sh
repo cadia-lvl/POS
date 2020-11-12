@@ -33,8 +33,6 @@ if ((FIRST_STEP <= 1 && LAST_STEP >= 1)); then
     $RAW_DIR/mim/10PM.plain \
     $out_folder \
     --bert_encoder electra_model \
-    --main_lstm_layers 0 \
-    --final_layer none \
     --label_smoothing 0.1 \
     --epochs 25 \
     --batch_size 16 \
