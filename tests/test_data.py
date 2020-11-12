@@ -222,3 +222,30 @@ def test_collate_fn(test_tsv_file):
             [w2i["f"], w2i["s"], w2i["n"]],
             [w2i["a"], w2i["a"], w2i["<pad>"]],
         ]
+
+
+def test_transformer_embedding_electra_small(test_tsv_file, electra_model):
+    if not electra_model:
+        pytest.skip("No --electra_model given")
+    ds = SequenceTaggingDataset.from_file(test_tsv_file)
+    _, dicts = load_modules(ds, bert_encoder=electra_model)
+    input_mappings = get_input_mappings(dicts)
+    target_mappings = get_target_mappings(dicts)
+    collate_fn = partial(
+        batch_preprocess, x_mappings=input_mappings, y_mappings=target_mappings
+    )
+    dl = torch.utils.data.DataLoader(ds, batch_size=3, collate_fn=collate_fn)
+
+    for batch in dl:
+        assert batch[Modules.Lengths].tolist() == [
+            1,
+            3,
+            2,
+        ]  # These sentences are 1, 3, 2 tokens long
+        w2i = dicts[Modules.FullTag].w2i
+        assert batch[Modules.FullTag].tolist() == [
+            [w2i["a"], w2i["<pad>"], w2i["<pad>"]],
+            [w2i["f"], w2i["s"], w2i["n"]],
+            [w2i["a"], w2i["a"], w2i["<pad>"]],
+        ]
+        assert batch[Modules.BERT].shape == (3, 3, 256)

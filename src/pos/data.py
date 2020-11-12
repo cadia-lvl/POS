@@ -75,7 +75,7 @@ def map_to_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
 
 
 def embed_transformer(
-    transformer: TransformerWordEmbeddings, sentence: Tokens,
+    sentence: Tokens, transformer: TransformerWordEmbeddings,
 ) -> Tensor:
     """Preprocess a tuple of sentences using a transformer."""
     f_sentence = Sentence(" ".join(sentence))
@@ -84,7 +84,7 @@ def embed_transformer(
 
 
 def embed_transformer_bulk(
-    transformer: TransformerWordEmbeddings, sentences: Sequence[Tokens],
+    sentences: Sequence[Tokens], transformer: TransformerWordEmbeddings,
 ) -> Tensor:
     """Preprocess a tuple of sentences using a transformer."""
     f_sentences = [Sentence(" ".join(sentence)) for sentence in sentences]
