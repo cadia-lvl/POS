@@ -7,32 +7,6 @@ from flair.embeddings import (
     StackedEmbeddings,
 )
 
-from .types import Symbols
-
-TRANSFORMER = None
-
-
-def electra_embedding(tokens: Symbols):
-    """Create Electra embeddings from tokens."""
-    # init embedding
-    global TRANSFORMER
-    if TRANSFORMER is None:
-        TRANSFORMER = TransformerWordEmbeddings(
-            "electra_model/", layers="all", use_scalar_mix=True
-        )
-
-    # create a sentence
-    length = len(tokens)
-    max_seq_len = 128  # This is the maximum sequence length for the model. It uses subwords- so some sequences will be too long.
-    embs = []
-    for ndx in range(0, length, max_seq_len):
-        batch = tokens[ndx : min(ndx + max_seq_len, length)]
-        sentence = Sentence(" ".join(batch))
-        # embed words in sentence
-        TRANSFORMER.embed(sentence)
-        embs.extend([token.embedding for token in sentence])
-    return stack(embs)  # pylint: disable=not-callable
-
 
 def train_flair_embeddings(
     corpus_path: str,

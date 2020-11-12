@@ -3,7 +3,7 @@ import pytest
 from os.path import isfile
 
 import pos
-from pos.types import Dataset
+from pos.core import Dataset
 
 
 def test_tagger(tagger, dictionaries):

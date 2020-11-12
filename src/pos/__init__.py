@@ -1,7 +1,7 @@
 """An Icelandic POS tagger."""
 import logging
 
-from .types import SimpleDataset, Symbols
+from .core import TokenizedDataset
 from .api import Tagger
 
 log = logging.getLogger(__name__)

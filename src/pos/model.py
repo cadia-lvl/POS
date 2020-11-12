@@ -9,17 +9,7 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 
-from .core import VocabMap
-from .data import (
-    emb_pairs_to_dict,
-    map_embedding,
-    wemb_str_to_emb_pair,
-    Modules,
-    UNK,
-    UNK_ID,
-    PAD,
-    PAD_ID,
-)
+from .core import VocabMap, Modules
 
 
 log = logging.getLogger(__name__)
@@ -28,9 +18,12 @@ log = logging.getLogger(__name__)
 class ClassingWordEmbedding(nn.Module):
     """Classic word embeddings."""
 
-    def __init__(self, vocab_size: int, embedding_dim: int):
+    def __init__(self, vocab_size: int, embedding_dim: int, padding_idx=0):
         """Create one."""
-        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=PAD_ID)
+        super(ClassingWordEmbedding, self).__init__()
+        self.embedding = nn.Embedding(
+            vocab_size, embedding_dim, padding_idx=padding_idx
+        )
         # Skip the first index, should be zero
         nn.init.xavier_uniform_(self.embedding.weight[1:, :])
         self.output_dim = self.embedding.weight.data.shape[1]
@@ -43,10 +36,11 @@ class ClassingWordEmbedding(nn.Module):
 class PretrainedEmbedding(nn.Module):
     """The Morphological Lexicion embeddings."""
 
-    def __init__(self, embeddings: Tensor, freeze=False):
+    def __init__(self, embeddings: Tensor, freeze=False, padding_idx=0):
         """Create one."""
+        super(PretrainedEmbedding, self).__init__()
         self.embedding = nn.Embedding.from_pretrained(
-            embeddings, freeze=freeze, padding_idx=PAD_ID,
+            embeddings, freeze=freeze, padding_idx=padding_idx,
         )
         self.output_dim = self.embedding.weight.data.shape[1]
 
@@ -59,11 +53,17 @@ class CharacterAsWordEmbedding(nn.Module):
     """A Character as Word Embedding."""
 
     def __init__(
-        self, vocab_size, character_embedding_dim, char_lstm_dim, char_lstm_layers=1
+        self,
+        vocab_size,
+        character_embedding_dim=20,
+        char_lstm_dim=64,
+        char_lstm_layers=1,
+        padding_idx=0,
     ):
         """Create one."""
+        super(CharacterAsWordEmbedding, self).__init__()
         self.character_embedding = nn.Embedding(
-            vocab_size, character_embedding_dim, padding_idx=PAD_ID
+            vocab_size, character_embedding_dim, padding_idx=padding_idx
         )
         nn.init.xavier_uniform_(self.character_embedding.weight[1:, :])
         # The character BiLSTM
@@ -135,18 +135,31 @@ def load_transformer_embeddings(file_path, **kwargs) -> TransformerWordEmbedding
     )
 
 
-class ABLTagger(nn.Module):
-    """The Pytorch module implementing the tagger."""
+class Tagger(nn.Module):
+    """A tagger; accept some tensor input and return logits over classes."""
+
+    def __init__(self, input_dim, output_dim):
+        """Initialize."""
+        super(Tagger, self).__init__()
+        self.tagger = nn.Linear(input_dim, output_dim)
+        nn.init.xavier_uniform_(self.tagger.weight)
+        self.output_dim = output_dim
+
+    def forward(self, t_in):
+        """Apply the module."""
+        return self.tagger(t_in)
+
+
+class Encoder(nn.Module):
+    """The Pytorch module implementing the encoder."""
 
     def __init__(
         self,
-        tags_dim: int,  # The number of tags in dictionary - to predict
-        main_lstm_dim: int,  # The main LSTM dim will output with this dim
-        main_lstm_layers: int,  # The main LSTM layers
-        final_dim: int,  # The main LSTM time-steps will be mapped to this dim
-        lstm_dropouts: float,
-        input_dropouts: float,
-        noise: float,
+        main_lstm_dim=64,  # The main LSTM dim will output with this dim
+        main_lstm_layers=0,  # The main LSTM layers
+        lstm_dropouts=0.0,
+        input_dropouts=0.0,
+        noise=0.1,
         morphlex_embedding: nn.Module = None,
         pretrained_word_embedding: nn.Module = None,
         word_embedding: nn.Module = None,
@@ -154,7 +167,7 @@ class ABLTagger(nn.Module):
         transformer_embedding: nn.Module = None,
     ):
         """Initialize the module given the parameters."""
-        super(ABLTagger, self).__init__()
+        super(Encoder, self).__init__()
         self.noise = noise
         self.morphlex_embedding = morphlex_embedding
         self.pretrained_word_embedding = pretrained_word_embedding
@@ -163,22 +176,22 @@ class ABLTagger(nn.Module):
         self.transformer_embedding = transformer_embedding
 
         self.use_bilstm = not main_lstm_layers == 0
-        input_dim_tagger = 0
+        encoder_out_dim = 0
         if self.morphlex_embedding is not None:
-            input_dim_tagger += self.morphlex_embedding.output_dim  # type: ignore
+            encoder_out_dim += self.morphlex_embedding.output_dim  # type: ignore
         if self.pretrained_word_embedding is not None:
-            input_dim_tagger += self.pretrained_word_embedding.output_dim  # type: ignore
+            encoder_out_dim += self.pretrained_word_embedding.output_dim  # type: ignore
         if self.word_embedding is not None:
-            input_dim_tagger += self.word_embedding.output_dim  # type: ignore
+            encoder_out_dim += self.word_embedding.output_dim  # type: ignore
         if self.chars_as_word_embedding is not None:
-            input_dim_tagger += self.chars_as_word_embedding.output_dim  # type: ignore
+            encoder_out_dim += self.chars_as_word_embedding.output_dim  # type: ignore
         if self.transformer_embedding is not None:
-            input_dim_tagger += 256
+            encoder_out_dim += 256
 
         # BiLSTM over all inputs
         if self.use_bilstm:
             self.bilstm = nn.LSTM(
-                input_size=input_dim_tagger,
+                input_size=encoder_out_dim,
                 hidden_size=main_lstm_dim,
                 num_layers=main_lstm_layers,
                 dropout=lstm_dropouts,
@@ -192,12 +205,9 @@ class ABLTagger(nn.Module):
                     nn.init.xavier_uniform_(param)
                 else:
                     raise ValueError("Unknown parameter in lstm={name}")
-            input_dim_tagger = main_lstm_dim * 2
+            encoder_out_dim = main_lstm_dim * 2
         self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
-
-        # Tagger
-        self.tagger = nn.Linear(input_dim_tagger, tags_dim)
-        nn.init.xavier_uniform_(self.tagger.weight)
+        self.output_dim = encoder_out_dim
 
     def forward(  # pylint: disable=arguments-differ
         self, batch_dict: Dict[Modules, Tensor]
@@ -229,7 +239,7 @@ class ABLTagger(nn.Module):
 
         if self.use_bilstm:
             # Pack the paddings
-            packed = torch.nn.utils.rnn.pack_padded_sequence(  # type: ignore
+            packed = torch.nn.utils.rnn.pack_padded_sequence(
                 main_in,
                 batch_dict[Modules.Lengths],
                 batch_first=True,
@@ -241,11 +251,26 @@ class ABLTagger(nn.Module):
             packed_out, _ = self.bilstm(packed)
             # Unpack and ignore the lengths
             bilstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(
-                packed_out, batch_first=True  # type: ignore
+                packed_out, batch_first=True
             )
             main_in = self.main_bilstm_out_dropout(bilstm_out)
 
-        return self.tagger(main_in)
+        return main_in
+
+
+class ABLTagger(nn.Module):
+    """The ABLTagger, consists of an Encoder(multipart) and a Tagger."""
+
+    def __init__(self, encoder: nn.Module, tagger: nn.Module):
+        """Initialize the tagger."""
+        super(ABLTagger, self).__init__()
+        self.encoder = encoder
+        self.tagger = tagger
+
+    def forward(self, batch_dict: Dict[Modules, Tensor]):
+        """Forward pass."""
+        encoded = self.encoder(batch_dict)
+        return self.tagger(encoded)
 
 
 def cat_or_return(t1, t2, dim=2):

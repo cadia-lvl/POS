@@ -35,6 +35,9 @@ from .model import (
     load_transformer_embeddings,
     ClassingWordEmbedding,
     CharacterAsWordEmbedding,
+    Tagger,
+    Encoder,
+    ABLTagger,
 )
 from .utils import read_tsv
 from .core import (
@@ -44,6 +47,7 @@ from .core import (
     Tags,
     SequenceTaggingDataset,
     TokenizedDataset,
+    Modules,
 )
 
 
@@ -62,58 +66,11 @@ SOS = "<s>"
 SOS_ID = 3
 
 
-class Modules(Enum):
-    """An enum to hold all possible input preprocessing required for the model and corresponds to parts of the model."""
-
-    BERT = "bert"
-    CharsAsWord = "c_map"
-    Pretrained = "p_map"
-    FullTag = "t_map"
-    WordEmbeddings = "w_map"
-    MorphLex = "m_map"
-    Lengths = "lens"
-
-
-def pad_dict_tensors(batch_of_dicts: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
-    """Pad the tensors in a dict."""
-    # Convert List[Dict] to Dict[List]
-    result = {}
-    a_dict = {key: [d[key] for d in batch_of_dicts] for key in batch_of_dicts[0]}
-    for key, value in a_dict.items():
-        result[key] = pad_sequence(value, batch_first=True)
-    return result
-
-
-def batch_preprocess(
-    batch: Sequence[Tuple[Tokens, Tags]],
-    x_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
-    y_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
-):
-    """Ekki viss hvað það gerir, en þetta er fallið sem ég set inn í DataLoader.
-    
-    Padda.
-    Halda utan um öll input/output í gegnum dict
-    """
-    tokens, tags = SequenceTaggingDataset(batch).unpack()
-    processed = batch_preprocess_input(tokens, x_mappings)
-    return processed.update(batch_preprocess_input(tags, y_mappings))
-
-
-def batch_preprocess_input(
-    batch: Sequence[Tokens], mappings: Dict[Modules, Callable[[Tokens], Tensor]]
-) -> Dict[Modules, Tensor]:
-    """Process a batch of inputs."""
-    processed = {}
-    for key, mapping in mappings.items():
-        processed[key] = pad_sequence([mapping(x) for x in batch], batch_first=True)
-    # Also add the lengths
-    processed[Modules.Lengths] = Tensor([len(x) for x in batch])
-    return processed
-
-
-def map_to_index(sequence: Tokens, w2i: Dict[str, int]) -> Tensor:
+def map_to_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
     """Map a sequence to indices."""
-    return Tensor([w2i[token] if token in w2i else w2i[UNK] for token in sequence])
+    return Tensor(
+        [w2i[token] if token in w2i else w2i[UNK] for token in sentence]
+    ).long()
 
 
 def embed_transformer(
@@ -138,17 +95,31 @@ def embed_transformer_bulk(
 
 
 def get_input_mappings(
-    transformer: TransformerWordEmbeddings,
+    dictionaries: Dict[Modules, Optional[VocabMap]]
 ) -> Dict[Modules, Callable[[Tokens], Tensor]]:
     """Return the input mappings for the model."""
-    return {Modules.BERT: partial(embed_transformer, transformer=transformer)}
+    mappings: Dict[Modules, Callable[[Tokens], Tensor]] = {}
+    for module, value in dictionaries.items():
+        if module == Modules.BERT:
+            mappings[module] = partial(embed_transformer, transformer=value)
+        elif module == Modules.WordEmbeddings:
+            mappings[module] = partial(map_to_index, w2i=value.w2i)  # type: ignore
+        else:
+            log.info(f"Skipping module={module} in input mappings.")
+    return mappings
 
 
 def get_target_mappings(
-    tag_vocab_map: VocabMap,
+    dictionaries: Dict[Modules, Optional[VocabMap]]
 ) -> Dict[Modules, Callable[[Tokens], Tensor]]:
     """Return the target mappings for the model."""
-    return {Modules.FullTag: partial(map_to_index, w2i=tag_vocab_map.w2i)}
+    mappings: Dict[Modules, Callable[[Tokens], Tensor]] = {}
+    for module, value in dictionaries.items():
+        if module == Modules.FullTag:
+            mappings[module] = partial(map_to_index, w2i=value.w2i)  # type: ignore
+        else:
+            log.info(f"Skipping module={module} in target mappings.")
+    return mappings
 
 
 def character_mapping(w2i, batch_x):
@@ -176,6 +147,64 @@ def character_mapping(w2i, batch_x):
         for t in sents_padded
     ]
     return pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
+
+
+def batch_preprocess(
+    batch: Sequence[Tuple[Tokens, Tags]],
+    x_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
+    y_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
+) -> Dict[Modules, Tensor]:
+    """Ekki viss hvað það gerir, en þetta er fallið sem ég set inn í DataLoader.
+    
+    Padda.
+    Halda utan um öll input/output í gegnum dict
+    """
+    tokens, tags = SequenceTaggingDataset(batch).unpack()
+    processed = batch_preprocess_input(tokens, x_mappings)
+    processed.update(batch_preprocess_input(tags, y_mappings))
+    return processed
+
+
+def batch_preprocess_input(
+    batch: Sequence[Tokens], mappings: Dict[Modules, Callable[[Tokens], Tensor]]
+) -> Dict[Modules, Tensor]:
+    """Process a batch of inputs."""
+    processed = {}
+    for key, mapping in mappings.items():
+        processed[key] = pad_sequence([mapping(x) for x in batch], batch_first=True)
+    # Also add the lengths
+    processed[Modules.Lengths] = Tensor([len(x) for x in batch]).long()
+    return processed
+
+
+def pad_dict_tensors(batch_of_dicts: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
+    """Pad the tensors in a dict."""
+    # Convert List[Dict] to Dict[List]
+    result = {}
+    a_dict = {key: [d[key] for d in batch_of_dicts] for key in batch_of_dicts[0]}
+    for key, value in a_dict.items():
+        result[key] = pad_sequence(value, batch_first=True)
+    return result
+
+
+def get_encoder(modules: Dict[Modules, Module]) -> Encoder:
+    """Return an Encoder based on the modules available."""
+    return Encoder(
+        transformer_embedding=modules.get(Modules.BERT, None),
+        morphlex_embedding=modules.get(Modules.MorphLex, None),
+        pretrained_word_embedding=modules.get(Modules.Pretrained, None),
+        word_embedding=modules.get(Modules.WordEmbeddings, None),
+        chars_as_word_embedding=modules.get(Modules.CharsAsWord, None),
+    )
+
+
+def get_tagger(
+    encoder_output_dim: int, dictionaries: Dict[Modules, VocabMap]
+) -> Tagger:
+    """Return a Tagger."""
+    return Tagger(
+        input_dim=encoder_output_dim, output_dim=len(dictionaries[Modules.FullTag].w2i),
+    )
 
 
 def run_batch(
@@ -359,7 +388,7 @@ def read_pretrained_word_embeddings(filepath: str) -> Tuple[VocabMap, Tensor]:
     return w_map, w_embedding
 
 
-def vocab_map_from_dataset(dataset: TokenizedDataset):
+def vocab_map_from_dataset(dataset: TokenizedDataset) -> VocabMap:
     """Create a VocabMap given a Dataset."""
     return VocabMap(
         Vocab.from_symbols((x for x in dataset)),
@@ -367,46 +396,55 @@ def vocab_map_from_dataset(dataset: TokenizedDataset):
     )
 
 
-def load_modules(train_ds, **kwargs):
+def load_modules(
+    train_ds,
+    pretrained_word_embeddings_file=None,
+    bert_encoder=None,
+    word_embedding_dim=0,
+    morphlex_embeddings_file=None,
+    known_chars_file=None,
+    **kwargs,
+):
     """Load all the modules for the model."""
-    modules: Dict[Modules, Any] = {}
-    dictionaries: Dict[Modules, Dict[str, VocabMap]] = {}
+    modules: Dict[Modules, Module] = {}
+    dictionaries: Dict[Modules, VocabMap] = {}
 
     # Pretrained
-    if kwargs["pretrained_word_embeddings_file"] is not None:
+    if pretrained_word_embeddings_file:
         m_map, m_embedding = read_pretrained_word_embeddings(
-            kwargs["pretrained_word_embeddings_file"]
+            pretrained_word_embeddings_file
         )
         modules[Modules.Pretrained] = PretrainedEmbedding(m_embedding)
         dictionaries[Modules.Pretrained] = m_map
 
     # pretrained BERT like model, we use it.
-    if kwargs["bert_encoder"] is not None:
-        transformer_embedding = load_transformer_embeddings(
-            kwargs["bert_encoder"], **kwargs
-        )
+    if bert_encoder:
+        transformer_embedding = load_transformer_embeddings(bert_encoder, **kwargs)
         modules[Modules.BERT] = transformer_embedding
+        dictionaries[
+            Modules.BERT
+        ] = transformer_embedding  # We just place it here, this is for preprocessing.
 
-    if kwargs["word_embedding_dim"] != -1:
+    if word_embedding_dim:
         # The word embedding dimension is not -1 we train word-embeddings from scratch.
         w_map = vocab_map_from_dataset((x for x, y in train_ds))
         modules[Modules.WordEmbeddings] = ClassingWordEmbedding(
-            len(w_map), kwargs["word_embedding_dim"]
+            len(w_map), word_embedding_dim
         )
         dictionaries[Modules.WordEmbeddings] = w_map
 
     # MorphLex
-    if kwargs["morphlex_embeddings_file"] is not None:
+    if morphlex_embeddings_file:
         # File is provided, use it.
-        m_map, m_embedding = read_morphlex(kwargs["morphlex_embeddings_file"])
+        m_map, m_embedding = read_morphlex(morphlex_embeddings_file)
         modules[Modules.MorphLex] = PretrainedEmbedding(
             m_embedding, freeze=True
-        )  # Currently hard-coded
+        )  # Currently hard-coded to "freeze"
         dictionaries[Modules.MorphLex] = m_map
 
     # Character embeddings.
-    if kwargs["known_chars_file"] is not None:
-        char_vocab = Vocab.from_file(kwargs["known_chars_file"])
+    if known_chars_file:
+        char_vocab = Vocab.from_file(known_chars_file)
         c_map = VocabMap(
             char_vocab,
             special_tokens=[
@@ -416,14 +454,13 @@ def load_modules(train_ds, **kwargs):
                 (SOS, SOS_ID),
             ],
         )
-        modules[Modules.CharsAsWord] = CharacterAsWordEmbedding(
-            len(c_map), -1, -1, -1
-        )  # TODO: Fix!
+        modules[Modules.CharsAsWord] = CharacterAsWordEmbedding(len(c_map))
         dictionaries[Modules.CharsAsWord] = c_map
 
     # TAGS (POS)
-    t_map = VocabMap(
-        Vocab.from_symbols((y for x, y in train_ds)),
-        special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID),],
-    )
+    t_map = vocab_map_from_dataset((y for _, y in train_ds))
+    modules[Modules.FullTag] = Tagger(
+        10, 10
+    )  # TODO: fix this so we construct this when we have the input ready.
     dictionaries[Modules.FullTag] = t_map
+    return modules, dictionaries

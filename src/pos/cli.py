@@ -16,38 +16,34 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 from .data import (
-    read_morphlex,
-    vocab_map_from_dataset,
-    tag_data_loader,
-    MAPPING_KEY_TAGS,
-    EOS,
-    EOS_ID,
-    SOS,
-    SOS_ID,
-    PAD,
-    PAD_ID,
-    UNK,
-    UNK_ID,
-    SequenceTaggingDataset,
-    TokenizedDataset,
+    load_modules,
+    get_encoder,
+    get_tagger,
+    get_input_mappings,
+    get_target_mappings,
+    batch_preprocess,
+    emb_pairs_to_dict,
+    bin_str_to_emb_pair,
+    wemb_str_to_emb_pair,
 )
 from .core import (
     Vocab,
     VocabMap,
-    Dataset,
-    SimpleDataset,
-    TaggedSentence,
+    SequenceTaggingDataset,
+    TokenizedDataset,
+    Modules,
 )
-from .model import ABLTagger, PretrainedWordEmbeddings, load_transformer_embeddings
+from .model import Encoder, Tagger, ABLTagger
 from .train import (
     print_tagger,
     get_criterion,
+    tag_data_loader,
     get_parameter_groups,
     get_optimizer,
     get_scheduler,
     run_epochs,
 )
-from .api import Tagger
+from .api import Tagger as api_tagger
 from .evaluate import Experiment
 from .utils import write_tsv
 
@@ -123,6 +119,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--save_vocab/--no_save_vocab", default=False)
 @click.option(
     "--known_chars_file",
+    default=None,
     help="A file which contains the characters the model should know. Omit, to disable character embeddings. "
     + "File should be a single line, the line is split() to retrieve characters.",
 )
@@ -132,12 +129,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     default=None,
     help="A file which contains the morphological embeddings.",
 )
-@click.option("--morphlex_freeze", is_flag=True, default=False)
-@click.option(
-    "--morphlex_extra_dim",
-    default=-1,
-    help="The dimension to map morphlex embeddings to. -1 to disable.",
-)
+@click.option("--morphlex_freeze", is_flag=True, default=True)
 @click.option(
     "--pretrained_word_embeddings_file",
     default=None,
@@ -145,8 +137,8 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 )
 @click.option(
     "--word_embedding_dim",
-    default=-1,
-    help="The word/token embedding dimension. Set to -1 to disable word embeddings.",
+    default=0,
+    help="The word/token embedding dimension. Set to 0 to disable word embeddings.",
 )
 @click.option(
     "--word_embedding_lr", default=0.2, help="The word/token embedding learning rate."
@@ -156,17 +148,10 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     default=None,
     help="A folder which contains a pretrained BERT-like model.",
 )
-@click.option("--main_lstm_layers", default=1)
 @click.option(
-    "--final_layer",
-    default="dense",
-    type=click.Choice(["dense", "none", "attention"], case_sensitive=False),
-    help="The type of final layer to use.",
-)
-@click.option(
-    "--final_layer_attention_heads",
-    default=1,
-    help="The number of attention heads to use.",
+    "--main_lstm_layers",
+    default=0,
+    help="The number of bilstm layers to use in the encoder. Set to 0 to disable.",
 )
 @click.option("--final_dim", default=32)
 @click.option("--label_smoothing", default=0.0)
@@ -202,88 +187,69 @@ def train_and_tag(**kwargs):
     test_ds = read_dataset([kwargs["test_file"]], max_length=128)
 
     # Set configuration values and create mappers
-    dictionaries: Dict[str, VocabMap] = {}
-    extras: Dict[str, np.array] = {}
-
-    model_parameters = {
-        "w_emb": w_emb,
-        "c_emb": c_emb,
-        "m_emb": m_emb,
-        "char_dim": len(dictionaries["c_map"]) if "c_map" in dictionaries else 0,
-        "token_dim": len(dictionaries["w_map"]) if w_emb == "standard" else 0,
-        "tags_dim": len(dictionaries["t_map"]),
-        "emb_char_dim": 20,  # The characters are mapped to this dim
-        "char_lstm_dim": 64,  # The character LSTM will output with this dim
-        "char_lstm_layers": kwargs[
-            "char_lstm_layers"
-        ],  # The character LSTM will output with this dim
-        "emb_token_dim": kwargs[
-            "word_embedding_dim"
-        ],  # The tokens are mapped to this dim
-        "main_lstm_dim": 64,  # The main LSTM dim will output with this dim
-        "main_lstm_layers": kwargs[
-            "main_lstm_layers"
-        ],  # The main LSTM dim will output with this dim
-        "final_layer": kwargs["final_layer"],
-        "final_layer_attention_heads": kwargs["final_layer_attention_heads"],
-        "final_dim": kwargs[
-            "final_dim"
-        ],  # The main LSTM time-steps will be mapped to this dim
-        "morphlex_extra_dim": kwargs["morphlex_extra_dim"],
-        "transformer_embedding": transformer_embedding,
-        "lstm_dropouts": 0.1,
-        "input_dropouts": 0.0,
-        "noise": 0.1,  # Noise to main_in, to main_bilstm
-        "morphlex_freeze": kwargs["morphlex_freeze"],
-    }
-
-    # Run parameters
-    parameters = {
-        "training_files": kwargs["training_files"],
-        "test_file": kwargs["test_file"],
-        "epochs": kwargs["epochs"],
-        "batch_size": kwargs["batch_size"],
-        "learning_rate": kwargs["learning_rate"],
-        "word_embedding_lr": kwargs["word_embedding_lr"],
-        "scheduler": kwargs["scheduler"],
-        "label_smoothing": kwargs["label_smoothing"],
-        "optimizer": kwargs["optimizer"],
-    }
-
-    # Write all configuration to disk
-    output_dir = pathlib.Path(kwargs["output_dir"])
-    write_hyperparameters(
-        output_dir / "hyperparamters.json", dict(parameters).update(model_parameters)
+    modules, dicts = load_modules(
+        train_ds=train_ds,
+        pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
+        bert_encoder=kwargs["bert_encoder"],
+        word_embedding_dim=kwargs["word_embedding_dim"],
+        morphlex_embeddings_file=kwargs["morphlex_embddings_files"],
+        known_chars_file=kwargs["known_chars_file"],
+        **kwargs,
     )
-    # Train a model
 
-    tagger = ABLTagger(**{**model_parameters, **extras}).to(device)
+    input_mappings = get_input_mappings(dicts)
+    target_mappings = get_target_mappings(dicts)
+    collate_fn = partial(
+        batch_preprocess, x_mappings=input_mappings, y_mappings=target_mappings
+    )
+    train_dl = torch.utils.data.DataLoader(
+        train_ds,
+        shuffle=True,
+        pin_memory=True,
+        batch_size=kwargs["batch_size"],
+        collate_fn=collate_fn,
+    )
+    test_dl = torch.utils.data.DataLoader(
+        test_ds,
+        shuffle=False,
+        pin_memory=True,
+        batch_size=kwargs["batch_size"] * 10,
+        collate_fn=collate_fn,
+    )
+    encoder = get_encoder(
+        modules
+    )  # TODO: Pass in main_lstm, dropouts, etc. params here.
+    tagger = get_tagger(encoder.output_dim, dicts)
+    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger).to(device)
+
+    # Train a model
     print_tagger(tagger)
 
     criterion = get_criterion(**kwargs)
     parameter_groups = get_parameter_groups(tagger.named_parameters(), **kwargs)
     optimizer = get_optimizer(parameter_groups, **kwargs)
     scheduler = get_scheduler(optimizer, **kwargs)
-    evaluator = partial(
-        Experiment.from_predictions, test_ds=test_ds, dicts=dictionaries
-    )
+    evaluator = partial(Experiment.from_predictions, test_ds=test_ds, dicts=dicts)
 
+    # Write all configuration to disk
+    output_dir = pathlib.Path(kwargs["output_dir"])
+    write_hyperparameters(output_dir / "hyperparamters.json", (kwargs))
+
+    # Start the training
     run_epochs(
-        model=tagger,
+        model=abl_tagger,
         optimizer=optimizer,
         criterion=criterion,
         scheduler=scheduler,
         evaluator=evaluator,
-        train_data_loader=train_data_loader,
-        test_data_loader=test_data_loader,
-        dictionaries=dictionaries,
+        train_data_loader=train_dl,
+        test_data_loader=test_dl,
+        dictionaries=dicts,
         epochs=kwargs["epochs"],
         output_dir=output_dir,
     )
     test_tags_tagged, _ = tag_data_loader(
-        model=tagger,
-        data_loader=test_data_loader,
-        tag_map=dictionaries[MAPPING_KEY_TAGS],
+        model=abl_tagger, data_loader=test_dl, tag_map=dicts[Modules.FullTag],
     )
     log.info("Writing predictions, dictionaries and model")
     with (output_dir / "predictions.tsv").open("w") as f:
@@ -294,10 +260,10 @@ def train_and_tag(**kwargs):
     if kwargs["save_vocab"]:
         save_location = output_dir.joinpath("dictionaries.pickle")
         with save_location.open("wb+") as f:
-            pickle.dump(dictionaries, f)
+            pickle.dump(dicts, f)
     if kwargs["save_model"]:
         save_location = output_dir.joinpath("tagger.pt")
-        torch.save(tagger, str(save_location))
+        torch.save(abl_tagger, str(save_location))
     log.info("Done!")
 
 
@@ -305,21 +271,26 @@ def read_dataset(file_paths: List[str], max_length=-1) -> SequenceTaggingDataset
     """Read tagged datasets from multiple files."""
     ds = SequenceTaggingDataset(
         reduce(
-            add, (Dataset.from_file(training_file) for training_file in file_paths), (),
+            add,
+            (
+                SequenceTaggingDataset.from_file(training_file)
+                for training_file in file_paths
+            ),
+            (),
         )
     )
     if max_length != -1:
         # We want to filter out sentences which are too long (and throw them away, for now)
-        ds = Dataset(TaggedSentence((x, y)) for x, y in ds if len(x) <= max_length)
+        ds = SequenceTaggingDataset([(x, y) for x, y in ds if len(x) <= max_length])
     # DEBUG - read a subset of the data
     if DEBUG:
         debug_size = 100
-        ds = Dataset(ds[:debug_size])
+        ds = ds[:debug_size]
     return ds
 
 
 def set_seed(seed=42):
-    """Set the seed on all platforms. 0 for need specific seeding."""
+    """Set the seed on all platforms. 0 for no specific seeding."""
     if seed:
         random.seed(seed)
         np.random.seed(seed)
@@ -377,7 +348,7 @@ def tag(model_file, dictionaries_file, data_in, output, device, contains_tags):
         data_in: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
         output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
     """
-    tagger = Tagger(
+    tagger = api_tagger(
         model_file=model_file, dictionaries_file=dictionaries_file, device=device
     )
     log.info("Reading dataset")

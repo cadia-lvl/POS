@@ -23,7 +23,6 @@ from .data import (
     Modules,
 )
 from .core import Vocab, VocabMap, TokenizedDataset
-from .model import ABLTagger
 
 log = logging.getLogger(__name__)
 

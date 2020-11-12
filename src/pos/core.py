@@ -5,12 +5,24 @@ import logging
 
 from torch.utils.data import Dataset
 
-from .utils import read_tsv
+from .utils import read_tsv, tokens_to_sentences
 
 log = logging.getLogger(__name__)
 
 Tokens = Sequence[str]
 Tags = Sequence[str]
+
+
+class Modules(Enum):
+    """An enum to name all model parts."""
+
+    BERT = "bert"
+    CharsAsWord = "c_map"
+    Pretrained = "p_map"
+    FullTag = "t_map"
+    WordEmbeddings = "w_map"
+    MorphLex = "m_map"
+    Lengths = "lens"
 
 
 class SequenceTaggingDataset(Dataset):
@@ -38,16 +50,16 @@ class SequenceTaggingDataset(Dataset):
     def from_file(filepath: str,):
         """Initialize a dataset given a filepath."""
         with open(filepath) as f:
-            examples = read_tsv(f)
+            examples = tuple(tokens_to_sentences(read_tsv(f)))
         if len(examples) != 0:
             # We expect to get List[Tokens, Tags]
             assert len(examples[0]) == 2
-        examples = cast(Sequence[Tuple[Sequence[str], Sequence[str]]], examples)
+        examples = cast(Tuple[Tuple[Sequence[str], Sequence[str]]], examples)
         return SequenceTaggingDataset(examples)
 
     def unpack(self) -> Tuple[Sequence[Tokens], Sequence[Tags]]:
         """Unpack to Tokens and tags."""
-        return ([tokens for tokens, _ in self], [tags for _, tags in self])
+        return (tuple(tokens for tokens, _ in self), tuple(tags for _, tags in self))
 
 
 class TokenizedDataset(Dataset):
@@ -75,7 +87,7 @@ class TokenizedDataset(Dataset):
     def from_file(filepath: str,):
         """Initialize a dataset given a filepath."""
         with open(filepath) as f:
-            examples = read_tsv(f)
+            examples = tuple(tokens_to_sentences(read_tsv(f)))
         if len(examples) != 0:
             # We expect to get List[Tokens, Tags]
             assert len(examples[0]) == 1
@@ -106,9 +118,9 @@ class DoubleTaggedDataset(Dataset):
     def unpack(self) -> Tuple[Sequence[Tokens], Sequence[Tokens], Sequence[Tokens]]:
         """Unpack a PredictedDataset to three SimpleDataset(s): Tokens, tags and predicted tags."""
         return (
-            [tokens for tokens, _, _ in self],
-            [tags for _, tags, _ in self],
-            [preds for _, _, preds in self],
+            tuple(tokens for tokens, _, _ in self),
+            tuple(tags for _, tags, _ in self),
+            tuple(preds for _, _, preds in self),
         )
 
     def as_sequence(self) -> Iterable[Tuple[str, str, str, int, int]]:
@@ -121,8 +133,8 @@ class DoubleTaggedDataset(Dataset):
     def from_file(filepath):
         """Construct a PredictedDataset from a file."""
         with open(filepath) as f:
-            sentences = read_tsv(f)
-        return DoubleTaggedDataset(sentences)
+            examples = tuple(tokens_to_sentences(read_tsv(f)))
+        return DoubleTaggedDataset(examples)
 
 
 class Vocab(set):

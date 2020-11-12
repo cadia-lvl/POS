@@ -9,7 +9,7 @@ def test_copy_into_larger_tensor():
     bigger_tensor = torch.ones((3, 3))
     assert torch.all(
         model.copy_into_larger_tensor(test, bigger_tensor).eq(
-            torch.tensor([[0, 1, 0], [2, 3, 0], [0, 0, 0]])
+            torch.Tensor([[0, 1, 0], [2, 3, 0], [0, 0, 0]])
         )
     )
 
@@ -17,14 +17,14 @@ def test_copy_into_larger_tensor():
 def test_loss():
     criterion = torch.nn.CrossEntropyLoss()
 
-    test_score = torch.tensor([[1, 2]]).float()
-    test_idx = torch.tensor([0])
+    test_score = torch.Tensor([[1, 2]]).float()
+    test_idx = torch.Tensor([0.0]).long()
     loss = criterion(test_score, test_idx)
     expected_loss = 1.31326162815094
     assert loss.item() == expected_loss
 
-    test_score2 = torch.tensor([[2, 1]]).float()
-    test_idx2 = torch.tensor([1])
+    test_score2 = torch.Tensor([[2, 1]]).float()
+    test_idx2 = torch.Tensor([1.0]).long()
     loss2 = criterion(test_score2, test_idx2)
     expected_loss2 = 1.31326162815094
     assert loss2.item() == expected_loss2
@@ -62,7 +62,7 @@ def test_loss():
 
 
 def test_batch_first_to_batch_second():
-    test = torch.tensor(
+    test = torch.Tensor(
         [
             [[1, 2, 3], [4, 5, 6],],  # first batch  # first word  # second word
             [[7, 8, 9], [10, 11, 12],],  # second batch  # first word  # second word
@@ -71,7 +71,7 @@ def test_batch_first_to_batch_second():
     print(test)
     test_b_2nd = model.batch_first_to_batch_second(test)
     assert test_b_2nd.eq(
-        torch.tensor(
+        torch.Tensor(
             [
                 [[1, 2, 3], [7, 8, 9],],  # first word  # first batch  # second batch
                 [

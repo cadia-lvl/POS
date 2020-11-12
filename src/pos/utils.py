@@ -1,36 +1,62 @@
 """Utilities."""
-from typing import List, Tuple, Sequence
+from typing import List, Tuple, Sequence, Iterable, Optional
 import logging
 
 log = logging.getLogger(__name__)
 
 
-def read_tsv(f) -> Sequence[Tuple[Sequence[str], ...]]:
-    """Read a .tsv file which defines sequences with empty lines and return a  list of the Symbols."""
-    examples: List[Tuple[List[str], ...]] = []
-    example: List[List[str]] = []
+def tokens_to_sentences(
+    tsv_lines: Iterable[Optional[Tuple[str, ...]]]
+) -> Iterable[Tuple[Sequence[str], ...]]:
+    """Accept a sequence of tuples (token, tag, ...) and returns a sequence of sentences (tokens, tags).
 
-    def map_example(example: List[List[str]]) -> Tuple[List[str], ...]:
-        return tuple([list(field) for field in zip(*example)])
+    An end of sentence is marked with a None element.
+    """
 
-    for line in f:
-        line = line.strip()
-        # We read a blank line and buffer is not empty - sentence has been read.
-        if not line and len(example) != 0:
-            examples.append(map_example(example))
+    def pack_sentence(
+        example_list: List[Tuple[str, ...]]
+    ) -> Tuple[Tuple[str, ...], ...]:
+        return tuple(tuple(column_values) for column_values in zip(*example_list))
+
+    example: List[Tuple[str, ...]] = []
+    for line in tsv_lines:
+        if line is None:
+            yield pack_sentence(example)
             example.clear()
         else:
-            example.append(line.split())
-    # For the last sentence
-    if len(example) != 0:
+            example.append(line)
+
+
+def read_tsv(f) -> Iterable[Optional[Tuple[str, ...]]]:
+    """Read a .tsv file and return a tuple based on each line. Empty lines are None.
+
+    None is appended at then end if the last line in the file is not empty.
+    """
+    empty_sent = True
+    for line in f:
+        line = line.strip()
+        if not line:
+            empty_sent = True
+            yield None
+        else:
+            empty_sent = False
+            yield line.split("\t")
+    if not empty_sent:
+        yield None
         log.info("No newline at end of file, handling it.")
-        examples.append(map_example(example))
-    return examples
 
 
-def write_tsv(f, data: Tuple[Sequence[Sequence[str]], ...]):
+def sentences_to_tokens(
+    sentences: Iterable[Tuple[Sequence[str], ...]]
+) -> Iterable[Optional[Tuple[str, ...]]]:
+    """Convert sentences to tuples of tokens/tags."""
+    for sentence in sentences:
+        yield tuple(zip(*sentence))
+        yield None
+
+
+def write_tsv(f, data: Iterable[Tuple[str, ...]]):
     """Write a tsv in many columns."""
-    for sentence in zip(*data):
-        for tok_tags in zip(*sentence):
-            f.write("\t".join(tok_tags) + "\n")
-        f.write("\n")
+    for line in data:
+        f.write("\t".join(line) + "\n")
+    f.write("\n")

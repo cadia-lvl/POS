@@ -1,16 +1,38 @@
 from os.path import isfile
+from functools import partial
 
 import pytest
 import torch
+from torch import Tensor
 
-from pos.utils import read_tsv
+from pos.utils import read_tsv, tokens_to_sentences
 from pos.data import (
-    SequenceTaggingDataset,
     emb_pairs_to_dict,
+    pad_dict_tensors,
+    load_modules,
+    map_to_index,
+    get_input_mappings,
+    get_target_mappings,
     bin_str_to_emb_pair,
+    batch_preprocess,
     wemb_str_to_emb_pair,
+    vocab_map_from_dataset,
+    PAD,
+    PAD_ID,
+    EOS,
+    EOS_ID,
+    SOS,
+    SOS_ID,
+    UNK,
+    UNK_ID,
 )
-from pos.types import Dataset, PredictedDataset, Vocab, VocabMap
+from pos.core import (
+    SequenceTaggingDataset,
+    DoubleTaggedDataset,
+    Vocab,
+    VocabMap,
+    Modules,
+)
 
 
 def test_parse_bin_embedding():
@@ -40,254 +62,151 @@ def test_parse_wemb():
 
 def test_read_tsv(test_tsv_file):
     with open(test_tsv_file) as f:
-        assert read_tsv(f) == [
-            (["Hæ"], ["a"]),
-            (["Þetta", "er", "test"], ["f", "s", "n"]),
-            (["Já", "Kannski"], ["a", "a"]),
+        tmp = list(tokens_to_sentences(read_tsv(f)))
+        print(tmp)
+        tmp == [
+            (("Hæ",), ("a",)),
+            (("Þetta", "er", "test"), ("f", "s", "n")),
+            (("Já", "Kannski"), ("a", "a")),
         ]
+
+
+def test_pad_dict_tensor():
+    test = [
+        {"a": Tensor([1, 2]), "b": Tensor([5, 6])},
+        {"a": Tensor([3, 4]), "b": Tensor([7, 8])},
+    ]
+    result = pad_dict_tensors(test)
+    assert result["a"].tolist() == [[1, 2], [3, 4]]
+    assert result["b"].tolist() == [[5, 6], [7, 8]]
 
 
 def test_sequence_tagging_dataset_from_file(test_tsv_file):
     test_ds = SequenceTaggingDataset.from_file(test_tsv_file)
-    assert test_ds[0] == (["Hæ"], ["a"])
+    tmp = test_ds[0]
+    print(tmp)
+    assert tmp == (("Hæ",), ("a",))
     assert len(test_ds) == 3
 
 
-def test_sequence_tagging_dataset_transform(test_tsv_file):
-    transforms = {"concat": lambda tokens, tags: tokens + tags}
-    test_ds = SequenceTaggingDataset.from_file(test_tsv_file, transforms=transforms)
-    assert test_ds[0]["concat"] == ["Hæ", "a"]
-
-
-def test_create_mappers_c_w_emb_only():
-    test_ds = Dataset.from_file("./tests/test.tsv")
-    d = {}
-    d["w_map"] = VocabMap(
-        Vocab.from_symbols((x for x, y in test_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
-    )
-    d["c_map"] = VocabMap(
+def test_create_mappers_c_w_emb_only(test_tsv_file):
+    test_ds = SequenceTaggingDataset.from_file(test_tsv_file)
+    w_map = vocab_map_from_dataset((x for x, y in test_ds))
+    c_map = VocabMap(
         Vocab.from_symbols((tok for x, y in test_ds for tok in x)),
-        special_tokens=[
-            (data.UNK, data.UNK_ID),
-            (data.PAD, data.PAD_ID),
-            (data.EOS, data.EOS_ID),
-            (data.SOS, data.SOS_ID),
-        ],
+        special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID), (EOS, EOS_ID), (SOS, SOS_ID),],
     )
-    d["t_map"] = VocabMap(
-        Vocab.from_symbols((y for x, y in test_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
-    )
+    t_map = vocab_map_from_dataset((y for x, y in test_ds))
     # We always read the tags as well
-    assert d["w_map"].w2i["<unk>"] == 1
-    assert d["w_map"].w2i["<pad>"] == 0
-    assert d["c_map"].w2i["<unk>"] == 1
-    assert d["c_map"].w2i["<pad>"] == 0
-    assert d["w_map"].w2i["Hæ"] > 1
-    assert "Óla" not in d["w_map"].w2i
+    assert w_map.w2i["<pad>"] == 0
+    assert w_map.w2i["<unk>"] == 1
+    assert t_map.w2i["<pad>"] == 0
+    assert t_map.w2i["<unk>"] == 1
+    assert c_map.w2i["<pad>"] == 0
+    assert c_map.w2i["<unk>"] == 1
+    assert c_map.w2i["<s>"] == 3
+    assert c_map.w2i["</s>"] == 2
+    assert w_map.w2i["Hæ"] > 1
+    assert "Óla" not in w_map.w2i
 
     # 4 + pad + unk
-    assert len(d["t_map"].w2i) == 6
+    assert len(t_map.w2i) == 6
     # 6 + pad + unk
-    assert len(d["w_map"].w2i) == 8
+    assert len(w_map.w2i) == 8
     # 14 + pad + unk + <s> + </s>
-    assert len(d["c_map"].w2i) == 18
+    assert len(c_map.w2i) == 18
 
 
-def test_unpack_dataset():
-    test_ds = Dataset.from_file("./tests/test.tsv")
+def test_unpack_dataset(test_tsv_file):
+    test_ds = SequenceTaggingDataset.from_file(test_tsv_file)
     tokens, _ = test_ds.unpack()
     assert tokens == (("Hæ",), ("Þetta", "er", "test"), ("Já", "Kannski"))
 
 
-def test_read_predicted():
-    pred_ds = PredictedDataset.from_file("./tests/test_pred.tsv")
+def test_read_predicted(tagged_test_tsv_file):
+    pred_ds = DoubleTaggedDataset.from_file(tagged_test_tsv_file)
     tokens, tags, pred_tags = pred_ds.unpack()
     assert tokens == (("Hæ",), ("Þetta", "er", "test"), ("Já", "Kannski"))
     assert tags == (("a",), ("f", "s", "n"), ("a", "a"))
     assert pred_tags == (("a",), ("n", "s", "a"), ("a", "a"))
 
 
-def test_data_loader_w_emb_only():
-    test_ds = Dataset.from_file("./tests/test.tsv")
-    d = {}
-    d["w_map"] = VocabMap(
-        Vocab.from_symbols((x for x, y in test_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
-    )
-    d["t_map"] = VocabMap(
-        Vocab.from_symbols((y for x, y in test_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
-    )
-
-    data_it = data.data_loader(
-        dataset=test_ds,
-        device=torch.device("cpu"),
-        shuffle=False,
-        w_emb="standard",
-        c_emb="none",
-        m_emb="none",
-        dictionaries=d,
-        batch_size=1,
-    )
-    for batch in data_it:
-        assert "w" in batch
-        assert "t" in batch
-        assert "c" in batch
-        assert "m" in batch
-        assert batch["c"] is None
-        assert batch["m"] is None
-        assert batch["w"].shape[0] == 1
-
-    data_it = data.data_loader(
-        dataset=test_ds,
-        device=torch.device("cpu"),
-        shuffle=False,
-        w_emb="standard",
-        c_emb="none",
-        m_emb="none",
-        dictionaries=d,
-        batch_size=2,
-    )
-
-    for idx, batch in enumerate(data_it):
-        print(batch)
-        if idx == 0:
-            assert batch["w"].shape == (2, 3)
-        elif idx == 1:
-            assert batch["w"].shape == (1, 2)
+def test_load_modules(test_tsv_file):
+    ds = SequenceTaggingDataset.from_file(test_tsv_file)
+    modules, dicts = load_modules(ds, word_embedding_dim=3)
+    assert Modules.WordEmbeddings in modules
+    for module in Modules:
+        if module == Modules.WordEmbeddings or module == Modules.FullTag:
+            assert module in modules
+            assert module in dicts
+        else:
+            assert module not in modules
+            assert module not in dicts
 
 
-def test_data_loader_c_w_emb():
-    test_ds = Dataset.from_file("./tests/test.tsv")
-    d = {}
-    d["w_map"] = VocabMap(
-        Vocab.from_symbols((x for x, y in test_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
-    )
-    d["c_map"] = VocabMap(
-        Vocab.from_symbols((tok for x, y in test_ds for tok in x)),
-        special_tokens=[
-            (data.UNK, data.UNK_ID),
-            (data.PAD, data.PAD_ID),
-            (data.EOS, data.EOS_ID),
-            (data.SOS, data.SOS_ID),
-        ],
-    )
-    d["t_map"] = VocabMap(
-        Vocab.from_symbols((y for x, y in test_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
-    )
-
-    data_it = data.data_loader(
-        dataset=test_ds,
-        device=torch.device("cpu"),
-        shuffle=False,
-        w_emb="standard",
-        c_emb="standard",
-        m_emb="none",
-        dictionaries=d,
-        batch_size=1,
-    )
-    for idx, batch in enumerate(data_it):
-        assert "w" in batch
-        assert "t" in batch
-        assert "c" in batch
-        assert "m" in batch
-        assert batch["c"] is not None
-        assert batch["m"] is None
-        if idx == 0:
-            assert batch["c"].shape == (1, 1, 4)
-        elif idx == 1:
-            assert batch["c"].shape == (1, 3, 7)
-
-    data_it = data.data_loader(
-        dataset=test_ds,
-        device=torch.device("cpu"),
-        shuffle=False,
-        w_emb="standard",
-        c_emb="standard",
-        m_emb="none",
-        dictionaries=d,
-        batch_size=2,
-    )
-
-    for idx, batch in enumerate(data_it):
-        print(batch)
-        if idx == 0:
-            assert batch["w"].shape == (2, 3)
-            assert batch["c"].shape == (2, 3, 7)
-        elif idx == 1:
-            assert batch["w"].shape == (1, 2)
-            assert batch["c"].shape == (1, 2, 9)
+def test_map_to_idx():
+    mapping = {"a": 1, "b": 2, "<unk>": 0}
+    idxs = map_to_index(["a", "a", "b", "a", "c"], mapping)
+    assert idxs.tolist() == [1, 1, 2, 1, 0]
 
 
-def test_data_loader_c_w_emb_b3():
-    test_ds = Dataset.from_file("./tests/test.tsv")
-    d = {}
-    d["w_map"] = VocabMap(
-        Vocab.from_symbols((x for x, y in test_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
-    )
-    d["c_map"] = VocabMap(
-        Vocab.from_symbols((tok for x, y in test_ds for tok in x)),
-        special_tokens=[
-            (data.UNK, data.UNK_ID),
-            (data.PAD, data.PAD_ID),
-            (data.EOS, data.EOS_ID),
-            (data.SOS, data.SOS_ID),
-        ],
-    )
-    d["t_map"] = VocabMap(
-        Vocab.from_symbols((y for x, y in test_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
-    )
-
-    data_it = data.data_loader(
-        dataset=test_ds,
-        device=torch.device("cpu"),
-        shuffle=False,
-        w_emb="standard",
-        c_emb="standard",
-        m_emb="none",
-        dictionaries=d,
-        batch_size=3,
-    )
-    for idx, batch in enumerate(data_it):
-        assert "w" in batch
-        assert "t" in batch
-        assert "c" in batch
-        assert "m" in batch
-        assert batch["c"] is not None
-        assert batch["w"] is not None
-        assert batch["m"] is None
-        assert batch["c"].shape == (3, 3, 9)
-        assert idx != 1
+def test_get_mappings(test_tsv_file):
+    ds = SequenceTaggingDataset.from_file(test_tsv_file)
+    modules, dicts = load_modules(ds, word_embedding_dim=3)
+    input_mappings = get_input_mappings(dicts)
+    target_mappings = get_target_mappings(dicts)
+    assert Modules.WordEmbeddings in input_mappings
+    assert Modules.FullTag not in input_mappings
+    assert Modules.WordEmbeddings not in target_mappings
+    assert Modules.FullTag in target_mappings
+    batch = batch_preprocess(ds, input_mappings, target_mappings)
+    print(batch)
+    assert batch[Modules.WordEmbeddings].shape == (3, 3)  # 3 sentences, max length is 3
+    assert batch[Modules.FullTag].shape == (3, 3)  # Same as above
+    assert batch[Modules.Lengths].tolist() == [
+        1,
+        3,
+        2,
+    ]  # These sentences are 1, 3, 2 tokens long
+    w2i = dicts[Modules.WordEmbeddings].w2i
+    assert batch[Modules.WordEmbeddings].tolist() == [
+        [w2i["Hæ"], w2i["<pad>"], w2i["<pad>"]],
+        [w2i["Þetta"], w2i["er"], w2i["test"]],
+        [w2i["Já"], w2i["Kannski"], w2i["<pad>"]],
+    ]
+    w2i = dicts[Modules.FullTag].w2i
+    assert batch[Modules.FullTag].tolist() == [
+        [w2i["a"], w2i["<pad>"], w2i["<pad>"]],
+        [w2i["f"], w2i["s"], w2i["n"]],
+        [w2i["a"], w2i["a"], w2i["<pad>"]],
+    ]
 
 
-def test_data_loader_wemb_electra(electra_model):
-    if not electra_model:
-        pytest.skip("No --electra_model given")
-    test_ds = Dataset.from_file("./tests/test.tsv")
-    d = {}
-    d["t_map"] = VocabMap(
-        Vocab.from_symbols((y for x, y in test_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
+def test_collate_fn(test_tsv_file):
+    ds = SequenceTaggingDataset.from_file(test_tsv_file)
+    modules, dicts = load_modules(ds, word_embedding_dim=3)
+    input_mappings = get_input_mappings(dicts)
+    target_mappings = get_target_mappings(dicts)
+    collate_fn = partial(
+        batch_preprocess, x_mappings=input_mappings, y_mappings=target_mappings
     )
-
-    data_it = data.data_loader(
-        dataset=test_ds,
-        device=torch.device("cpu"),
-        shuffle=False,
-        w_emb="electra",
-        c_emb="none",
-        m_emb="none",
-        dictionaries=d,
-        batch_size=3,
-    )
-    for idx, batch in enumerate(data_it):
-        assert "w" in batch
-        assert "t" in batch
-        assert batch["w"].shape == (3, 3, 256)
-        assert idx != 1
+    dl = torch.utils.data.DataLoader(ds, batch_size=3, collate_fn=collate_fn)
+    assert len(dl) == 1
+    for batch in dl:
+        assert batch[Modules.Lengths].tolist() == [
+            1,
+            3,
+            2,
+        ]  # These sentences are 1, 3, 2 tokens long
+        w2i = dicts[Modules.WordEmbeddings].w2i
+        assert batch[Modules.WordEmbeddings].tolist() == [
+            [w2i["Hæ"], w2i["<pad>"], w2i["<pad>"]],
+            [w2i["Þetta"], w2i["er"], w2i["test"]],
+            [w2i["Já"], w2i["Kannski"], w2i["<pad>"]],
+        ]
+        w2i = dicts[Modules.FullTag].w2i
+        assert batch[Modules.FullTag].tolist() == [
+            [w2i["a"], w2i["<pad>"], w2i["<pad>"]],
+            [w2i["f"], w2i["s"], w2i["n"]],
+            [w2i["a"], w2i["a"], w2i["<pad>"]],
+        ]
