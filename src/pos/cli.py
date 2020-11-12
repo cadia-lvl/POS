@@ -193,7 +193,10 @@ def train_and_tag(**kwargs):
     input_mappings = get_input_mappings(dicts)
     target_mappings = get_target_mappings(dicts)
     collate_fn = partial(
-        batch_preprocess, x_mappings=input_mappings, y_mappings=target_mappings
+        batch_preprocess,
+        x_mappings=input_mappings,
+        y_mappings=target_mappings,
+        device=device,
     )
     train_dl = torch.utils.data.DataLoader(
         train_ds, shuffle=True, batch_size=kwargs["batch_size"], collate_fn=collate_fn,

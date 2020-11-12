@@ -22,7 +22,7 @@ import random
 
 from tqdm import tqdm
 import numpy as np
-from torch import Tensor, stack, no_grad, from_numpy
+from torch import Tensor, stack, no_grad, from_numpy, device as t_device
 from torch.utils.data import DataLoader
 from torch.nn import Module
 from torch.nn.utils import clip_grad_norm_
@@ -154,15 +154,19 @@ def batch_preprocess(
     batch: Sequence[Tuple[Tokens, Tags]],
     x_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
     y_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
+    device=None,
 ) -> Dict[Modules, Tensor]:
-    """Ekki viss hvað það gerir, en þetta er fallið sem ég set inn í DataLoader.
-    
-    Padda.
-    Halda utan um öll input/output í gegnum dict
+    """This is the collocate function. It takes care of creating batches and preprocess them.
+
+    Returns:
+        A dictionary of Tensors
     """
+    if not device:
+        device = t_device("cpu")
     tokens, tags = SequenceTaggingDataset(batch).unpack()
     processed = batch_preprocess_input(tokens, x_mappings)
     processed.update(batch_preprocess_input(tags, y_mappings))
+    processed = {key: tensor.to(device) for key, tensor in processed.items()}
     return processed
 
 
