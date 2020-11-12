@@ -193,7 +193,7 @@ def train_and_tag(**kwargs):
         pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
         bert_encoder=kwargs["bert_encoder"],
         word_embedding_dim=kwargs["word_embedding_dim"],
-        morphlex_embeddings_file=kwargs["morphlex_embddings_files"],
+        morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
         known_chars_file=kwargs["known_chars_file"],
         **kwargs,
     )
