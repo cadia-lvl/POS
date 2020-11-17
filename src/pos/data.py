@@ -156,7 +156,7 @@ def batch_preprocess(
     y_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
     device=None,
 ) -> Dict[Modules, Tensor]:
-    """This is the collocate function. It takes care of creating batches and preprocess them.
+    """Batch collate function. It takes care of creating batches and preprocess them.
 
     Returns:
         A dictionary of Tensors
@@ -458,13 +458,14 @@ def load_modules(
             Modules.BERT
         ] = transformer_embedding  # We just place it here, this is for preprocessing.
 
+    # This breaks the pattern a bit...
+    w_map = vocab_map_from_dataset((x for x, y in train_ds))
+    dictionaries[Modules.WordEmbeddings] = w_map
     if word_embedding_dim:
         # The word embedding dimension is not -1 we train word-embeddings from scratch.
-        w_map = vocab_map_from_dataset((x for x, y in train_ds))
         modules[Modules.WordEmbeddings] = ClassingWordEmbedding(
             len(w_map), word_embedding_dim
         )
-        dictionaries[Modules.WordEmbeddings] = w_map
 
     # MorphLex
     if morphlex_embeddings_file:
@@ -492,8 +493,5 @@ def load_modules(
 
     # TAGS (POS)
     t_map = vocab_map_from_dataset((y for _, y in train_ds))
-    modules[Modules.FullTag] = Tagger(
-        10, 10
-    )  # TODO: fix this so we construct this when we have the input ready.
     dictionaries[Modules.FullTag] = t_map
     return modules, dictionaries

@@ -124,7 +124,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     help="A file which contains the characters the model should know. Omit, to disable character embeddings. "
     + "File should be a single line, the line is split() to retrieve characters.",
 )
-@click.option("--char_lstm_layers", default=1)
+@click.option("--char_lstm_layers", default=0)
 @click.option(
     "--morphlex_embeddings_file",
     default=None,
@@ -147,14 +147,13 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option(
     "--bert_encoder",
     default=None,
-    help="A folder which contains a pretrained BERT-like model.",
+    help="A folder which contains a pretrained BERT-like model. Set to None to disable.",
 )
 @click.option(
     "--main_lstm_layers",
     default=0,
     help="The number of bilstm layers to use in the encoder. Set to 0 to disable.",
 )
-@click.option("--final_dim", default=32)
 @click.option("--label_smoothing", default=0.0)
 @click.option("--learning_rate", default=0.20)
 @click.option("--epochs", default=20)

@@ -203,13 +203,16 @@ def write_scalars(writer, accuracies, train_loss, val_loss, epoch):
 
 def categorical_accuracy(preds, y):
     """Calculate accuracy (per batch), i.e. if you get 8/10 right, this returns 0.8."""
-    max_preds = preds.argmax(
-        dim=1, keepdim=True
-    )  # get the index of the max probability
-    # nonzero to map to idexes again and filter out pads.
-    non_pad_elements = (y != PAD_ID).nonzero(as_tuple=False)
-    correct = max_preds[non_pad_elements].squeeze(1).eq(y[non_pad_elements])
-    return float(correct.sum().item()) / y[non_pad_elements].shape[0]
+    preds = preds.argmax(dim=2)  # get the index of the max probability
+    # Change them to column vectors - conceptually easier
+    y = y.reshape(shape=(-1,))
+    preds = preds.reshape(shape=(-1,))
+    # Remove elements which are paddings
+    non_pad_idxs = y != PAD_ID
+    preds = preds[non_pad_idxs]
+    y = y[non_pad_idxs]
+    correct = y == preds
+    return correct.sum().item() / len(y)
 
 
 def smooth_ce_loss(pred, gold, pad_idx, smoothing=0.1):

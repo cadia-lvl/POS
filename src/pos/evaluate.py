@@ -70,8 +70,12 @@ class Experiment:
         """Create an Experiment from predicted tags, test_dataset and dictionaries."""
         train_vocab = Vocab(dicts[Modules.WordEmbeddings].w2i.keys())
         predicted_ds = DoubleTaggedDataset(
-            tuple((tokens, tags, predicted_tags))
-            for tokens, tags, predicted_tags in zip(*test_ds.unpack(), predicted_tags)
+            [
+                (tokens, tags, predicted_tags)
+                for tokens, tags, predicted_tags in zip(
+                    *test_ds.unpack(), predicted_tags
+                )
+            ]
         )
         return Experiment(predicted_ds, train_vocab=train_vocab, dicts=dicts)
 
