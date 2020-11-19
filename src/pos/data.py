@@ -33,7 +33,7 @@ from flair.data import Sentence
 from .model import (
     copy_into_larger_tensor,
     PretrainedEmbedding,
-    load_transformer_embeddings,
+    FlairTransformerEmbedding,
     ClassingWordEmbedding,
     CharacterAsWordEmbedding,
     Tagger,
@@ -74,35 +74,14 @@ def map_to_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
     ).long()
 
 
-def embed_transformer(
-    sentence: Tokens, transformer: TransformerWordEmbeddings,
-) -> Tensor:
-    """Preprocess a tuple of sentences using a transformer."""
-    f_sentence = Sentence(" ".join(sentence))
-    transformer.embed(f_sentence)
-    return stack([token.embedding for token in f_sentence])
-
-
-def embed_transformer_bulk(
-    sentences: Sequence[Tokens], transformer: TransformerWordEmbeddings,
-) -> Tensor:
-    """Preprocess a tuple of sentences using a transformer."""
-    f_sentences = [Sentence(" ".join(sentence)) for sentence in sentences]
-    transformer.embed(f_sentences)
-    return pad_sequence(
-        [stack([token.embedding for token in sentence]) for sentence in f_sentences],
-        batch_first=True,
-    )
-
-
 def get_input_mappings(
     dictionaries: Dict[Modules, Optional[VocabMap]]
-) -> Dict[Modules, Callable[[Tokens], Tensor]]:
+) -> Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]]:
     """Return the input mappings for the model."""
-    mappings: Dict[Modules, Callable[[Tokens], Tensor]] = {}
+    mappings: Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]] = {}
     for module, value in dictionaries.items():
         if module == Modules.BERT:
-            mappings[module] = partial(embed_transformer, transformer=value)
+            mappings[module] = lambda x: x  #  No-op
         elif module == Modules.WordEmbeddings:
             mappings[module] = partial(map_to_index, w2i=value.w2i)  # type: ignore
         else:
@@ -152,10 +131,10 @@ def character_mapping(w2i, batch_x):
 
 def batch_preprocess(
     batch: Sequence[Tuple[Tokens, Tags]],
-    x_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
-    y_mappings: Dict[Modules, Callable[[Tokens], Tensor]],
+    x_mappings: Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]],
+    y_mappings: Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]],
     device=None,
-) -> Dict[Modules, Tensor]:
+) -> Dict[Modules, Union[Tensor, Sequence[Tokens]]]:
     """Batch collate function. It takes care of creating batches and preprocess them.
 
     Returns:
@@ -164,21 +143,27 @@ def batch_preprocess(
     if not device:
         device = t_device("cpu")
     tokens, tags = SequenceTaggingDataset(batch).unpack()
-    processed = batch_preprocess_input(tokens, x_mappings)
-    processed.update(batch_preprocess_input(tags, y_mappings))
-    processed = {key: tensor.to(device) for key, tensor in processed.items()}
+    processed = batch_preprocess_input(tokens, x_mappings, device)
+    processed.update(batch_preprocess_input(tags, y_mappings, device))
     return processed
 
 
 def batch_preprocess_input(
-    batch: Sequence[Tokens], mappings: Dict[Modules, Callable[[Tokens], Tensor]]
-) -> Dict[Modules, Tensor]:
+    batch: Sequence[Tokens],
+    mappings: Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]],
+    device,
+) -> Dict[Modules, Union[Tensor, Sequence[Tokens]]]:
     """Process a batch of inputs."""
-    processed = {}
+    processed: Dict[Modules, Union[Tensor, Sequence[Tokens]]] = {}
     for key, mapping in mappings.items():
-        processed[key] = pad_sequence([mapping(x) for x in batch], batch_first=True)
+        if key == Modules.BERT:
+            processed[key] = batch
+        else:
+            processed[key] = pad_sequence(
+                [mapping(x) for x in batch], batch_first=True
+            ).to(device)
     # Also add the lengths
-    processed[Modules.Lengths] = Tensor([len(x) for x in batch]).long()
+    processed[Modules.Lengths] = Tensor([len(x) for x in batch]).long().to(device)
     return processed
 
 
@@ -452,11 +437,8 @@ def load_modules(
 
     # pretrained BERT like model, we use it.
     if bert_encoder:
-        transformer_embedding = load_transformer_embeddings(bert_encoder, **kwargs)
-        modules[Modules.BERT] = transformer_embedding
-        dictionaries[
-            Modules.BERT
-        ] = transformer_embedding  # We just place it here, this is for preprocessing.
+        modules[Modules.BERT] = FlairTransformerEmbedding(bert_encoder, **kwargs)
+        dictionaries[Modules.BERT] = None
 
     # This breaks the pattern a bit...
     w_map = vocab_map_from_dataset((x for x, y in train_ds))

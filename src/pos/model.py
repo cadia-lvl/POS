@@ -6,7 +6,8 @@ import datetime
 from flair.embeddings import TransformerWordEmbeddings
 from flair.data import Sentence
 import torch
-from torch import Tensor
+from torch import Tensor, stack
+from torch.nn.utils.rnn import pad_sequence
 import torch.nn as nn
 
 from .core import VocabMap, Modules
@@ -123,16 +124,33 @@ class CharacterAsWordEmbedding(nn.Module):
         return chars_as_word
 
 
-def load_transformer_embeddings(file_path, **kwargs) -> TransformerWordEmbeddings:
-    """Return a torch.nn.Module which can accept a list of tokens as input."""
-    return TransformerWordEmbeddings(
-        file_path,
-        layers=kwargs.get("transformer_layers", "-1"),
-        use_scalar_mix=kwargs.get("transformer_use_scalar_mix", False),
-        allow_long_sentences=kwargs.get("transformer_allow_long_sentences", True),
-        fine_tune=True,
-        batch_size=kwargs.get("batch_size", 1),
-    )
+class FlairTransformerEmbedding(nn.Module):
+    """A wrapper for the TransformerEmbedding from Flair. It's here to fit into the preprocessing setup."""
+
+    def __init__(self, file_path, **kwargs):
+        """Initialize the embeddings."""
+        super(FlairTransformerEmbedding, self).__init__()
+        self.emb = TransformerWordEmbeddings(
+            file_path,
+            layers=kwargs.get("transformer_layers", "-1"),
+            use_scalar_mix=kwargs.get("transformer_use_scalar_mix", False),
+            allow_long_sentences=kwargs.get("transformer_allow_long_sentences", True),
+            fine_tune=True,
+            batch_size=kwargs.get("batch_size", 1),
+        )
+        self.output_dim = 256
+
+    def forward(self, sentences):
+        """Run through the model. Sentences are a sequence of sequence of string."""
+        f_sentences = [Sentence(" ".join(sentence)) for sentence in sentences]
+        self.emb.embed(f_sentences)
+        return pad_sequence(
+            [
+                stack([token.embedding for token in sentence])
+                for sentence in f_sentences
+            ],
+            batch_first=True,
+        )
 
 
 class GRUDecoder(nn.Module):
@@ -247,7 +265,7 @@ class Encoder(nn.Module):
         if self.chars_as_word_embedding is not None:
             encoder_out_dim += self.chars_as_word_embedding.output_dim  # type: ignore
         if self.transformer_embedding is not None:
-            encoder_out_dim += 256
+            encoder_out_dim += self.transformer_embedding.output_dim  # type: ignore
 
         # BiLSTM over all inputs
         if self.use_bilstm:
@@ -290,7 +308,7 @@ class Encoder(nn.Module):
             embs = self.chars_as_word_embedding(batch_dict[Modules.CharsAsWord])
             main_in = cat_or_return(main_in, embs)
         if self.transformer_embedding is not None:
-            embs = batch_dict[Modules.BERT]
+            embs = self.transformer_embedding(batch_dict[Modules.BERT])
             main_in = cat_or_return(main_in, embs)
 
         # Add noise - like in dyney
