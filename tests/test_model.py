@@ -66,3 +66,20 @@ def test_combination(data_loader):
     for batch in data_loader:
         assert abl_tagger(batch).shape == (batch_size, max_sent_len, num_tags)
     assert True
+
+
+def test_gru_decoder(data_loader):
+    hidden_dim = 3
+    output_dim = 4  # 4 chars to map to and from
+    context_dim = 2
+    emb_dim = 5
+    batch_size = 2
+    gru = model.GRUDecoder(
+        hidden_dim=hidden_dim,
+        context_dim=context_dim,
+        output_dim=output_dim,
+        emb_dim=emb_dim,
+        dropout=0.0,
+    )
+    t_in = Tensor([])
+    gru()

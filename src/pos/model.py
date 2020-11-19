@@ -135,6 +135,67 @@ def load_transformer_embeddings(file_path, **kwargs) -> TransformerWordEmbedding
     )
 
 
+class GRUDecoder(nn.Module):
+    """Cho et al., 2014 GRU RNN decoder which uses the context vector for each timestep.
+    
+    Code adjusted from: https://github.com/bentrevett/pytorch-seq2seq/
+    """
+
+    def __init__(self, hidden_dim, context_dim, output_dim, emb_dim, dropout):
+        """Initialize the model."""
+        super().__init__()
+        self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
+        self.output_dim = (
+            output_dim  # The number of characters, these will be interpreted as logits.
+        )
+
+        self.embedding = nn.Embedding(
+            output_dim, emb_dim
+        )  # We map the input idx to vectors.
+        self.rnn = nn.GRU(
+            emb_dim + context_dim, hidden_dim, batch_first=True
+        )  # The input is the embedding and context
+
+        self.fc_out = nn.Linear(
+            emb_dim + hidden_dim + context_dim, output_dim
+        )  # Map to logits.
+
+        self.dropout = nn.Dropout(dropout)  # Embedding dropout
+
+    def forward(self, input, hidden, context):
+        """Run a forward pass, batch_first, one timestep at a time.
+        
+        Arguments assume 1 layer and 1 direction.
+        Args:
+            input: [batch_size] of idxs; f.ex. the "previous output" for an auto-regressive model.
+            hidden: [batch_size, hidden_features], the previous hidden state
+            context: [batch_size, context_features], the context
+        """
+        embedded = self.dropout(self.embedding(input))
+        # [batch size, emb dim]
+
+        emb_con = torch.cat((embedded, context), dim=2)
+
+        # emb_con = [1, batch size, emb dim + hid dim]
+
+        output, hidden = self.rnn(emb_con, hidden)
+
+        # output = [seq len, batch size, hid dim * n directions]
+        # hidden = [n layers * n directions, batch size, hid dim]
+
+        # seq len, n layers and n directions will always be 1 in the decoder, therefore:
+        # output = [1, batch size, hid dim]
+        # hidden = [1, batch size, hid dim]
+
+        output = torch.cat(
+            (embedded.squeeze(0), hidden.squeeze(0), context.squeeze(0)), dim=1
+        )
+
+        prediction = self.fc_out(output)
+
+        # prediction = [batch size, output dim]
+
+
 class Tagger(nn.Module):
     """A tagger; accept some tensor input and return logits over classes."""
 
