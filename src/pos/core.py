@@ -1,6 +1,6 @@
 """The main abstractions in the project."""
 from enum import Enum
-from typing import Tuple, Set, Iterable, List, Dict, Optional, Sequence, cast
+from typing import Tuple, Set, Iterable, List, Dict, Optional, Sequence, cast, Any
 import logging
 
 from torch.utils.data import Dataset
@@ -23,122 +23,7 @@ class Modules(Enum):
     WordEmbeddings = "w_map"
     MorphLex = "m_map"
     Lengths = "lens"
-
-
-class SequenceTaggingDataset(Dataset):
-    """A dataset to hold pairs of tokens and tags."""
-
-    def __init__(
-        self, examples: Sequence[Tuple[Tokens, Tags]],
-    ):
-        """Initialize a dataset given a sequence of examples."""
-        self.examples = examples
-
-    def __getitem__(self, idx):
-        """Support itemgetter."""
-        return self.examples[idx]
-
-    def __len__(self):
-        """Support len."""
-        return len(self.examples)
-
-    def __iter__(self):
-        """Support iteration."""
-        return iter(self.examples)
-
-    def __add__(self, other):
-        """Support addition."""
-        return SequenceTaggingDataset(self.examples + other.examples)
-
-    @staticmethod
-    def from_file(filepath: str,):
-        """Initialize a dataset given a filepath."""
-        with open(filepath) as f:
-            examples = tuple(tokens_to_sentences(read_tsv(f)))
-        if len(examples) != 0:
-            # We expect to get List[Tokens, Tags]
-            assert len(examples[0]) == 2
-        examples = cast(Tuple[Tuple[Sequence[str], Sequence[str]]], examples)
-        return SequenceTaggingDataset(examples)
-
-    def unpack(self) -> Tuple[Sequence[Tokens], Sequence[Tags]]:
-        """Unpack to Tokens and tags."""
-        return (tuple(tokens for tokens, _ in self), tuple(tags for _, tags in self))
-
-
-class TokenizedDataset(Dataset):
-    """A dataset to hold tokenized text."""
-
-    def __init__(
-        self, examples: Sequence[Tokens],
-    ):
-        """Initialize a dataset given a sequence of examples."""
-        self.examples = examples
-
-    def __getitem__(self, idx):
-        """Support itemgetter."""
-        return self.examples[idx]
-
-    def __len__(self):
-        """Support len."""
-        return len(self.examples)
-
-    def __iter__(self):
-        """Support iteration."""
-        return iter(self.examples)
-
-    @staticmethod
-    def from_file(filepath: str,):
-        """Initialize a dataset given a filepath."""
-        with open(filepath) as f:
-            examples = tuple(tokens_to_sentences(read_tsv(f)))
-        if len(examples) != 0:
-            # We expect to get List[Tokens, Tags]
-            assert len(examples[0]) == 1
-        return TokenizedDataset([example[0] for example in examples])
-
-
-class DoubleTaggedDataset(Dataset):
-    """A PredictedDataset is sequence of PredictedSentences."""
-
-    def __init__(
-        self, examples: Sequence[Tuple[Tokens, Tags, Tags]],
-    ):
-        """Initialize the Dataset."""
-        self.examples = examples
-
-    def __getitem__(self, idx):
-        """Support itemgetter."""
-        return self.examples[idx]
-
-    def __len__(self):
-        """Support len."""
-        return len(self.examples)
-
-    def __iter__(self):
-        """Support iteration."""
-        return iter(self.examples)
-
-    def unpack(self) -> Tuple[Sequence[Tokens], Sequence[Tokens], Sequence[Tokens]]:
-        """Unpack a PredictedDataset to three SimpleDataset(s): Tokens, tags and predicted tags."""
-        return (
-            tuple(tokens for tokens, _, _ in self),
-            tuple(tags for _, tags, _ in self),
-            tuple(preds for _, _, preds in self),
-        )
-
-    def as_sequence(self) -> Iterable[Tuple[str, str, str, int, int]]:
-        """Represent the PredictedDataset as a sequence of predictions, along with sentence and word index (0-based)."""
-        for sent_index, sentence in enumerate(self):
-            for word_index, symbols in enumerate(zip(*sentence)):
-                yield symbols[0], symbols[1], symbols[2], sent_index, word_index
-
-    @staticmethod
-    def from_file(filepath):
-        """Construct a PredictedDataset from a file."""
-        with open(filepath) as f:
-            examples = tuple(tokens_to_sentences(read_tsv(f)))
-        return DoubleTaggedDataset(examples)
+    Lemmatizer = "lemma"
 
 
 class Vocab(set):
@@ -160,6 +45,25 @@ class Vocab(set):
 
 class VocabMap:
     """A VocabMap stores w2i and i2w for dictionaries."""
+
+    # To pad in batches
+    PAD = "<pad>"
+    PAD_ID = 0
+    # For unkown words in testing
+    UNK = "<unk>"
+    UNK_ID = 1
+    # For EOS and SOS in char BiLSTM
+    EOS = "</s>"
+    EOS_ID = 2
+    SOS = "<s>"
+    SOS_ID = 3
+    UNK_PAD = [(UNK, UNK_ID), (PAD, PAD_ID)]
+    UNK_PAD_EOS_SOS = [
+        (UNK, UNK_ID),
+        (PAD, PAD_ID),
+        (EOS, EOS_ID),
+        (SOS, SOS_ID),
+    ]
 
     w2i: Dict[str, int]
     i2w: Dict[int, str]
@@ -184,4 +88,106 @@ class VocabMap:
     def __len__(self):
         """Return the length of the dictionary."""
         return len(self.w2i)
+
+
+class TokenizedDataset(Dataset):
+    """A dataset to hold tokenized text."""
+
+    def __init__(
+        self, examples: Sequence[Any],
+    ):
+        """Initialize a dataset given a sequence of examples."""
+        self.examples = examples
+
+    @staticmethod
+    def from_file(filepath: str,):
+        """Initialize a dataset given a filepath."""
+        with open(filepath) as f:
+            examples = tuple(tokens_to_sentences(read_tsv(f)))
+        if len(examples) != 0:
+            # We expect to get List[Tokens]
+            assert len(examples[0]) == 1
+        return TokenizedDataset([example[0] for example in examples])
+
+    def __getitem__(self, idx):
+        """Support itemgetter."""
+        return self.examples[idx]
+
+    def __len__(self):
+        """Support len."""
+        return len(self.examples)
+
+    def __iter__(self):
+        """Support iteration."""
+        return iter(self.examples)
+
+    def __add__(self, other):
+        """Support addition."""
+        return self.__class__(self.examples + other.examples)
+
+    def unpack(self) -> Tuple[Sequence[Tokens], ...]:
+        """Unpack to Tokens and tags."""
+        return (tuple(tokens for tokens in self),)
+
+    def get_vocab(self) -> Vocab:
+        """Return the Vocabulary in the dataset."""
+        return Vocab.from_symbols(self.unpack()[0])
+
+    def get_vocab_map(self, special_tokens=None) -> VocabMap:
+        """Return the VocabularyMapping in the dataset."""
+        return VocabMap(self.get_vocab(), special_tokens=special_tokens)
+
+    def get_char_vocab(self) -> Vocab:
+        """Return the character Vocabulary in the dataset."""
+        return Vocab.from_symbols((tok for sent in self.unpack()[0] for tok in sent))
+
+    def get_char_vocab_map(self, special_tokens=None) -> VocabMap:
+        """Return the character VocabularyMapping in the dataset."""
+        return VocabMap(self.get_char_vocab(), special_tokens=special_tokens)
+
+
+class SequenceTaggingDataset(TokenizedDataset):
+    """A dataset to hold pairs of tokens and tags."""
+
+    @staticmethod
+    def from_file(filepath: str,):
+        """Initialize a dataset given a filepath."""
+        with open(filepath) as f:
+            examples = tuple(tokens_to_sentences(read_tsv(f)))
+        if len(examples) != 0:
+            # We expect to get List[Tokens, Tags]
+            assert len(examples[0]) == 2
+        examples = cast(Tuple[Tuple[Sequence[str], Sequence[str]]], examples)
+        return SequenceTaggingDataset(examples)
+
+    def unpack(self) -> Tuple[Sequence[Tokens], ...]:
+        """Unpack to Tokens and tags."""
+        return (tuple(tokens for tokens, _ in self), tuple(tags for _, tags in self))
+
+    def get_tag_vocab(self) -> Vocab:
+        """Return the tag Vocabulary in the dataset."""
+        return Vocab.from_symbols(self.unpack()[1])
+
+    def get_tag_vocab_map(self, special_tokens) -> VocabMap:
+        """Return the tag VocabularyMapping in the dataset."""
+        return VocabMap(self.get_tag_vocab(), special_tokens=special_tokens)
+
+
+class DoubleTaggedDataset(SequenceTaggingDataset):
+    """A dataset containing two tags per token."""
+
+    def unpack(self) -> Tuple[Sequence[Tokens], ...]:
+        """Unpack to Tokens and other token tags."""
+        return (
+            tuple(tokens for tokens, _, _ in self),
+            tuple(tags for _, tags, _ in self),
+            tuple(preds for _, _, preds in self),
+        )
+
+    @staticmethod
+    def from_file(filepath):
+        """Construct from a file."""
+        with open(filepath) as f:
+            examples = tuple(tokens_to_sentences(read_tsv(f)))
+        return DoubleTaggedDataset(examples)
 

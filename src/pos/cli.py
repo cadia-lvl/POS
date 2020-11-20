@@ -16,10 +16,8 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 from .data import (
-    load_modules,
+    load_dicts,
     read_datasets,
-    get_encoder,
-    get_tagger,
     get_input_mappings,
     get_target_mappings,
     batch_preprocess,
@@ -34,7 +32,16 @@ from .core import (
     TokenizedDataset,
     Modules,
 )
-from .model import Encoder, Tagger, ABLTagger
+from .model import (
+    Encoder,
+    Tagger,
+    ABLTagger,
+    FlairTransformerEmbedding,
+    PretrainedEmbedding,
+    ClassingWordEmbedding,
+    CharacterAsWordEmbedding,
+    GRUDecoder,
+)
 from .train import (
     print_tagger,
     get_criterion,
@@ -121,10 +128,13 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option(
     "--known_chars_file",
     default=None,
-    help="A file which contains the characters the model should know. Omit, to disable character embeddings. "
-    + "File should be a single line, the line is split() to retrieve characters.",
+    help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",
 )
-@click.option("--char_lstm_layers", default=0)
+@click.option(
+    "--char_lstm_layers",
+    default=0,
+    help="The number of layers in character LSTM embedding. Set to 0 to disable.",
+)
 @click.option(
     "--morphlex_embeddings_file",
     default=None,
@@ -187,7 +197,7 @@ def train_and_tag(**kwargs):
     test_ds = read_datasets([kwargs["test_file"]], max_sent_length=128)
 
     # Set configuration values and create mappers
-    modules, dicts = load_modules(train_ds=train_ds, **kwargs,)
+    embeddings, dicts = load_dicts(train_ds=train_ds, **kwargs,)
 
     input_mappings = get_input_mappings(dicts)
     target_mappings = get_target_mappings(dicts)
@@ -206,10 +216,36 @@ def train_and_tag(**kwargs):
         batch_size=kwargs["batch_size"] * 10,
         collate_fn=collate_fn,
     )
-    encoder = get_encoder(
-        modules
-    )  # TODO: Pass in main_lstm, dropouts, etc. params here.
-    tagger = get_tagger(encoder.output_dim, dicts)
+    encoder = Encoder(
+        transformer_embedding=FlairTransformerEmbedding(
+            kwargs["bert_encoder"], **kwargs
+        )
+        if "bert_encoder" in kwargs
+        else None,
+        morphlex_embedding=PretrainedEmbedding(
+            embeddings[Modules.MorphLex], freeze=True
+        )
+        if "morphlex_embeddings_file" in kwargs
+        else None,
+        pretrained_word_embedding=PretrainedEmbedding(
+            embeddings[Modules.Pretrained], freeze=True
+        )
+        if "pretrained_word_embeddings_file" in kwargs
+        else None,
+        word_embedding=ClassingWordEmbedding(
+            len(dicts[Modules.WordEmbeddings]), kwargs["word_embedding_dim"]
+        )
+        if kwargs["word_embedding_dim"]
+        else None,
+        chars_as_word_embedding=CharacterAsWordEmbedding(
+            len(dicts[Modules.CharsAsWord])
+        )
+        if kwargs["char_lstm_layers"]
+        else None,
+    )
+    tagger = Tagger(
+        input_dim=encoder.output_dim, output_dim=len(dicts[Modules.FullTag].w2i),
+    )
     abl_tagger = ABLTagger(encoder=encoder, tagger=tagger).to(device)
 
     # Train a model

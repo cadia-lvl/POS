@@ -2,9 +2,9 @@
 from pytest import fixture
 from functools import partial
 
-from pos.core import SequenceTaggingDataset
+from pos.core import SequenceTaggingDataset, VocabMap, TokenizedDataset
 from pos.data import (
-    load_modules,
+    load_dicts,
     get_input_mappings,
     get_target_mappings,
     batch_preprocess,
@@ -49,11 +49,16 @@ def tagged_test_tsv_file():
     return "./tests/test_pred.tsv"
 
 
+@fixture
+def ds(test_tsv_file):
+    """Return a sequence tagged dataset."""
+    return SequenceTaggingDataset.from_file(test_tsv_file)
+
+
 @fixture()
-def data_loader(test_tsv_file):
+def data_loader(ds):
     """Return a data loader over the unit testing data."""
-    ds = SequenceTaggingDataset.from_file(test_tsv_file)
-    _, dicts = load_modules(ds, word_embedding_dim=3)
+    _, dicts = load_dicts(ds)
     input_mappings = get_input_mappings(dicts)
     target_mappings = get_target_mappings(dicts)
     collate_fn = partial(

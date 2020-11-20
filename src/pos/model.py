@@ -11,6 +11,7 @@ from torch.nn.utils.rnn import pad_sequence
 import torch.nn as nn
 
 from .core import VocabMap, Modules
+from .data import copy_into_larger_tensor
 
 
 log = logging.getLogger(__name__)
@@ -381,15 +382,6 @@ def pack_sequence(padded_sequence):
 def unpack_sequence(packed_sequence):
     """Inverse of pack_sequence."""
     return torch.nn.utils.rnn.pad_packed_sequence(packed_sequence, batch_first=True)[0]
-
-
-def copy_into_larger_tensor(
-    tensor: torch.Tensor, like_tensor: torch.Tensor
-) -> torch.Tensor:
-    """Create a larger tensor based on given tensor. Only works for 2-dims."""
-    base = torch.zeros_like(like_tensor)
-    base[: tensor.shape[0], : tensor.shape[1]] = tensor
-    return base
 
 
 def batch_first_to_batch_second(tensor: torch.Tensor):

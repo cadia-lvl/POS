@@ -21,8 +21,15 @@ from datetime import datetime
 import random
 
 from tqdm import tqdm
-import numpy as np
-from torch import Tensor, stack, no_grad, from_numpy, device as t_device
+from torch import (
+    Tensor,
+    stack,
+    no_grad,
+    from_numpy,
+    device as t_device,
+    zeros_like,
+    zeros,
+)
 from torch.utils.data import DataLoader
 from torch.nn import Module
 from torch.nn.utils import clip_grad_norm_
@@ -30,16 +37,6 @@ from torch.nn.utils.rnn import pad_sequence
 from flair.embeddings import TransformerWordEmbeddings
 from flair.data import Sentence
 
-from .model import (
-    copy_into_larger_tensor,
-    PretrainedEmbedding,
-    FlairTransformerEmbedding,
-    ClassingWordEmbedding,
-    CharacterAsWordEmbedding,
-    Tagger,
-    Encoder,
-    ABLTagger,
-)
 from .utils import read_tsv
 from .core import (
     Vocab,
@@ -74,18 +71,57 @@ def map_to_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
     ).long()
 
 
+def map_to_chars_and_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
+    """Map a sequence to characters then to indices."""
+    return pad_sequence(
+        [
+            Tensor(
+                [w2i[SOS]]
+                + [w2i[char] if char in w2i else w2i[UNK] for char in token]
+                + [w2i[EOS]]
+            ).long()
+            for token in sentence
+        ],
+        batch_first=True,
+        padding_value=w2i[PAD],
+    )
+
+
+def map_to_chars_batch(sentences: List[Tokens], w2i: Dict[str, int]) -> Tensor:
+    """Map a batch of sentences to characters of words. This is convoluted, I know."""
+    sents_padded = []
+    for sentence in sentences:
+        sents_padded.append(map_to_chars_and_index(sentence, w2i))
+    max_words = max((t.shape[0] for t in sents_padded))
+    max_chars = max((t.shape[1] for t in sents_padded))
+    sents_padded = [
+        copy_into_larger_tensor(t, t.new_zeros(size=(max_words, max_chars)))
+        for t in sents_padded
+    ]
+    return (
+        pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
+        .reshape(shape=(-1, max_chars))
+        .long()
+    )
+
+
 def get_input_mappings(
     dictionaries: Dict[Modules, Optional[VocabMap]]
 ) -> Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]]:
     """Return the input mappings for the model."""
     mappings: Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]] = {}
     for module, value in dictionaries.items():
+        preprocess = None
         if module == Modules.BERT:
-            mappings[module] = lambda x: x  #  No-op
+            preprocess = lambda x: x  #  No-op
         elif module == Modules.WordEmbeddings:
-            mappings[module] = partial(map_to_index, w2i=value.w2i)  # type: ignore
+            preprocess = partial(map_to_index, w2i=value.w2i)  # type: ignore
+        elif module == Modules.CharsAsWord:
+            preprocess = partial(map_to_chars_and_index, w2i=value.w2i)  # type: ignore
         else:
             log.info(f"Skipping module={module} in input mappings.")
+        if preprocess:
+            mappings[module] = preprocess
     return mappings
 
 
@@ -100,33 +136,6 @@ def get_target_mappings(
         else:
             log.info(f"Skipping module={module} in target mappings.")
     return mappings
-
-
-def character_mapping(w2i, batch_x):
-    """Old code for character mapping."""
-    sents_padded = []
-    for sent in batch_x:
-        sents_padded.append(
-            pad_sequence(
-                [
-                    Tensor(
-                        [w2i[SOS]]
-                        + [w2i[char] if char in w2i else w2i[UNK] for char in token]
-                        + [w2i[EOS]]
-                    )
-                    for token in sent
-                ],
-                batch_first=True,
-                padding_value=w2i[PAD],
-            )
-        )
-    max_words = max((t.shape[0] for t in sents_padded))
-    max_chars = max((t.shape[1] for t in sents_padded))
-    sents_padded = [
-        copy_into_larger_tensor(t, t.new_zeros(size=(max_words, max_chars)))
-        for t in sents_padded
-    ]
-    return pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
 
 
 def batch_preprocess(
@@ -167,6 +176,13 @@ def batch_preprocess_input(
     return processed
 
 
+def copy_into_larger_tensor(tensor: Tensor, like_tensor: Tensor) -> Tensor:
+    """Create a larger tensor based on given tensor. Only works for 2-dims."""
+    base = zeros_like(like_tensor)
+    base[: tensor.shape[0], : tensor.shape[1]] = tensor
+    return base
+
+
 def pad_dict_tensors(batch_of_dicts: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
     """Pad the tensors in a dict."""
     # Convert List[Dict] to Dict[List]
@@ -175,26 +191,6 @@ def pad_dict_tensors(batch_of_dicts: List[Dict[str, Tensor]]) -> Dict[str, Tenso
     for key, value in a_dict.items():
         result[key] = pad_sequence(value, batch_first=True)
     return result
-
-
-def get_encoder(modules: Dict[Modules, Module]) -> Encoder:
-    """Return an Encoder based on the modules available."""
-    return Encoder(
-        transformer_embedding=modules.get(Modules.BERT, None),
-        morphlex_embedding=modules.get(Modules.MorphLex, None),
-        pretrained_word_embedding=modules.get(Modules.Pretrained, None),
-        word_embedding=modules.get(Modules.WordEmbeddings, None),
-        chars_as_word_embedding=modules.get(Modules.CharsAsWord, None),
-    )
-
-
-def get_tagger(
-    encoder_output_dim: int, dictionaries: Dict[Modules, VocabMap]
-) -> Tagger:
-    """Return a Tagger."""
-    return Tagger(
-        input_dim=encoder_output_dim, output_dim=len(dictionaries[Modules.FullTag].w2i),
-    )
 
 
 def run_batch(
@@ -294,7 +290,7 @@ def read_datasets(
     return ds
 
 
-def wemb_str_to_emb_pair(line: str) -> Tuple[str, List[float]]:
+def wemb_str_to_emb_pair(line: str) -> Tuple[str, Tensor]:
     """Map a word-embedding string to the key and values.
 
     Word-embeddings string is formatted as:
@@ -303,10 +299,10 @@ def wemb_str_to_emb_pair(line: str) -> Tuple[str, List[float]]:
     Between each value in the embedding there is a space " ".
     """
     values = line.strip().split(" ")
-    return (values[0], [float(n) for n in values[1:]])
+    return (values[0], Tensor([float(n) for n in values[1:]]))
 
 
-def bin_str_to_emb_pair(line: str) -> Tuple[str, List[float]]:
+def bin_str_to_emb_pair(line: str) -> Tuple[str, Tensor]:
     """Map a bin-embedding string to the key and values.
 
     Each line is a token and the corresponding embedding.
@@ -315,14 +311,14 @@ def bin_str_to_emb_pair(line: str) -> Tuple[str, List[float]]:
     """
     key, vector = line.strip().split(";")
     # We stip out '[' and ']'
-    return (key, [float(n) for n in vector[1:-1].split(",")])
+    return (key, Tensor([float(n) for n in vector[1:-1].split(",")]))
 
 
 def emb_pairs_to_dict(
-    lines: Iterable[str], f: Callable[[str], Tuple[str, List[float]]]
-) -> Dict[str, List[float]]:
+    lines: Iterable[str], f: Callable[[str], Tuple[str, Tensor]]
+) -> Dict[str, Tensor]:
     """Map a sequence of strings which are embeddings using f to dictionary."""
-    embedding_dict: Dict[str, List[float]] = dict()
+    embedding_dict: Dict[str, Tensor] = dict()
     for line in tqdm(lines):
         key, values = f(line)
         embedding_dict[key] = values
@@ -330,10 +326,10 @@ def emb_pairs_to_dict(
 
 
 def map_embedding(
-    embedding_dict: Dict[str, Union[List[float], List[int]]],
+    embedding_dict: Dict[str, Tensor],
     filter_on: Optional[Set[str]] = None,
     special_tokens: Optional[List[Tuple[str, int]]] = None,
-) -> Tuple[VocabMap, np.array]:
+) -> Tuple[VocabMap, Tensor]:
     """Accept an embedding dict and returns the read embedding (np.array) and the VocabMap based on the embedding dict.
 
     filter_on: If provided, will only return mappings for given words (if present in the file). If not provided, will read all the file.
@@ -359,13 +355,13 @@ def map_embedding(
     for token, _ in special_tokens:
         # We treat PAD as 0s
         if token == PAD:
-            embedding_dict[token] = [0 for _ in range(length_of_embeddings)]
+            embedding_dict[token] = Tensor([0 for _ in range(length_of_embeddings)])
         # Others we treat also as 0
         else:
-            embedding_dict[token] = [0 for _ in range(length_of_embeddings)]
+            embedding_dict[token] = Tensor([0 for _ in range(length_of_embeddings)])
 
-    embeddings = np.zeros(
-        shape=(len(words_to_add) + len(special_tokens), length_of_embeddings)
+    embeddings = zeros(
+        size=(len(words_to_add) + len(special_tokens), length_of_embeddings)
     )
 
     vocab_map = VocabMap(words_to_add, special_tokens=special_tokens)
@@ -386,7 +382,6 @@ def read_morphlex(filepath: str) -> Tuple[VocabMap, Tensor]:
         filter_on=None,
         special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
     )
-    m_embedding = from_numpy(m_embedding).float()
     return m_map, m_embedding
 
 
@@ -406,25 +401,14 @@ def read_pretrained_word_embeddings(filepath: str) -> Tuple[VocabMap, Tensor]:
     return w_map, w_embedding
 
 
-def vocab_map_from_dataset(dataset: TokenizedDataset) -> VocabMap:
-    """Create a VocabMap given a Dataset."""
-    return VocabMap(
-        Vocab.from_symbols((x for x in dataset)),
-        special_tokens=[(PAD, PAD_ID), (UNK, UNK_ID)],
-    )
-
-
-def load_modules(
+def load_dicts(
     train_ds,
     pretrained_word_embeddings_file=None,
-    bert_encoder=None,
-    word_embedding_dim=0,
     morphlex_embeddings_file=None,
     known_chars_file=None,
-    **kwargs,
 ):
     """Load all the modules for the model."""
-    modules: Dict[Modules, Module] = {}
+    embeddings: Dict[Modules, Tensor] = {}
     dictionaries: Dict[Modules, VocabMap] = {}
 
     # Pretrained
@@ -432,48 +416,30 @@ def load_modules(
         m_map, m_embedding = read_pretrained_word_embeddings(
             pretrained_word_embeddings_file
         )
-        modules[Modules.Pretrained] = PretrainedEmbedding(m_embedding)
+        embeddings[Modules.Pretrained] = m_embedding
         dictionaries[Modules.Pretrained] = m_map
 
-    # pretrained BERT like model, we use it.
-    if bert_encoder:
-        modules[Modules.BERT] = FlairTransformerEmbedding(bert_encoder, **kwargs)
-        dictionaries[Modules.BERT] = None
-
-    # This breaks the pattern a bit...
-    w_map = vocab_map_from_dataset((x for x, y in train_ds))
-    dictionaries[Modules.WordEmbeddings] = w_map
-    if word_embedding_dim:
-        # The word embedding dimension is not -1 we train word-embeddings from scratch.
-        modules[Modules.WordEmbeddings] = ClassingWordEmbedding(
-            len(w_map), word_embedding_dim
-        )
+    dictionaries[Modules.WordEmbeddings] = train_ds.get_vocab_map(
+        special_tokens=VocabMap.UNK_PAD
+    )
 
     # MorphLex
     if morphlex_embeddings_file:
         # File is provided, use it.
         m_map, m_embedding = read_morphlex(morphlex_embeddings_file)
-        modules[Modules.MorphLex] = PretrainedEmbedding(
-            m_embedding, freeze=True
-        )  # Currently hard-coded to "freeze"
+        embeddings[Modules.MorphLex] = m_embedding
         dictionaries[Modules.MorphLex] = m_map
 
-    # Character embeddings.
+    # Character mappings, if a file is provided, use it. Otherwise, build from dataset.
     if known_chars_file:
         char_vocab = Vocab.from_file(known_chars_file)
-        c_map = VocabMap(
-            char_vocab,
-            special_tokens=[
-                (UNK, UNK_ID),
-                (PAD, PAD_ID),
-                (EOS, EOS_ID),
-                (SOS, SOS_ID),
-            ],
-        )
-        modules[Modules.CharsAsWord] = CharacterAsWordEmbedding(len(c_map))
-        dictionaries[Modules.CharsAsWord] = c_map
+    else:
+        char_vocab = train_ds.get_char_vocab()
+    c_map = VocabMap(char_vocab, special_tokens=VocabMap.UNK_PAD_EOS_SOS,)
+    dictionaries[Modules.CharsAsWord] = c_map
 
     # TAGS (POS)
-    t_map = vocab_map_from_dataset((y for _, y in train_ds))
-    dictionaries[Modules.FullTag] = t_map
-    return modules, dictionaries
+    dictionaries[Modules.FullTag] = train_ds.get_tag_vocab_map(
+        special_tokens=VocabMap.UNK_PAD
+    )
+    return embeddings, dictionaries
