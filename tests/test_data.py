@@ -80,13 +80,16 @@ def test_sequence_tagging_dataset_from_file(test_tsv_file):
 
 
 def test_read_datasets(test_tsv_file):
-    test_ds = read_datasets([test_tsv_file])
+    fields = ["tokens", "tags"]
+    test_ds = read_datasets([test_tsv_file], fields=fields)
     assert len(test_ds) == 3
-    test_ds = read_datasets([test_tsv_file], max_lines=2)
+    test_ds = read_datasets([test_tsv_file], max_lines=2, fields=fields)
     assert len(test_ds) == 2
-    test_ds = read_datasets([test_tsv_file], max_sent_length=2)
+    test_ds = read_datasets([test_tsv_file], max_sent_length=2, fields=fields)
     assert len(test_ds) == 2
-    test_ds = read_datasets([test_tsv_file], max_lines=2, max_sent_length=2)
+    test_ds = read_datasets(
+        [test_tsv_file], max_lines=2, max_sent_length=2, fields=fields
+    )
     assert len(test_ds) == 2
 
 
@@ -143,7 +146,7 @@ def test_map_to_idx():
 
 
 def test_map_to_chars(ds):
-    c_map = ds.get_char_vocab_map(VocabMap.UNK_PAD_EOS_SOS)
+    c_map = ds.get_char_vocab_map(special_tokens=VocabMap.UNK_PAD_EOS_SOS)
     for idx, (sent, _) in enumerate(ds):
         if idx == 0:
             mapped = map_to_chars_and_index(sent, c_map.w2i)

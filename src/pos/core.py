@@ -192,3 +192,69 @@ class DoubleTaggedDataset(SequenceTaggingDataset):
         with open(filepath) as f:
             examples = tuple(tokens_to_sentences(read_tsv(f)))
         return DoubleTaggedDataset(examples)
+
+
+class Fields:
+    Tokens = "tokens"
+    Tags = "tags"
+    Lemmas = "lemmas"
+    GoldTags = "gold_tags"
+
+
+class FieldedDataset(Dataset):
+    """A generic dataset built from group tsv lines."""
+
+    def __init__(self, data: Tuple[Sequence[Tokens], ...], fields: Sequence[str]):
+        """Initialize the dataset."""
+        self.data: Tuple[Sequence[Tokens], ...] = data
+        self.fields: Sequence[str] = fields
+
+    def __getitem__(self, idx):
+        """Support itemgetter."""
+        return tuple(data_field[idx] for data_field in self.data)
+
+    def __len__(self):
+        """Support len."""
+        return len(self.data[0])
+
+    def __iter__(self):
+        """Support iteration."""
+        return zip(*self.data)
+
+    def __add__(self, other):
+        """Support addition."""
+        assert self.fields == other.fields
+        return self.__class__(self.data + other.data, self.fields)
+
+    def get_field(self, field=Fields.Tokens):
+        """Get the field."""
+        return self.data[self.fields.index(field)]
+
+    def get_vocab(self, field=Fields.Tokens) -> Vocab:
+        """Return the Vocabulary in the dataset."""
+        return Vocab.from_symbols(self.get_field(field))
+
+    def get_vocab_map(self, special_tokens=None, field=Fields.Tokens) -> VocabMap:
+        """Return the VocabularyMapping in the dataset."""
+        return VocabMap(self.get_vocab(field), special_tokens=special_tokens)
+
+    def get_char_vocab(self, field=Fields.Tokens) -> Vocab:
+        """Return the character Vocabulary in the dataset."""
+        return Vocab.from_symbols(
+            (tok for sent in self.get_field(field) for tok in sent)
+        )
+
+    def get_char_vocab_map(self, special_tokens=None, field=Fields.Tokens) -> VocabMap:
+        """Return the character VocabularyMapping in the dataset."""
+        return VocabMap(self.get_char_vocab(field), special_tokens=special_tokens)
+
+    def get_tag_vocab_map(self, special_tokens=None, field=Fields.Tags) -> VocabMap:
+        """Return the VocabularyMapping in the dataset."""
+        return VocabMap(self.get_vocab(field), special_tokens=special_tokens)
+
+    @staticmethod
+    def from_file(filepath, fields):
+        """Construct from a file."""
+        with open(filepath) as f:
+            examples = tuple(zip(*tuple(tokens_to_sentences(read_tsv(f)))))
+        return FieldedDataset(examples, fields=fields)

@@ -2,10 +2,11 @@
 from pytest import fixture
 from typing import Dict
 
-from pos.core import SequenceTaggingDataset, VocabMap, Dicts, DoubleTaggedDataset
+import torch
+
+from pos.core import SequenceTaggingDataset, VocabMap, Dicts, FieldedDataset
 from pos.data import collate_fn, load_dicts
 from pos.model import Encoder, ClassingWordEmbedding, Tagger
-import torch
 
 
 def pytest_addoption(parser):
@@ -54,13 +55,15 @@ def test_tsv_lemma_file():
 @fixture
 def ds(test_tsv_file):
     """Return a sequence tagged dataset."""
-    return SequenceTaggingDataset.from_file(test_tsv_file)
+    return FieldedDataset.from_file(test_tsv_file, fields=["tokens", "tags"])
 
 
 @fixture
 def ds_lemma(test_tsv_lemma_file):
     """Return a sequence tagged dataset."""
-    return DoubleTaggedDataset.from_file(test_tsv_lemma_file)
+    return FieldedDataset.from_file(
+        test_tsv_lemma_file, fields=["tokens", "tags", "lemmas"]
+    )
 
 
 @fixture
