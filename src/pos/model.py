@@ -465,25 +465,25 @@ class Encoder(nn.Module):
         lstm_dropouts=0.0,
         input_dropouts=0.0,
         noise=0.1,
+        **kwargs
     ):
         """Initialize the module given the parameters."""
         super().__init__()
         self.noise = noise
         self.embeddings = nn.ModuleList(embeddings)
-        if self.embeddings is None:
-            self.embeddings = []
 
         self.use_bilstm = not main_lstm_layers == 0
         encoder_out_dim = sum(
-            emb.output_dim for emb in self.embeddings if emb.to_bilstm
+            emb.output_dim for emb in self.embeddings if not emb.to_bilstm
         )
-        if encoder_out_dim and not self.use_bilstm:
+        bilstm_in_dim = sum(emb.output_dim for emb in self.embeddings if emb.to_bilstm)
+        if bilstm_in_dim and not self.use_bilstm:
             raise ValueError("Not using BiLSTM but Embedding is set to use BiLSTM")
 
         # BiLSTM over all inputs
         if self.use_bilstm:
             self.bilstm = nn.LSTM(
-                input_size=encoder_out_dim,
+                input_size=bilstm_in_dim,
                 hidden_size=main_lstm_dim,
                 num_layers=main_lstm_layers,
                 dropout=lstm_dropouts,
@@ -497,7 +497,7 @@ class Encoder(nn.Module):
                     nn.init.xavier_uniform_(param)
                 else:
                     raise ValueError("Unknown parameter in lstm={name}")
-            encoder_out_dim = main_lstm_dim * 2
+            encoder_out_dim += main_lstm_dim * 2
         self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
         self.output_dim = encoder_out_dim
 

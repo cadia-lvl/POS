@@ -219,31 +219,31 @@ def train_and_tag(**kwargs):
         shuffle=False,
         batch_size=kwargs["batch_size"] * 10,
     )
-    embs = [
-        FlairTransformerEmbedding(kwargs["bert_encoder"], **kwargs)
-        if kwargs["bert_encoder"]
-        else None,
-        PretrainedEmbedding(
-            vocab_map=dicts[Dicts.MorphLex],
-            embeddings=embeddings[Dicts.MorphLex],
-            freeze=True,
+    embs = []
+    if kwargs["bert_encoder"]:
+        embs.append(FlairTransformerEmbedding(kwargs["bert_encoder"], **kwargs))
+    if kwargs["morphlex_embeddings_file"]:
+        embs.append(
+            PretrainedEmbedding(
+                vocab_map=dicts[Dicts.MorphLex],
+                embeddings=embeddings[Dicts.MorphLex],
+                freeze=True,
+            )
         )
-        if kwargs["morphlex_embeddings_file"]
-        else None,
-        PretrainedEmbedding(
-            vocab_map=dicts[Dicts.Pretrained],
-            embeddings=embeddings[Dicts.Pretrained],
-            freeze=True,
+    if kwargs["pretrained_word_embeddings_file"]:
+        embs.append(
+            PretrainedEmbedding(
+                vocab_map=dicts[Dicts.Pretrained],
+                embeddings=embeddings[Dicts.Pretrained],
+                freeze=True,
+            )
         )
-        if kwargs["pretrained_word_embeddings_file"]
-        else None,
-        ClassingWordEmbedding(dicts[Dicts.Tokens], kwargs["word_embedding_dim"])
-        if kwargs["word_embedding_dim"]
-        else None,
-        CharacterAsWordEmbedding(dicts[Dicts.Chars])
-        if kwargs["char_lstm_layers"]
-        else None,
-    ]
+    if kwargs["word_embedding_dim"]:
+        embs.append(
+            ClassingWordEmbedding(dicts[Dicts.Tokens], kwargs["word_embedding_dim"])
+        )
+    if kwargs["char_lstm_layers"]:
+        embs.append(CharacterAsWordEmbedding(dicts[Dicts.Chars]))
     encoder = Encoder(embeddings=embs, **kwargs)
     tagger = Tagger(
         vocab_map=dicts[Dicts.FullTag],
