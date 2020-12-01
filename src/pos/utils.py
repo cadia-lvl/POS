@@ -51,7 +51,7 @@ def sentences_to_tokens(
 ) -> Iterable[Optional[Tuple[str, ...]]]:
     """Convert sentences to tuples of tokens/tags."""
     for sentence in sentences:
-        yield tuple(zip(*sentence))
+        yield tuple(zip(*sentence))  # type: ignore
         yield None
 
 
