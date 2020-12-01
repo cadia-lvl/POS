@@ -1,14 +1,10 @@
 """Fixtures for tests."""
 from pytest import fixture
-from functools import partial
+from typing import Dict
 
-from pos.core import SequenceTaggingDataset, VocabMap, TokenizedDataset
-from pos.data import (
-    load_dicts,
-    get_input_mappings,
-    get_target_mappings,
-    batch_preprocess,
-)
+from pos.core import SequenceTaggingDataset, VocabMap, Dicts, DoubleTaggedDataset
+from pos.data import collate_fn, load_dicts
+from pos.model import Encoder, ClassingWordEmbedding, Tagger
 import torch
 
 
@@ -49,20 +45,46 @@ def tagged_test_tsv_file():
     return "./tests/test_pred.tsv"
 
 
+@fixture()
+def test_tsv_lemma_file():
+    """Return the filepath of the test tsv file."""
+    return "./tests/test_lemma.tsv"
+
+
 @fixture
 def ds(test_tsv_file):
     """Return a sequence tagged dataset."""
     return SequenceTaggingDataset.from_file(test_tsv_file)
 
 
-@fixture()
-def data_loader(ds):
-    """Return a data loader over the unit testing data."""
-    _, dicts = load_dicts(ds)
-    input_mappings = get_input_mappings(dicts)
-    target_mappings = get_target_mappings(dicts)
-    collate_fn = partial(
-        batch_preprocess, x_mappings=input_mappings, y_mappings=target_mappings
-    )
-    return torch.utils.data.DataLoader(ds, batch_size=3, collate_fn=collate_fn)
+@fixture
+def ds_lemma(test_tsv_lemma_file):
+    """Return a sequence tagged dataset."""
+    return DoubleTaggedDataset.from_file(test_tsv_lemma_file)
 
+
+@fixture
+def vocab_maps(ds_lemma) -> Dict[str, VocabMap]:
+    """Return the dictionaries for the dataset."""
+    return load_dicts(ds_lemma)[1]
+
+
+@fixture()
+def data_loader(ds_lemma):
+    """Return a data loader over the unit testing data."""
+    return torch.utils.data.DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)
+
+
+@fixture
+def encoder(vocab_maps) -> Encoder:
+    """Return an Encoder."""
+    wembs = ClassingWordEmbedding(vocab_map=vocab_maps[Dicts.Tokens], embedding_dim=3)
+    return Encoder([wembs], main_lstm_layers=1)
+
+
+@fixture
+def tagger_module(vocab_maps, encoder) -> Tagger:
+    """Return a Tagger."""
+    return Tagger(
+        vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim, output_dim=5
+    )

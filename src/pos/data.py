@@ -1,51 +1,25 @@
 """Data preparation and reading."""
-from enum import Enum
-from typing import (
-    List,
-    Any,
-    Tuple,
-    Set,
-    Dict,
-    Optional,
-    Union,
-    Iterable,
-    cast,
-    Sequence,
-    Callable,
-)
-from functools import partial, reduce
+from typing import List, Tuple, Set, Dict, Optional, Iterable, Sequence, Callable, Any
+from functools import reduce
 from operator import add
 import logging
-from copy import deepcopy
-from datetime import datetime
-import random
+from enum import Enum
 
 from tqdm import tqdm
 from torch import (
     Tensor,
-    stack,
-    no_grad,
     from_numpy,
-    device as t_device,
     zeros_like,
     zeros,
 )
-from torch.utils.data import DataLoader
-from torch.nn import Module
-from torch.nn.utils import clip_grad_norm_
 from torch.nn.utils.rnn import pad_sequence
-from flair.embeddings import TransformerWordEmbeddings
-from flair.data import Sentence
 
-from .utils import read_tsv
 from .core import (
     Vocab,
     VocabMap,
     Tokens,
-    Tags,
     SequenceTaggingDataset,
-    TokenizedDataset,
-    Modules,
+    Dicts,
 )
 
 
@@ -64,6 +38,17 @@ SOS = "<s>"
 SOS_ID = 3
 
 
+class BATCH_KEYS(Enum):
+    """Keys used on the batch dictionary."""
+
+    TOKENS = "tokens"
+    FULL_TAGS = "full_tags"
+    TARGET_FULL_TAGS = "target_full_tags"
+    LEMMAS = "lemmas"
+    TARGET_LEMMAS = "target_lemmas"
+    LENGTHS = "lens"
+
+
 def map_to_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
     """Map a sequence to indices."""
     return Tensor(
@@ -71,14 +56,18 @@ def map_to_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
     ).long()
 
 
-def map_to_chars_and_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
+def map_to_chars_and_index(
+    sentence: Tokens, w2i: Dict[str, int], add_eos=True, add_sos=True
+) -> Tensor:
     """Map a sequence to characters then to indices."""
+    SOS_l = [w2i[SOS]] if add_sos else []
+    EOS_l = [w2i[EOS]] if add_eos else []
     return pad_sequence(
         [
             Tensor(
-                [w2i[SOS]]
+                SOS_l
                 + [w2i[char] if char in w2i else w2i[UNK] for char in token]
-                + [w2i[EOS]]
+                + EOS_l
             ).long()
             for token in sentence
         ],
@@ -87,11 +76,15 @@ def map_to_chars_and_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
     )
 
 
-def map_to_chars_batch(sentences: List[Tokens], w2i: Dict[str, int]) -> Tensor:
+def map_to_chars_batch(
+    sentences: Sequence[Tokens], w2i: Dict[str, int], add_eos=True, add_sos=True
+) -> Tensor:
     """Map a batch of sentences to characters of words. This is convoluted, I know."""
     sents_padded = []
     for sentence in sentences:
-        sents_padded.append(map_to_chars_and_index(sentence, w2i))
+        sents_padded.append(
+            map_to_chars_and_index(sentence, w2i, add_eos=add_eos, add_sos=add_sos)
+        )
     max_words = max((t.shape[0] for t in sents_padded))
     max_chars = max((t.shape[1] for t in sents_padded))
     sents_padded = [
@@ -105,75 +98,13 @@ def map_to_chars_batch(sentences: List[Tokens], w2i: Dict[str, int]) -> Tensor:
     )
 
 
-def get_input_mappings(
-    dictionaries: Dict[Modules, Optional[VocabMap]]
-) -> Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]]:
-    """Return the input mappings for the model."""
-    mappings: Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]] = {}
-    for module, value in dictionaries.items():
-        preprocess = None
-        if module == Modules.BERT:
-            preprocess = lambda x: x  #  No-op
-        elif module == Modules.WordEmbeddings:
-            preprocess = partial(map_to_index, w2i=value.w2i)  # type: ignore
-        elif module == Modules.CharsAsWord:
-            preprocess = partial(map_to_chars_and_index, w2i=value.w2i)  # type: ignore
-        else:
-            log.info(f"Skipping module={module} in input mappings.")
-        if preprocess:
-            mappings[module] = preprocess
-    return mappings
-
-
-def get_target_mappings(
-    dictionaries: Dict[Modules, Optional[VocabMap]]
-) -> Dict[Modules, Callable[[Tokens], Tensor]]:
-    """Return the target mappings for the model."""
-    mappings: Dict[Modules, Callable[[Tokens], Tensor]] = {}
-    for module, value in dictionaries.items():
-        if module == Modules.FullTag:
-            mappings[module] = partial(map_to_index, w2i=value.w2i)  # type: ignore
-        else:
-            log.info(f"Skipping module={module} in target mappings.")
-    return mappings
-
-
-def batch_preprocess(
-    batch: Sequence[Tuple[Tokens, Tags]],
-    x_mappings: Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]],
-    y_mappings: Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]],
-    device=None,
-) -> Dict[Modules, Union[Tensor, Sequence[Tokens]]]:
-    """Batch collate function. It takes care of creating batches and preprocess them.
-
-    Returns:
-        A dictionary of Tensors
-    """
-    if not device:
-        device = t_device("cpu")
-    tokens, tags = SequenceTaggingDataset(batch).unpack()
-    processed = batch_preprocess_input(tokens, x_mappings, device)
-    processed.update(batch_preprocess_input(tags, y_mappings, device))
-    return processed
-
-
-def batch_preprocess_input(
-    batch: Sequence[Tokens],
-    mappings: Dict[Modules, Callable[[Tokens], Union[Tensor, Tokens]]],
-    device,
-) -> Dict[Modules, Union[Tensor, Sequence[Tokens]]]:
-    """Process a batch of inputs."""
-    processed: Dict[Modules, Union[Tensor, Sequence[Tokens]]] = {}
-    for key, mapping in mappings.items():
-        if key == Modules.BERT:
-            processed[key] = batch
-        else:
-            processed[key] = pad_sequence(
-                [mapping(x) for x in batch], batch_first=True
-            ).to(device)
-    # Also add the lengths
-    processed[Modules.Lengths] = Tensor([len(x) for x in batch]).long().to(device)
-    return processed
+def map_to_index_batch(sentences: Sequence[Tokens], w2i: Dict[str, int]):
+    """Map to index, batch."""
+    return pad_sequence(
+        [map_to_index(sentence=sentence, w2i=w2i) for sentence in sentences],
+        batch_first=True,
+        padding_value=w2i[PAD],
+    )
 
 
 def copy_into_larger_tensor(tensor: Tensor, like_tensor: Tensor) -> Tensor:
@@ -183,90 +114,26 @@ def copy_into_larger_tensor(tensor: Tensor, like_tensor: Tensor) -> Tensor:
     return base
 
 
-def pad_dict_tensors(batch_of_dicts: List[Dict[str, Tensor]]) -> Dict[str, Tensor]:
-    """Pad the tensors in a dict."""
-    # Convert List[Dict] to Dict[List]
-    result = {}
-    a_dict = {key: [d[key] for d in batch_of_dicts] for key in batch_of_dicts[0]}
-    for key, value in a_dict.items():
-        result[key] = pad_sequence(value, batch_first=True)
-    return result
-
-
-def run_batch(
-    model: Module, batch: Dict[Modules, Tensor], criterion=None, optimizer=None,
-) -> Tuple[Tensor, float]:
-    """Run a batch through the model.
-    
-    If criterion is given, it will be applied and returned (as float).
-    If optimizer is given, it will be used to update parameters in conjunction with the criterion.
-    """
-    if optimizer is not None:
-        optimizer.zero_grad()
-    model_out = model(batch)
-    # (b, seq, tag_features)
-    loss = 0.0
-    if criterion is not None and Modules.FullTag in batch:
-        t_loss = criterion(
-            model_out.view(-1, model_out.shape[-1]), batch[Modules.FullTag].view(-1)
-        )
-        if optimizer is not None:
-            t_loss.backward()
-            clip_grad_norm_(model.parameters(), 5)
-            optimizer.step()
-        loss = t_loss.item()
-    return model_out, loss
-
-
-def tag_batch(
-    model: Module,
-    batch: Dict[Modules, Tensor],
-    tag_map: VocabMap,
-    criterion=None,
-    optimizer=None,
-) -> Tuple[Iterable[Sequence[str]], float]:
-    """Tag (apply POS) on a given data set."""
-    preds, loss = run_batch(model, batch, criterion, optimizer)
-    idxs = preds.argmax(dim=2).tolist()
-
-    tags = [
-        tuple(
-            tag_map.i2w[tag_idx]
-            for token_count, tag_idx in enumerate(sent)
-            # All sentences are padded (at the right end) to be of equal length.
-            # We do not want to return tags for the paddings.
-            # We check the information about lengths and paddings.
-            if token_count < batch[Modules.Lengths][sent_idx]
-        )
-        for sent_idx, sent in enumerate(idxs)
-    ]
-    return tags, loss
-
-
-def tag_data_loader(
-    model: Module, data_loader: DataLoader, tag_map: VocabMap, criterion=None,
-) -> Tuple[List[Sequence[str]], float]:
-    """Tag (apply POS) on a given data set. Sets the model to evaluation mode."""
-    tags: List[Sequence[str]] = []
-    loss = 0.0
-    model.eval()
-    with no_grad():
-        start = datetime.now()
-        for batch in data_loader:
-            b_tags, b_loss = tag_batch(model, batch, tag_map, criterion)
-            loss += b_loss
-            tags.extend(b_tags)
-        end = datetime.now()
-    log.info(f"Tagged {sum((1 for sent in tags for token in sent))} tokens")
-    log.info(f"Tagging took={end-start} seconds")
-    return tags, loss
+def collate_fn(batch: Sequence[Tuple[Tokens, ...]]) -> Dict[BATCH_KEYS, Any]:
+    """Map the inputs to batches."""
+    batch_dict = {}
+    if len(batch[0]) >= 1:  # we assume we are given the tokens
+        batch_dict[BATCH_KEYS.TOKENS] = tuple(element[0] for element in batch)
+    if len(batch[0]) >= 2:  # Next, the tags. Usually only for training.
+        batch_dict[BATCH_KEYS.FULL_TAGS] = tuple(element[1] for element in batch)
+    if len(batch[0]) >= 3:  # lastly, the lemmas. Usually only for training.
+        batch_dict[BATCH_KEYS.LEMMAS] = tuple(element[2] for element in batch)
+    batch_dict[BATCH_KEYS.LENGTHS] = tuple(
+        len(x) for x in batch_dict[BATCH_KEYS.TOKENS]  # type: ignore
+    )
+    return batch_dict
 
 
 def read_datasets(
     file_paths: List[str], max_sent_length=0, max_lines=0
 ) -> SequenceTaggingDataset:
     """Read tagged datasets from multiple files.
-    
+
     Args:
         max_sent_length: Sentences longer than "max_sent_length" are thrown away.
         max_lines: Will only keep the first "max_lines" sentences.
@@ -408,38 +275,39 @@ def load_dicts(
     known_chars_file=None,
 ):
     """Load all the modules for the model."""
-    embeddings: Dict[Modules, Tensor] = {}
-    dictionaries: Dict[Modules, VocabMap] = {}
+    embeddings: Dict[Dicts, Tensor] = {}
+    dictionaries: Dict[Dicts, VocabMap] = {}
 
     # Pretrained
     if pretrained_word_embeddings_file:
         m_map, m_embedding = read_pretrained_word_embeddings(
             pretrained_word_embeddings_file
         )
-        embeddings[Modules.Pretrained] = m_embedding
-        dictionaries[Modules.Pretrained] = m_map
+        embeddings[Dicts.Pretrained] = m_embedding
+        dictionaries[Dicts.Pretrained] = m_map
 
-    dictionaries[Modules.WordEmbeddings] = train_ds.get_vocab_map(
-        special_tokens=VocabMap.UNK_PAD
-    )
+    dictionaries[Dicts.Tokens] = train_ds.get_vocab_map(special_tokens=VocabMap.UNK_PAD)
 
     # MorphLex
     if morphlex_embeddings_file:
         # File is provided, use it.
         m_map, m_embedding = read_morphlex(morphlex_embeddings_file)
-        embeddings[Modules.MorphLex] = m_embedding
-        dictionaries[Modules.MorphLex] = m_map
+        embeddings[Dicts.MorphLex] = m_embedding
+        dictionaries[Dicts.MorphLex] = m_map
 
     # Character mappings, if a file is provided, use it. Otherwise, build from dataset.
     if known_chars_file:
         char_vocab = Vocab.from_file(known_chars_file)
     else:
         char_vocab = train_ds.get_char_vocab()
-    c_map = VocabMap(char_vocab, special_tokens=VocabMap.UNK_PAD_EOS_SOS,)
-    dictionaries[Modules.CharsAsWord] = c_map
+    c_map = VocabMap(
+        char_vocab,
+        special_tokens=VocabMap.UNK_PAD_EOS_SOS,
+    )
+    dictionaries[Dicts.Chars] = c_map
 
     # TAGS (POS)
-    dictionaries[Modules.FullTag] = train_ds.get_tag_vocab_map(
+    dictionaries[Dicts.FullTag] = train_ds.get_tag_vocab_map(
         special_tokens=VocabMap.UNK_PAD
     )
     return embeddings, dictionaries

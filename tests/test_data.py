@@ -8,17 +8,14 @@ from torch import Tensor
 from pos.utils import read_tsv, tokens_to_sentences
 from pos.data import (
     emb_pairs_to_dict,
-    pad_dict_tensors,
     read_datasets,
     load_dicts,
     map_to_index,
     map_to_chars_and_index,
     map_to_chars_batch,
-    get_input_mappings,
-    get_target_mappings,
     bin_str_to_emb_pair,
-    batch_preprocess,
     wemb_str_to_emb_pair,
+    collate_fn,
     PAD,
     PAD_ID,
     EOS,
@@ -27,13 +24,14 @@ from pos.data import (
     SOS_ID,
     UNK,
     UNK_ID,
+    BATCH_KEYS,
 )
 from pos.core import (
     SequenceTaggingDataset,
     DoubleTaggedDataset,
     Vocab,
     VocabMap,
-    Modules,
+    Dicts,
 )
 
 
@@ -71,16 +69,6 @@ def test_read_tsv(test_tsv_file):
             (("Þetta", "er", "test"), ("f", "s", "n")),
             (("Já", "Kannski"), ("a", "a")),
         ]
-
-
-def test_pad_dict_tensor():
-    test = [
-        {"a": Tensor([1, 2]), "b": Tensor([5, 6])},
-        {"a": Tensor([3, 4]), "b": Tensor([7, 8])},
-    ]
-    result = pad_dict_tensors(test)
-    assert result["a"].tolist() == [[1, 2], [3, 4]]
-    assert result["b"].tolist() == [[5, 6], [7, 8]]
 
 
 def test_sequence_tagging_dataset_from_file(test_tsv_file):
@@ -142,9 +130,10 @@ def test_read_predicted(tagged_test_tsv_file):
 
 def test_load_modules(ds):
     _, dicts = load_dicts(ds)
-    assert Modules.WordEmbeddings in dicts
-    assert Modules.CharsAsWord in dicts
-    assert Modules.FullTag in dicts
+    assert Dicts.Tokens in dicts
+    assert Dicts.Chars in dicts
+    assert Dicts.FullTag in dicts
+    assert len(dicts) == 3
 
 
 def test_map_to_idx():
@@ -183,93 +172,15 @@ def test_map_to_chars_batch(ds):
     print(batch)
 
 
-def test_get_mappings(ds):
-    _, dicts = load_dicts(ds)
-    input_mappings = get_input_mappings(dicts)
-    target_mappings = get_target_mappings(dicts)
-    assert len(input_mappings) == 3
-    assert len(target_mappings) == 1
-    assert Modules.WordEmbeddings in input_mappings
-    assert Modules.CharsAsWord in input_mappings
-    assert Modules.FullTag not in input_mappings
-    assert Modules.WordEmbeddings not in target_mappings
-    assert Modules.FullTag in target_mappings
-    batch = batch_preprocess(ds, input_mappings, target_mappings)
-    print(batch)
-    assert batch[Modules.WordEmbeddings].shape == (3, 3)  # 3 sentences, max length is 3
-    assert batch[Modules.FullTag].shape == (3, 3)  # Same as above
-    assert batch[Modules.CharsAsWord].shape == (9, 9)  # Same as in test above
-    assert batch[Modules.Lengths].tolist() == [
-        1,
-        3,
-        2,
-    ]  # These sentences are 1, 3, 2 tokens long
-    w2i = dicts[Modules.WordEmbeddings].w2i
-    assert batch[Modules.WordEmbeddings].tolist() == [
-        [w2i["Hæ"], w2i["<pad>"], w2i["<pad>"]],
-        [w2i["Þetta"], w2i["er"], w2i["test"]],
-        [w2i["Já"], w2i["Kannski"], w2i["<pad>"]],
-    ]
-    w2i = dicts[Modules.FullTag].w2i
-    assert batch[Modules.FullTag].tolist() == [
-        [w2i["a"], w2i["<pad>"], w2i["<pad>"]],
-        [w2i["f"], w2i["s"], w2i["n"]],
-        [w2i["a"], w2i["a"], w2i["<pad>"]],
-    ]
-
-
 def test_collate_fn(test_tsv_file):
     ds = SequenceTaggingDataset.from_file(test_tsv_file)
-    modules, dicts = load_dicts(ds, word_embedding_dim=3)
-    input_mappings = get_input_mappings(dicts)
-    target_mappings = get_target_mappings(dicts)
-    collate_fn = partial(
-        batch_preprocess, x_mappings=input_mappings, y_mappings=target_mappings
-    )
+    _, dicts = load_dicts(ds)
     dl = torch.utils.data.DataLoader(ds, batch_size=3, collate_fn=collate_fn)
     assert len(dl) == 1
     for batch in dl:
-        assert batch[Modules.Lengths].tolist() == [
+        assert len(batch) == 3
+        assert list(batch[BATCH_KEYS.LENGTHS]) == [
             1,
             3,
             2,
         ]  # These sentences are 1, 3, 2 tokens long
-        w2i = dicts[Modules.WordEmbeddings].w2i
-        assert batch[Modules.WordEmbeddings].tolist() == [
-            [w2i["Hæ"], w2i["<pad>"], w2i["<pad>"]],
-            [w2i["Þetta"], w2i["er"], w2i["test"]],
-            [w2i["Já"], w2i["Kannski"], w2i["<pad>"]],
-        ]
-        w2i = dicts[Modules.FullTag].w2i
-        assert batch[Modules.FullTag].tolist() == [
-            [w2i["a"], w2i["<pad>"], w2i["<pad>"]],
-            [w2i["f"], w2i["s"], w2i["n"]],
-            [w2i["a"], w2i["a"], w2i["<pad>"]],
-        ]
-
-
-def test_transformer_embedding_electra_small(test_tsv_file, electra_model):
-    if not electra_model:
-        pytest.skip("No --electra_model given")
-    ds = SequenceTaggingDataset.from_file(test_tsv_file)
-    _, dicts = load_dicts(ds, bert_encoder=electra_model)
-    input_mappings = get_input_mappings(dicts)
-    target_mappings = get_target_mappings(dicts)
-    collate_fn = partial(
-        batch_preprocess, x_mappings=input_mappings, y_mappings=target_mappings
-    )
-    dl = torch.utils.data.DataLoader(ds, batch_size=3, collate_fn=collate_fn)
-
-    for batch in dl:
-        assert batch[Modules.Lengths].tolist() == [
-            1,
-            3,
-            2,
-        ]  # These sentences are 1, 3, 2 tokens long
-        w2i = dicts[Modules.FullTag].w2i
-        assert batch[Modules.FullTag].tolist() == [
-            [w2i["a"], w2i["<pad>"], w2i["<pad>"]],
-            [w2i["f"], w2i["s"], w2i["n"]],
-            [w2i["a"], w2i["a"], w2i["<pad>"]],
-        ]
-        assert batch[Modules.BERT].shape == (3, 3, 256)

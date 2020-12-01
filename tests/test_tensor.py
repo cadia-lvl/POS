@@ -59,27 +59,3 @@ def test_loss():
     loss_ignore = criterion(test_score_combined, test_idx_combined)
     assert loss_ignore.shape[0] == 2
     assert loss_ignore.sum().eq(loss2)
-
-
-def test_batch_first_to_batch_second():
-    test = torch.Tensor(
-        [
-            [[1, 2, 3], [4, 5, 6],],  # first batch  # first word  # second word
-            [[7, 8, 9], [10, 11, 12],],  # second batch  # first word  # second word
-        ]
-    )
-    print(test)
-    test_b_2nd = model.batch_first_to_batch_second(test)
-    assert test_b_2nd.eq(
-        torch.Tensor(
-            [
-                [[1, 2, 3], [7, 8, 9],],  # first word  # first batch  # second batch
-                [
-                    [4, 5, 6],
-                    [10, 11, 12],
-                ],  # second word  # first batch  # second batch
-            ]
-        )
-    ).all()
-
-    assert test.eq(model.batch_second_to_batch_first(test_b_2nd)).all()

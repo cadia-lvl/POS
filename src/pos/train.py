@@ -5,24 +5,23 @@ During training this module handles:
 - Epochs (iterations) and evaluation.
 - Schedulers and optimizers. 
 """
-from typing import Iterable, Optional, Callable, Dict, List
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
 import logging
-import datetime
+from datetime import datetime
 from functools import partial
 from math import inf
 
 import torch
+from torch.nn.utils import clip_grad_norm_
+from torch import Tensor, no_grad
 from torch.utils.data import DataLoader
 
-from .evaluate import Experiment
 from .data import (
-    tag_batch,
-    tag_data_loader,
     PAD_ID,
-    run_batch,
-    Modules,
+    BATCH_KEYS,
 )
-from .core import Vocab, VocabMap, TokenizedDataset
+from .model import ABLTagger
+
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +72,9 @@ def get_criterion(**kwargs):
         return torch.nn.CrossEntropyLoss(ignore_index=PAD_ID, reduction="sum")
     else:
         return partial(  # type: ignore
-            smooth_ce_loss, pad_idx=PAD_ID, smoothing=label_smoothing,
+            smooth_ce_loss,
+            pad_idx=PAD_ID,
+            smoothing=label_smoothing,
         )
 
 
@@ -112,8 +113,74 @@ def print_tagger(tagger: torch.nn.Module):
     )
 
 
+def run_batch(
+    model: ABLTagger,
+    batch: Dict[BATCH_KEYS, Any],
+    criterion=None,
+    optimizer=None,
+) -> Tuple[Tensor, float]:
+    """Run a batch through the model.
+
+    If criterion is given, it will be applied and returned (as float).
+    If optimizer is given, it will be used to update parameters in conjunction with the criterion.
+    """
+    if optimizer is not None:
+        optimizer.zero_grad()
+    model_out = model(batch)[0]  # TODO: Tagger-only now
+    # (b, seq, tag_features)
+    loss = 0.0
+    if criterion is not None:
+        t_loss = criterion(
+            model_out.view(-1, model_out.shape[-1]),
+            batch[BATCH_KEYS.TARGET_FULL_TAGS].view(-1),
+        )
+        if optimizer is not None:
+            t_loss.backward()
+            clip_grad_norm_(model.parameters(), 5)
+            optimizer.step()
+        loss = t_loss.item()
+    return model_out, loss
+
+
+def tag_batch(
+    model: ABLTagger,
+    batch: Dict[BATCH_KEYS, Any],
+    criterion=None,
+    optimizer=None,
+) -> Tuple[Iterable[Sequence[str]], float]:
+    """Tag (apply POS) on a given data set."""
+    preds, loss = run_batch(model, batch, criterion, optimizer)
+    tagger = model.decoders[0]  # TODO: Tagger hard-coded
+    return tagger.postprocess(preds, batch[BATCH_KEYS.LENGTHS]), loss
+
+
+def tag_data_loader(
+    model: ABLTagger,
+    data_loader: DataLoader,
+    criterion=None,
+) -> Tuple[List[Sequence[str]], float]:
+    """Tag (apply POS) on a given data set. Sets the model to evaluation mode."""
+    tags: List[Sequence[str]] = []
+    loss = 0.0
+    model.eval()
+    with no_grad():
+        start = datetime.now()
+        for batch in data_loader:
+            b_tags, b_loss = tag_batch(model, batch, criterion)
+            loss += b_loss
+            tags.extend(b_tags)
+        end = datetime.now()
+    log.info(f"Tagged {sum((1 for sent in tags for token in sent))} tokens")
+    log.info(f"Tagging took={end-start} seconds")
+    return tags, loss
+
+
 def train_model(
-    model, optimizer, criterion, data_loader: DataLoader, log_prepend: str,
+    model,
+    optimizer,
+    criterion,
+    data_loader: DataLoader,
+    log_prepend: str,
 ) -> float:
     """Run a single training epoch and evaluate the model."""
     model.train()
@@ -122,7 +189,7 @@ def train_model(
     for i, batch in enumerate(data_loader, start=1):
         y_pred, loss = run_batch(model, batch, criterion, optimizer)
         total_loss += loss
-        acc = categorical_accuracy(y_pred, batch[Modules.FullTag])
+        acc = categorical_accuracy(y_pred, batch[BATCH_KEYS.TARGET_FULL_TAGS])
         if i % 10 == 0:
             log.info(
                 f"{log_prepend}batch={i}/{len(data_loader)}, acc={acc}, loss={loss:.4f}"
@@ -131,14 +198,13 @@ def train_model(
 
 
 def run_epochs(
-    model,
+    model: ABLTagger,
     optimizer,
     criterion,
     scheduler,
     evaluator,
     train_data_loader: DataLoader,
     test_data_loader: DataLoader,
-    dictionaries: Dict[Modules, VocabMap],
     epochs: int,
     output_dir,
 ):
@@ -151,7 +217,7 @@ def run_epochs(
     # Get the tokens only
     for epoch in range(1, epochs + 1):
         # Time it
-        start = datetime.datetime.now()
+        start = datetime.now()
         log.info(
             f'Epoch={epoch}/{epochs}, lr={list(param_group["lr"] for param_group in optimizer.param_groups)}'
         )
@@ -162,13 +228,12 @@ def run_epochs(
             data_loader=train_data_loader,
             log_prepend=f"Epoch={epoch}/{epochs}, ",
         )
-        end = datetime.datetime.now()
+        end = datetime.now()
         log.info(f"Training took={end-start} seconds")
         # We just run the validation using a larger batch size
         tags, val_loss = tag_data_loader(
             model,
             data_loader=test_data_loader,
-            tag_map=dictionaries[Modules.FullTag],
             criterion=criterion,
         )
         accuracies = evaluator(tags).all_accuracy()

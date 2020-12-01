@@ -5,8 +5,7 @@ from collections import Counter
 from pathlib import Path
 import pickle
 
-from .core import DoubleTaggedDataset, Vocab, VocabMap, SequenceTaggingDataset
-from .data import Modules
+from .core import DoubleTaggedDataset, Vocab, VocabMap, SequenceTaggingDataset, Dicts
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ class Experiment:
         self,
         predictions: DoubleTaggedDataset,
         train_vocab: Vocab,
-        dicts: Dict[Modules, VocabMap],
+        dicts: Dict[Dicts, VocabMap],
     ):
         """Initialize an experiment given the predictions and vocabulary."""
         self.predictions = predictions
@@ -29,11 +28,11 @@ class Experiment:
 
         log.info("Creating vocabs")
         morphlex_vocab = get_by_key_backup(
-            "m_map", Modules.MorphLex, self.dicts
+            "m_map", Dicts.MorphLex, self.dicts
         ).intersection(self.test_vocab)
-        wemb_vocab = get_by_key_backup(
-            "w_map", Modules.WordEmbeddings, self.dicts
-        ).intersection(self.test_vocab)
+        wemb_vocab = get_by_key_backup("w_map", Dicts.Tokens, self.dicts).intersection(
+            self.test_vocab
+        )
         # fmt: off
         self.unknown_vocab = self.test_vocab.difference(self.known_vocab)  # pylint: disable=no-member
         self.known_wemb_vocab = self.known_vocab.intersection(wemb_vocab).difference(morphlex_vocab)
@@ -65,10 +64,10 @@ class Experiment:
 
     @staticmethod
     def from_predictions(
-        predicted_tags, test_ds: SequenceTaggingDataset, dicts: Dict[Modules, VocabMap]
+        predicted_tags, test_ds: SequenceTaggingDataset, dicts: Dict[Dicts, VocabMap]
     ):
         """Create an Experiment from predicted tags, test_dataset and dictionaries."""
-        train_vocab = Vocab(dicts[Modules.WordEmbeddings].w2i.keys())
+        train_vocab = Vocab(dicts[Dicts.Tokens].w2i.keys())
         predicted_ds = DoubleTaggedDataset(
             [
                 (tokens, tags, predicted_tags)

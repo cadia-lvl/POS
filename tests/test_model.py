@@ -1,85 +1,85 @@
 """To test parts of the model."""
 import pytest
-from torch import Tensor
+from torch import Tensor, zeros
 
 from pos import model
+from pos.core import Dicts
+from pos.data import BATCH_KEYS
 
 
-def test_classic_wemb():
+def test_classic_wemb(vocab_maps, data_loader):
     emb_dim = 3
-    wemb = model.ClassingWordEmbedding(2, emb_dim)  # 2 tokens, 3 dim for embedding
-    padded_emb = Tensor([0.0] * emb_dim)
-    t = Tensor([0, 1, 0]).long()  # pad, tok, pad
-    emb = wemb(t)
-    assert emb.requires_grad == True
-    assert all(emb[0].eq(padded_emb))
-    assert not all(emb[1].eq(padded_emb))
-    assert all(emb[2].eq(padded_emb))
+    wemb = model.ClassingWordEmbedding(
+        vocab_map=vocab_maps[Dicts.Tokens], embedding_dim=emb_dim
+    )
+    for batch in data_loader:
+        embs = wemb(batch[BATCH_KEYS.TOKENS])
+        assert embs.shape == (3, 3, emb_dim)
+        assert embs.requires_grad == True
 
 
-def test_pretrained_wemb():
+def test_pretrained_wemb(vocab_maps, data_loader):
     emb_dim = 3
-    # We place 1.0 where the padding is supposed to be, to check how it works
-    pretrained_weights = Tensor([[1.0] * emb_dim, [0.0] * emb_dim, [-1.0] * emb_dim])
-    wemb = model.PretrainedEmbedding(pretrained_weights, freeze=True, padding_idx=0)
-    padded_emb = Tensor([0.0] * emb_dim)
-    t = Tensor([0, 1, 2]).long()  # tok0, tok1, tok2
-    emb = wemb(t)
-    assert emb.requires_grad == False
-    assert sum(emb[0]).item() == 3.0
-    assert sum(emb[1]).item() == 0.0
-    assert sum(emb[2]).item() == -3.0
-
-    wemb = model.PretrainedEmbedding(pretrained_weights, freeze=False, padding_idx=0)
-    emb = wemb(t)
-    assert emb.requires_grad == True
+    pretrained_weights = zeros(size=(9, emb_dim))
+    wemb = model.PretrainedEmbedding(
+        vocab_map=vocab_maps[Dicts.Tokens],
+        embeddings=pretrained_weights,
+        freeze=True,
+    )
+    for batch in data_loader:
+        embs = wemb(batch[BATCH_KEYS.TOKENS])
+        assert embs.shape == (3, 3, emb_dim)
+        assert embs.requires_grad == False
 
 
 def test_chars_as_words():
     assert True  # We will not do this now.
 
 
-def test_transformer_embedding_electra_small(electra_model):
+def test_transformer_embedding_electra_small(electra_model, data_loader):
     if not electra_model:
         pytest.skip("No --electra_model given")
-    transformer_emb = model.load_transformer_embeddings(electra_model)
+    wemb = model.FlairTransformerEmbedding(electra_model)
     # The TransformerEmbedding expects the input to be a Sentence, not vectors.
-    from flair.data import Sentence
-
-    s = Sentence("Þetta er vinnuvélaverkamannaskúr")
-    transformer_emb.embed(s)
-    # (Electra-small) This will be 3 tokens since we only use the head-subword token.
-    assert len(s) == 3
-    assert all(token.embedding.shape == (256,) for token in s)
-
-
-def test_combination(data_loader):
-    num_tokens = 8
-    wemb_dim = 3
-    num_tags = 6
-    batch_size = 3
-    max_sent_len = 3
-    wemb = model.ClassingWordEmbedding(num_tokens, wemb_dim)
-    encoder = model.Encoder(word_embedding=wemb)
-    tagger = model.Tagger(encoder.output_dim, num_tags)
-    abl_tagger = model.ABLTagger(encoder=encoder, tagger=tagger)
     for batch in data_loader:
-        assert abl_tagger(batch).shape == (batch_size, max_sent_len, num_tags)
-    assert True
+        embs = wemb(batch[BATCH_KEYS.TOKENS])
+        assert embs.shape == (3, 3, 256)
+        assert embs.requires_grad == True
 
 
-def test_gru_decoder(data_loader):
+def test_encoder(encoder, data_loader):
+    for batch in data_loader:
+        embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
+        assert embs.shape == (3, 3, encoder.output_dim)
+        assert embs.requires_grad == True
+
+
+def test_tagger(encoder, data_loader, tagger_module):
+    for batch in data_loader:
+        embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
+        tag_embs = tagger_module(embs, batch)
+        assert tag_embs.shape == (3, 3, tagger_module.output_dim)
+        assert embs.requires_grad == True
+
+
+def test_gru_decoder(vocab_maps, data_loader, encoder: model.Encoder):
     hidden_dim = 3
-    output_dim = 4  # 4 chars to map to and from
-    context_dim = 2
+    output_dim = 4
+    context_dim = encoder.output_dim
     emb_dim = 5
-    batch_size = 2
     gru = model.GRUDecoder(
+        vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=hidden_dim,
         context_dim=context_dim,
         output_dim=output_dim,
         emb_dim=emb_dim,
-        dropout=0.0,
     )
-    t_in = Tensor([])
-    gru()
+    for batch in data_loader:
+        embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
+        tok_embs = gru(embs, batch)
+        assert tok_embs.shape == (
+            9,
+            8,
+            4,
+        )  # 9 tokens, 8 chars at most, each char uses 4 emb_dim
+        assert tok_embs.requires_grad == True

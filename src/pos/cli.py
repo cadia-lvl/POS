@@ -6,31 +6,26 @@ import random
 import logging
 import json
 import pathlib
-from typing import Dict, List
 from functools import partial
 
 import click
 import flair
 import torch
-from torch.utils.data import DataLoader
 import numpy as np
 
 from .data import (
     load_dicts,
     read_datasets,
-    get_input_mappings,
-    get_target_mappings,
-    batch_preprocess,
     emb_pairs_to_dict,
     bin_str_to_emb_pair,
     wemb_str_to_emb_pair,
+    collate_fn,
 )
 from .core import (
     Vocab,
-    VocabMap,
     SequenceTaggingDataset,
     TokenizedDataset,
-    Modules,
+    Dicts,
 )
 from .model import (
     Encoder,
@@ -40,7 +35,6 @@ from .model import (
     PretrainedEmbedding,
     ClassingWordEmbedding,
     CharacterAsWordEmbedding,
-    GRUDecoder,
 )
 from .train import (
     print_tagger,
@@ -62,7 +56,7 @@ log = logging.getLogger(__name__)
 @click.group()
 @click.option("--debug/--no-debug", default=False)
 @click.option("--log/--no-log", default=False)
-def cli(debug, log):
+def cli(debug, log):  # pylint: disable=redefined-outer-name
     """Entrypoint to the program. --debug flag from command line is caught here."""
     log_level = logging.INFO
     if debug or log:
@@ -125,6 +119,8 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--gpu/--no_gpu", default=False)
 @click.option("--save_model/--no_save_model", default=False)
 @click.option("--save_vocab/--no_save_vocab", default=False)
+@click.option("--tagger", is_flag=True, default=True, help="Train tagger")
+@click.option("--lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option(
     "--known_chars_file",
     default=None,
@@ -197,56 +193,55 @@ def train_and_tag(**kwargs):
     test_ds = read_datasets([kwargs["test_file"]], max_sent_length=128)
 
     # Set configuration values and create mappers
-    embeddings, dicts = load_dicts(train_ds=train_ds, **kwargs,)
-
-    input_mappings = get_input_mappings(dicts)
-    target_mappings = get_target_mappings(dicts)
-    collate_fn = partial(
-        batch_preprocess,
-        x_mappings=input_mappings,
-        y_mappings=target_mappings,
-        device=device,
+    embeddings, dicts = load_dicts(
+        train_ds=train_ds,
+        **kwargs,
     )
+
     train_dl = torch.utils.data.DataLoader(
-        train_ds, shuffle=True, batch_size=kwargs["batch_size"], collate_fn=collate_fn,
+        train_ds,
+        collate_fn=collate_fn,
+        shuffle=True,
+        batch_size=kwargs["batch_size"],
     )
     test_dl = torch.utils.data.DataLoader(
         test_ds,
+        collate_fn=collate_fn,
         shuffle=False,
         batch_size=kwargs["batch_size"] * 10,
-        collate_fn=collate_fn,
     )
-    encoder = Encoder(
-        transformer_embedding=FlairTransformerEmbedding(
-            kwargs["bert_encoder"], **kwargs
-        )
+    embs = [
+        FlairTransformerEmbedding(kwargs["bert_encoder"], **kwargs)
         if "bert_encoder" in kwargs
         else None,
-        morphlex_embedding=PretrainedEmbedding(
-            embeddings[Modules.MorphLex], freeze=True
+        PretrainedEmbedding(
+            vocab_map=dicts[Dicts.MorphLex],
+            embeddings=embeddings[Dicts.MorphLex],
+            freeze=True,
         )
         if "morphlex_embeddings_file" in kwargs
         else None,
-        pretrained_word_embedding=PretrainedEmbedding(
-            embeddings[Modules.Pretrained], freeze=True
+        PretrainedEmbedding(
+            vocab_map=dicts[Dicts.Pretrained],
+            embeddings=embeddings[Dicts.Pretrained],
+            freeze=True,
         )
         if "pretrained_word_embeddings_file" in kwargs
         else None,
-        word_embedding=ClassingWordEmbedding(
-            len(dicts[Modules.WordEmbeddings]), kwargs["word_embedding_dim"]
-        )
+        ClassingWordEmbedding(dicts[Dicts.Tokens], kwargs["word_embedding_dim"])
         if kwargs["word_embedding_dim"]
         else None,
-        chars_as_word_embedding=CharacterAsWordEmbedding(
-            len(dicts[Modules.CharsAsWord])
-        )
+        CharacterAsWordEmbedding(dicts[Dicts.Chars])
         if kwargs["char_lstm_layers"]
         else None,
-    )
+    ]
+    encoder = Encoder(embeddings=embs, **kwargs)
     tagger = Tagger(
-        input_dim=encoder.output_dim, output_dim=len(dicts[Modules.FullTag].w2i),
+        vocab_map=dicts[Dicts.FullTag],
+        input_dim=encoder.output_dim,
+        output_dim=len(dicts[Dicts.FullTag]),
     )
-    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger).to(device)
+    abl_tagger = ABLTagger(encoder=encoder, decoders=[tagger]).to(device)
 
     # Train a model
     print_tagger(abl_tagger)
@@ -270,12 +265,12 @@ def train_and_tag(**kwargs):
         evaluator=evaluator,
         train_data_loader=train_dl,
         test_data_loader=test_dl,
-        dictionaries=dicts,
         epochs=kwargs["epochs"],
         output_dir=output_dir,
     )
     test_tags_tagged, _ = tag_data_loader(
-        model=abl_tagger, data_loader=test_dl, tag_map=dicts[Modules.FullTag],
+        model=abl_tagger,
+        data_loader=test_dl,
     )
     log.info("Writing predictions, dictionaries and model")
     with (output_dir / "predictions.tsv").open("w") as f:

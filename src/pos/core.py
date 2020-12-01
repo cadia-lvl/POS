@@ -1,6 +1,6 @@
 """The main abstractions in the project."""
 from enum import Enum
-from typing import Tuple, Set, Iterable, List, Dict, Optional, Sequence, cast, Any
+from typing import Tuple, Iterable, List, Dict, Optional, Sequence, cast, Any
 import logging
 
 from torch.utils.data import Dataset
@@ -13,17 +13,14 @@ Tokens = Sequence[str]
 Tags = Sequence[str]
 
 
-class Modules(Enum):
+class Dicts(Enum):
     """An enum to name all model parts."""
 
-    BERT = "bert"
-    CharsAsWord = "c_map"
+    Chars = "c_map"
     Pretrained = "p_map"
     FullTag = "t_map"
-    WordEmbeddings = "w_map"
+    Tokens = "w_map"
     MorphLex = "m_map"
-    Lengths = "lens"
-    Lemmatizer = "lemma"
 
 
 class Vocab(set):
@@ -94,13 +91,16 @@ class TokenizedDataset(Dataset):
     """A dataset to hold tokenized text."""
 
     def __init__(
-        self, examples: Sequence[Any],
+        self,
+        examples: Sequence[Any],
     ):
         """Initialize a dataset given a sequence of examples."""
         self.examples = examples
 
     @staticmethod
-    def from_file(filepath: str,):
+    def from_file(
+        filepath: str,
+    ):
         """Initialize a dataset given a filepath."""
         with open(filepath) as f:
             examples = tuple(tokens_to_sentences(read_tsv(f)))
@@ -150,7 +150,9 @@ class SequenceTaggingDataset(TokenizedDataset):
     """A dataset to hold pairs of tokens and tags."""
 
     @staticmethod
-    def from_file(filepath: str,):
+    def from_file(
+        filepath: str,
+    ):
         """Initialize a dataset given a filepath."""
         with open(filepath) as f:
             examples = tuple(tokens_to_sentences(read_tsv(f)))
@@ -190,4 +192,3 @@ class DoubleTaggedDataset(SequenceTaggingDataset):
         with open(filepath) as f:
             examples = tuple(tokens_to_sentences(read_tsv(f)))
         return DoubleTaggedDataset(examples)
-
