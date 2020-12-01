@@ -551,7 +551,7 @@ class ABLTagger(nn.Module):
         """Initialize the tagger."""
         super().__init__()
         self.encoder = encoder
-        self.decoders = decoders
+        self.decoders = nn.ModuleList(decoders)
 
     def forward(self, batch: Dict[BATCH_KEYS, Any]) -> Tuple[Tensor, ...]:
         """Forward pass."""
