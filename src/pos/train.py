@@ -132,7 +132,7 @@ def run_batch(
     if criterion is not None:
         t_loss = criterion(
             model_out.view(-1, model_out.shape[-1]),
-            batch[BATCH_KEYS.TARGET_FULL_TAGS].view(-1),
+            batch[BATCH_KEYS.TARGET_FULL_TAGS].view(-1).to(model_out.device),
         )
         if optimizer is not None:
             t_loss.backward()
