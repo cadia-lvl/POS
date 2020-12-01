@@ -189,6 +189,7 @@ def train_and_tag(**kwargs):
     device = set_device(gpu_flag=kwargs["gpu"])
 
     # Read train and test data
+
     train_ds = read_datasets(
         kwargs["training_files"],
         max_sent_length=128,
@@ -201,7 +202,9 @@ def train_and_tag(**kwargs):
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
         train_ds=train_ds,
-        **kwargs,
+        pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
+        morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
+        known_chars_file=kwargs["known_chars_file"],
     )
 
     train_dl = torch.utils.data.DataLoader(
@@ -218,21 +221,21 @@ def train_and_tag(**kwargs):
     )
     embs = [
         FlairTransformerEmbedding(kwargs["bert_encoder"], **kwargs)
-        if "bert_encoder" in kwargs
+        if kwargs["bert_encoder"]
         else None,
         PretrainedEmbedding(
             vocab_map=dicts[Dicts.MorphLex],
             embeddings=embeddings[Dicts.MorphLex],
             freeze=True,
         )
-        if "morphlex_embeddings_file" in kwargs
+        if kwargs["morphlex_embeddings_file"]
         else None,
         PretrainedEmbedding(
             vocab_map=dicts[Dicts.Pretrained],
             embeddings=embeddings[Dicts.Pretrained],
             freeze=True,
         )
-        if "pretrained_word_embeddings_file" in kwargs
+        if kwargs["pretrained_word_embeddings_file"]
         else None,
         ClassingWordEmbedding(dicts[Dicts.Tokens], kwargs["word_embedding_dim"])
         if kwargs["word_embedding_dim"]

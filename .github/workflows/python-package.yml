@@ -24,7 +24,7 @@ jobs:
       run: poetry install
     - name: Run Pylint
       run: |
-        poetry run pylint pos
+        poetry run pylint -E pos
     - name: Lint with mypy
       run: |
         poetry run mypy --ignore-missing-imports --pretty src/
