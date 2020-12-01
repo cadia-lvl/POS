@@ -189,7 +189,9 @@ def train_model(
     for i, batch in enumerate(data_loader, start=1):
         y_pred, loss = run_batch(model, batch, criterion, optimizer)
         total_loss += loss
-        acc = categorical_accuracy(y_pred, batch[BATCH_KEYS.TARGET_FULL_TAGS])
+        acc = categorical_accuracy(
+            y_pred, batch[BATCH_KEYS.TARGET_FULL_TAGS].to(y_pred.device)
+        )
         if i % 10 == 0:
             log.info(
                 f"{log_prepend}batch={i}/{len(data_loader)}, acc={acc}, loss={loss:.4f}"
