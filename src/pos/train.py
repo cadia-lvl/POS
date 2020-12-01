@@ -287,7 +287,7 @@ def smooth_ce_loss(pred, gold, pad_idx, smoothing=0.1):
     n_class = pred.size(1)
 
     # Expand the idx to one-hot representation
-    one_hot = torch.zeros_like(pred).scatter(1, gold.view(-1, 1), 1)
+    one_hot = torch.zeros_like(pred, device=pred.device).scatter(1, gold.view(-1, 1), 1)
     # First smooth the one hot and then add the smoothed values
     smoothed = one_hot * (1 - smoothing) + (1 - one_hot) * smoothing / (n_class - 1)
     log_prb = torch.log_softmax(pred, dim=1)
