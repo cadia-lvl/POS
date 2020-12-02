@@ -6,9 +6,7 @@ RAW_DIR="$DATA_DIR"/raw
 NAME="$1"
 COUNT="$2"
 TRAIN=$RAW_DIR/mim/10TM.plain
-TRAIN=tests/test.tsv
 TEST=$RAW_DIR/mim/10PM.plain
-TEST=tests/test.tsv
 for i in $(seq $COUNT)
 do
     out_folder=./out/"$NAME"/$i
