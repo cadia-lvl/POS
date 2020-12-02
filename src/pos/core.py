@@ -195,6 +195,8 @@ class DoubleTaggedDataset(SequenceTaggingDataset):
 
 
 class Fields:
+    """Common fields used."""
+
     Tokens = "tokens"
     Tags = "tags"
     Lemmas = "lemmas"
@@ -257,7 +259,7 @@ class FieldedDataset(Dataset):
         return FieldedDataset(self.data + (data_field,), self.fields + [field])
 
     def _iter_for_tsv(self):
-        """Iterable for TSV which includes empty lines between sentences."""
+        """Iterate for TSV which includes empty lines between sentences."""
         for field_sentences in iter(self):
             for fields in zip(*field_sentences):
                 yield fields
