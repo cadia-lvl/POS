@@ -252,6 +252,10 @@ class FieldedDataset(Dataset):
         """Return the VocabularyMapping in the dataset."""
         return VocabMap(self.get_vocab(field), special_tokens=special_tokens)
 
+    def add_field(self, data_field, field):
+        """Return a new FieldDataset which has an added data_field."""
+        return FieldedDataset(self.data + (data_field,), self.fields + [field])
+
     @staticmethod
     def from_file(filepath, fields):
         """Construct from a file."""

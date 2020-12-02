@@ -259,7 +259,7 @@ def train_and_tag(**kwargs):
     parameter_groups = get_parameter_groups(abl_tagger.named_parameters(), **kwargs)
     optimizer = get_optimizer(parameter_groups, **kwargs)
     scheduler = get_scheduler(optimizer, **kwargs)
-    evaluator = partial(Experiment.from_predictions, test_ds=test_ds, dicts=dicts)
+    evaluator = partial(Experiment.from_predictions, dicts=dicts)
 
     # Write all configuration to disk
     output_dir = pathlib.Path(kwargs["output_dir"])

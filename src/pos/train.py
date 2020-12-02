@@ -21,6 +21,7 @@ from .data import (
     BATCH_KEYS,
 )
 from .model import ABLTagger
+from .core import Fields
 
 
 log = logging.getLogger(__name__)
@@ -238,7 +239,9 @@ def run_epochs(
             data_loader=test_data_loader,
             criterion=criterion,
         )
-        accuracies = evaluator(tags).all_accuracy()
+        accuracies = evaluator(
+            test_data_loader.dataset.add_field(tags, Fields.GoldTags)  # type: ignore
+        ).all_accuracy()
         log.info(f"Validation acc={accuracies[0][0]}, loss={val_loss}")
         write_scalars(writer, accuracies, train_loss, val_loss, epoch)
         if val_loss < best_validation_loss:

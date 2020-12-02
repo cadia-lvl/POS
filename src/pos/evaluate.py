@@ -5,7 +5,7 @@ from collections import Counter
 from pathlib import Path
 import pickle
 
-from .core import DoubleTaggedDataset, Vocab, VocabMap, SequenceTaggingDataset, Dicts
+from .core import Vocab, VocabMap, FieldedDataset, Dicts, Fields
 
 log = logging.getLogger(__name__)
 
@@ -15,14 +15,14 @@ class Experiment:
 
     def __init__(
         self,
-        predictions: DoubleTaggedDataset,
+        predictions: FieldedDataset,
         train_vocab: Vocab,
         dicts: Dict[Dicts, VocabMap],
     ):
         """Initialize an experiment given the predictions and vocabulary."""
         self.predictions = predictions
         # Get the tokens and retrive the vocab.
-        self.test_vocab = Vocab.from_symbols(self.predictions.unpack()[0])
+        self.test_vocab = Vocab.from_symbols(self.predictions.get_field(Fields.Tokens))
         self.known_vocab = train_vocab.intersection(self.test_vocab)
         self.dicts = dicts
 
@@ -46,14 +46,13 @@ class Experiment:
         # fmt: on
 
     @staticmethod
-    def from_file(path: Path, predictions=None):
+    def from_file(path: Path):
         """Create an Experiment from a given path of an experimental results. Optionally point to a specific prediction ds."""
         log.info(f"Reading experiment={path}")
         log.info("Reading predictions")
-        if predictions:
-            predictions = DoubleTaggedDataset.from_file(predictions)
-        else:
-            predictions = DoubleTaggedDataset.from_file(str(path / "predictions.tsv"))
+        predictions = FieldedDataset.from_file(
+            str(path), [Fields.Tokens, Fields.GoldTags, Fields.Tags]
+        )
         log.info("Reading dicts")
         with (path / "dictionaries.pickle").open("rb") as f:
             dicts = pickle.load(f)
@@ -63,20 +62,10 @@ class Experiment:
         return Experiment(predictions=predictions, train_vocab=train_vocab, dicts=dicts)
 
     @staticmethod
-    def from_predictions(
-        predicted_tags, test_ds: SequenceTaggingDataset, dicts: Dict[Dicts, VocabMap]
-    ):
+    def from_predictions(test_ds: FieldedDataset, dicts: Dict[Dicts, VocabMap]):
         """Create an Experiment from predicted tags, test_dataset and dictionaries."""
         train_vocab = Vocab(dicts[Dicts.Tokens].w2i.keys())
-        predicted_ds = DoubleTaggedDataset(
-            [
-                (tokens, tags, predicted_tags)
-                for tokens, tags, predicted_tags in zip(
-                    *test_ds.unpack(), predicted_tags
-                )
-            ]
-        )
-        return Experiment(predicted_ds, train_vocab=train_vocab, dicts=dicts)
+        return Experiment(test_ds, train_vocab=train_vocab, dicts=dicts)
 
     def accuracy(self, vocab: Set[str] = None) -> Tuple[float, int]:
         """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter."""
