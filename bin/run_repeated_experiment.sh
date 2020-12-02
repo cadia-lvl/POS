@@ -15,5 +15,5 @@ do
     --output="$out_folder/slurm-%j.out" \
     --gres=gpu \
     --mem=10G \
-    --wrap="bin/run_model.sh $out_folder $TRAIN $TEST"
+    --wrap="bin/run_model.sh $out_folder $TRAIN $TEST --gpu"
 done
