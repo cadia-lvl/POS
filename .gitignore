@@ -11,3 +11,5 @@ igc*
 electra*
 *.egg-info
 dist/
+debug/
+.python-version

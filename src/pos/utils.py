@@ -58,5 +58,6 @@ def sentences_to_tokens(
 def write_tsv(f, data: Iterable[Tuple[str, ...]]):
     """Write a tsv in many columns."""
     for line in data:
+        log.info(tuple(line))
         f.write("\t".join(line) + "\n")
     f.write("\n")

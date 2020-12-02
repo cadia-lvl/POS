@@ -5,7 +5,7 @@ import logging
 
 from torch.utils.data import Dataset
 
-from .utils import read_tsv, tokens_to_sentences
+from .utils import read_tsv, tokens_to_sentences, write_tsv
 
 log = logging.getLogger(__name__)
 
@@ -255,6 +255,18 @@ class FieldedDataset(Dataset):
     def add_field(self, data_field, field):
         """Return a new FieldDataset which has an added data_field."""
         return FieldedDataset(self.data + (data_field,), self.fields + [field])
+
+    def _iter_for_tsv(self):
+        """Iterable for TSV which includes empty lines between sentences."""
+        for field_sentences in iter(self):
+            for fields in zip(*field_sentences):
+                yield fields
+            yield tuple()
+
+    def to_tsv_file(self, path: str):
+        """Write the dataset to a file as TSV."""
+        with open(path, mode="w") as f:
+            write_tsv(f, self._iter_for_tsv())
 
     @staticmethod
     def from_file(filepath, fields):

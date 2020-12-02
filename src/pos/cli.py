@@ -26,6 +26,7 @@ from .core import (
     SequenceTaggingDataset,
     TokenizedDataset,
     Dicts,
+    Fields,
 )
 from .model import (
     Encoder,
@@ -282,8 +283,10 @@ def train_and_tag(**kwargs):
         data_loader=test_dl,
     )
     log.info("Writing predictions, dictionaries and model")
-    with (output_dir / "predictions.tsv").open("w") as f:
-        write_tsv(f, (*test_ds.unpack(), test_tags_tagged))
+
+    test_ds.add_field(test_tags_tagged, Fields.GoldTags).to_tsv_file(
+        str(output_dir / "predictions.tsv")
+    )
     with (output_dir / "known_toks.txt").open("w+") as f:
         for token in Vocab.from_symbols(x for x, y in train_ds):
             f.write(f"{token}\n")
