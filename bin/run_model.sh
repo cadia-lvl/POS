@@ -24,7 +24,7 @@ train-and-tag \
 --bert_encoder electra-small-pytorch \
 --label_smoothing 0.1 \
 --epochs 25 \
---batch_size 3 \
+--batch_size 16 \
 --save_vocab \
 --save_model \
 --optimizer adam \
