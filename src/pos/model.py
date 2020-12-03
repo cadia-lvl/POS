@@ -105,8 +105,7 @@ class ClassingWordEmbedding(Embedding):
     def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
         return pad_sequence(
-            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch],
-            batch_first=True,
+            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch], batch_first=True,
         )
 
     def embed(self, batch: Tensor) -> Tensor:
@@ -143,9 +142,7 @@ class PretrainedEmbedding(ClassingWordEmbedding):
             pass_to_bilstm=pass_to_bilstm,
         )  # we overwrite the embedding
         self.embedding = nn.Embedding.from_pretrained(
-            embeddings,
-            freeze=freeze,
-            padding_idx=padding_idx,
+            embeddings, freeze=freeze, padding_idx=padding_idx,
         )
 
 
@@ -255,7 +252,7 @@ class FlairTransformerEmbedding(Embedding):
             fine_tune=True,
             batch_size=kwargs.get("batch_size", 1),
         )
-        self._output_dim = 256
+        self._output_dim = kwargs.get("bert_encoder_dim", 256)
 
     def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
@@ -263,7 +260,7 @@ class FlairTransformerEmbedding(Embedding):
         self.emb.embed(f_sentences)
         return pad_sequence(
             [
-                stack(tuple(token.embedding for token in sentence))  # type: ignore
+                stack(tuple(token.embedding for token in sentence))
                 for sentence in f_sentences
             ],
             batch_first=True,
@@ -546,10 +543,7 @@ class Encoder(nn.Module):
 
             # Pack the paddings
             packed = pack_padded_sequence(
-                embs_to_bilstm,
-                lengths,
-                batch_first=True,
-                enforce_sorted=False,
+                embs_to_bilstm, lengths, batch_first=True, enforce_sorted=False,
             )
             # Make sure that the parameters are contiguous.
             self.bilstm.flatten_parameters()
@@ -593,8 +587,7 @@ def pack_sequence(padded_sequence):
     lengths = torch.sum(torch.pow(padded_sequence, 2), dim=2)
     # lengths = (b)
     lengths = torch.sum(
-        lengths != torch.Tensor([0.0]).to(padded_sequence.device),
-        dim=1,
+        lengths != torch.Tensor([0.0]).to(padded_sequence.device), dim=1,
     )
     return (
         pack_padded_sequence(

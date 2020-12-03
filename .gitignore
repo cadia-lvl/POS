@@ -13,3 +13,5 @@ electra*
 dist/
 debug/
 .python-version
+old_experiments/
+roberta/

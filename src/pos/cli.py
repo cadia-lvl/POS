@@ -166,6 +166,9 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     "--word_embedding_lr", default=0.2, help="The word/token embedding learning rate."
 )
 @click.option(
+    "--bert_encoder_dim", default=256, help="The dimension the BERT encoder outputs.",
+)
+@click.option(
     "--bert_encoder",
     default=None,
     help="A folder which contains a pretrained BERT-like model. Set to None to disable.",
@@ -271,8 +274,7 @@ def train_and_tag(**kwargs):
         )
     if kwargs["tagger"]:
         decoders[Modules.Tagger] = Tagger(
-            vocab_map=dicts[Dicts.FullTag],
-            input_dim=encoder.output_dim,
+            vocab_map=dicts[Dicts.FullTag], input_dim=encoder.output_dim,
         )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(device)
 
@@ -304,10 +306,7 @@ def train_and_tag(**kwargs):
         epochs=kwargs["epochs"],
         output_dir=output_dir,
     )
-    _, values = tag_data_loader(
-        model=abl_tagger,
-        data_loader=test_dl,
-    )
+    _, values = tag_data_loader(model=abl_tagger, data_loader=test_dl,)
     log.info("Writing predictions, dictionaries and model")
     for module_name, value in values.items():
         test_ds = test_ds.add_field(value, MODULE_TO_FIELD[module_name])
