@@ -2,7 +2,7 @@
 import pytest
 
 import pos
-from pos.core import SequenceTaggingDataset
+from pos.core import FieldedDataset
 
 
 def test_tagger(tagger, dictionaries):
@@ -12,15 +12,14 @@ def test_tagger(tagger, dictionaries):
     # Initialize the tagger
     tagger = pos.Tagger(
         model_file=tagger,
-        dictionaries_file=dictionaries,
         device="cpu",
     )
     # Tag a single sentence
-    tags = tagger.tag_sent(["Þetta", "er", "setning", "."])
+    tags = tagger.tag_sent(("Þetta", "er", "setning", "."))
     assert tags == ("fahen", "sfg3en", "nven", "pl")
 
     # Tag a correctly formatted file.
-    dataset = SequenceTaggingDataset.from_file("tests/test.tsv").unpack()[0]
+    dataset = FieldedDataset.from_file("tests/test.tsv", fields=("Tokens",))
     tags = tagger.tag_bulk(dataset=dataset)
     print(tags)
     assert tags == (("au",), ("fahen", "sfg3en", "nhen"), ("au", "aa"))

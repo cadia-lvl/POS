@@ -1,9 +1,10 @@
 """To test parts of the model."""
 import pytest
-from torch import Tensor, zeros
+from torch import zeros
 
 from pos.model import (
     ClassingWordEmbedding,
+    Modules,
     PretrainedEmbedding,
     FlairTransformerEmbedding,
     Tagger,
@@ -55,7 +56,7 @@ def test_transformer_embedding_electra_small(electra_model, data_loader):
         assert embs.requires_grad == True
 
 
-def test_encoder(encoder, data_loader):
+def test_encoder(encoder: Encoder, data_loader):
     for batch in data_loader:
         embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         assert embs.shape == (3, 3, encoder.output_dim)
@@ -97,10 +98,10 @@ def test_full_run(data_loader, vocab_maps, electra_model):
     if not electra_model:
         pytest.skip("No --electra_model given")
     emb = FlairTransformerEmbedding(electra_model)
-    encoder = Encoder(embeddings=[emb])
+    encoder = Encoder(embeddings={Modules.BERT: emb})
     tagger = Tagger(
         vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim, output_dim=5
     )
-    abl_tagger = ABLTagger(encoder=encoder, decoders=[tagger])
+    abl_tagger = ABLTagger(encoder=encoder, decoders={Modules.Tagger: tagger})
     for batch in data_loader:
         abl_tagger(batch)

@@ -1,11 +1,11 @@
 """A collection of types and function used to evaluate the performance of a tagger."""
-from typing import Tuple, List, Dict, Set, Any
+from typing import Callable, Tuple, List, Dict, Set, Any, Union
 import logging
 from collections import Counter
 from pathlib import Path
 import pickle
 
-from .core import Vocab, VocabMap, FieldedDataset, Dicts, Fields
+from .core import Sentences, Vocab, VocabMap, FieldedDataset, Dicts, Fields
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class Experiment:
         log.info(f"Reading experiment={path}")
         log.info("Reading predictions")
         predictions = FieldedDataset.from_file(
-            str(path), [Fields.Tokens, Fields.GoldTags, Fields.Tags]
+            str(path), (Fields.Tokens, Fields.GoldTags, Fields.Tags)
         )
         log.info("Reading dicts")
         with (path / "dictionaries.pickle").open("rb") as f:
@@ -62,25 +62,36 @@ class Experiment:
         return Experiment(predictions=predictions, train_vocab=train_vocab, dicts=dicts)
 
     @staticmethod
-    def from_predictions(test_ds: FieldedDataset, dicts: Dict[Dicts, VocabMap]):
+    def from_tag_predictions(
+        test_ds: FieldedDataset, dicts: Dict[Dicts, VocabMap], tags: Sentences
+    ):
         """Create an Experiment from predicted tags, test_dataset and dictionaries."""
         train_vocab = Vocab(dicts[Dicts.Tokens].w2i.keys())
+        test_ds = test_ds.add_field(tags, Fields.Tags)
         return Experiment(test_ds, train_vocab=train_vocab, dicts=dicts)
 
-    def accuracy(self, vocab: Set[str] = None) -> Tuple[float, int]:
+    def calculate_accuracy(self, vocab: Set[str] = None) -> Tuple[float, int]:
         """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter."""
         if vocab is None:
             total = sum(
                 (
                     1
-                    for tokens, gold_tags, predicted_tags in self.predictions
-                    for _, gold, predicted in zip(tokens, gold_tags, predicted_tags)
+                    for tokens, gold_tags, predicted_tags in zip(
+                        self.predictions.get_field(Fields.Tokens),
+                        self.predictions.get_field(Fields.GoldTags),
+                        self.predictions.get_field(Fields.Tags),
+                    )
+                    for _ in zip(tokens, gold_tags, predicted_tags)
                 )
             )
             correct = sum(
                 (
                     predicted == gold
-                    for tokens, gold_tags, predicted_tags in self.predictions
+                    for tokens, gold_tags, predicted_tags in zip(
+                        self.predictions.get_field(Fields.Tokens),
+                        self.predictions.get_field(Fields.GoldTags),
+                        self.predictions.get_field(Fields.Tags),
+                    )
                     for _, gold, predicted in zip(tokens, gold_tags, predicted_tags)
                 )
             )
@@ -89,8 +100,12 @@ class Experiment:
         total = sum(
             (
                 1
-                for tokens, gold_tags, predicted_tags in self.predictions
-                for token, gold, predicted in zip(tokens, gold_tags, predicted_tags)
+                for tokens, gold_tags, predicted_tags in zip(
+                    self.predictions.get_field(Fields.Tokens),
+                    self.predictions.get_field(Fields.GoldTags),
+                    self.predictions.get_field(Fields.Tags),
+                )
+                for token, _, _ in zip(tokens, gold_tags, predicted_tags)
                 if token in vocab
             )
         )
@@ -99,28 +114,60 @@ class Experiment:
         correct = sum(
             (
                 predicted == gold
-                for tokens, gold_tags, predicted_tags in self.predictions
+                for tokens, gold_tags, predicted_tags in zip(
+                    self.predictions.get_field(Fields.Tokens),
+                    self.predictions.get_field(Fields.GoldTags),
+                    self.predictions.get_field(Fields.Tags),
+                )
                 for token, gold, predicted in zip(tokens, gold_tags, predicted_tags)
                 if token in vocab
             )
         )
         return (correct / total, total)
 
-    def all_accuracy(self):
+    @staticmethod
+    def all_accuracy_closure(
+        test_ds: FieldedDataset, dicts: Dict[Dicts, VocabMap]
+    ) -> Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]:
+        """Create an Experiment from predicted tags, test_dataset and dictionaries."""
+
+        def calculate_accuracy(
+            tags: Sentences,
+        ) -> Tuple[Dict[str, float], Dict[str, int]]:
+            """Closure."""
+            return Experiment.from_tag_predictions(test_ds, dicts, tags).all_accuracy()
+
+        return calculate_accuracy
+
+    def all_accuracy(self) -> Tuple[Dict[str, float], Dict[str, int]]:
         """Return all accuracies."""
-        return (
-            self.accuracy(),
-            self.accuracy(self.unknown_vocab),
-            self.accuracy(self.known_vocab),
-            self.accuracy(self.known_wemb_vocab),
-            self.accuracy(self.known_wemb_morphlex_vocab),
-            self.accuracy(self.known_morphlex_vocab),
-            self.accuracy(self.seen_vocab),
-            self.accuracy(self.unknown_wemb_vocab),
-            self.accuracy(self.unknown_wemb_morphlex_vocab),
-            self.accuracy(self.unknown_morphlex_vocab),
-            self.accuracy(self.unseen_vocab),
-        )
+
+        def _all_accuracy(index):
+            return {
+                "Total": self.calculate_accuracy()[index],
+                "Unknown": self.calculate_accuracy(self.unknown_vocab)[index],
+                "Known": self.calculate_accuracy(self.known_vocab)[index],
+                "Known-Wemb": self.calculate_accuracy(self.known_wemb_vocab)[index],
+                "Known-Wemb+Morph": self.calculate_accuracy(
+                    self.known_wemb_morphlex_vocab
+                )[index],
+                "Known-Morph": self.calculate_accuracy(self.known_morphlex_vocab)[
+                    index
+                ],
+                "Seen": self.calculate_accuracy(self.seen_vocab)[index],
+                "Unknown-Wemb": self.calculate_accuracy(self.unknown_wemb_vocab)[index],
+                "Unknown-Wemb+Morph": self.calculate_accuracy(
+                    self.unknown_wemb_morphlex_vocab
+                )[index],
+                "Unknown-Morph": self.calculate_accuracy(self.unknown_morphlex_vocab)[
+                    index
+                ],
+                "Unseen": self.calculate_accuracy(self.unseen_vocab)[index],
+            }
+
+        accuracy = _all_accuracy(0)
+        total = _all_accuracy(1)
+        return accuracy, total  # type: ignore
 
     def error_profile(self):
         """Return an error profile with counts of errors (tagger > gold)."""
@@ -142,15 +189,26 @@ def get_by_key_backup(key1, key2, dictionary: Dict[Any, VocabMap]) -> Set:
         return set()
 
 
-def get_average(accuracies: List[Tuple[float, int]]) -> Tuple[float, int]:
+def get_average(accuracies: List[Dict[str, Union[float, int]]]) -> Dict[str, float]:
     """Get the average percentage and total of a list of accuracies."""
-    return (
-        sum(accuracy[0] for accuracy in accuracies) / len(accuracies),
-        int(round(sum(accuracy[1] for accuracy in accuracies) / len(accuracies))),
-    )
+    length = len(accuracies)
+    keys = list(accuracies[0].keys())
+    totals = {}
+    for key in keys:
+        totals[key] = 0
+        for accuracy in accuracies:
+            totals[key] += accuracy[key]
+    return {key: total / length for key, total in totals.items()}
 
 
-def all_accuracy_average(experiments: List[Experiment]) -> List[Tuple[float, int]]:
+def all_accuracy_average(
+    experiments: List[Experiment],
+) -> Tuple[Dict[str, float], Dict[str, float]]:
     """Return the average of all accuracies."""
-    all_accuracy = [experiment.all_accuracy() for experiment in experiments]
-    return [get_average(accuracies) for accuracies in zip(*all_accuracy)]
+    all_accuracies = []
+    all_totals = []
+    for experiment in experiments:
+        accuracies, totals = experiment.all_accuracy()
+        all_accuracies.append(accuracies)
+        all_totals.append(totals)
+    return (get_average(all_accuracies), get_average(all_totals))

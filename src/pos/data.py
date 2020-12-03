@@ -14,7 +14,7 @@ from torch import (
 )
 from torch.nn.utils.rnn import pad_sequence
 
-from .core import Vocab, VocabMap, Tokens, SequenceTaggingDataset, Dicts, FieldedDataset
+from .core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset
 
 
 log = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ class BATCH_KEYS(Enum):
     LENGTHS = "lens"
 
 
-def map_to_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
+def map_to_index(sentence: Sentence, w2i: Dict[str, int]) -> Tensor:
     """Map a sequence to indices."""
     return Tensor(
         [w2i[token] if token in w2i else w2i[UNK] for token in sentence]
@@ -51,7 +51,7 @@ def map_to_index(sentence: Tokens, w2i: Dict[str, int]) -> Tensor:
 
 
 def map_to_chars_and_index(
-    sentence: Tokens, w2i: Dict[str, int], add_eos=True, add_sos=True
+    sentence: Sentence, w2i: Dict[str, int], add_eos=True, add_sos=True
 ) -> Tensor:
     """Map a sequence to characters then to indices."""
     SOS_l = [w2i[SOS]] if add_sos else []
@@ -71,7 +71,7 @@ def map_to_chars_and_index(
 
 
 def map_to_chars_batch(
-    sentences: Sequence[Tokens], w2i: Dict[str, int], add_eos=True, add_sos=True
+    sentences: Sequence[Sentence], w2i: Dict[str, int], add_eos=True, add_sos=True
 ) -> Tensor:
     """Map a batch of sentences to characters of words. This is convoluted, I know."""
     sents_padded = []
@@ -92,7 +92,7 @@ def map_to_chars_batch(
     )
 
 
-def map_to_index_batch(sentences: Sequence[Tokens], w2i: Dict[str, int]):
+def map_to_index_batch(sentences: Sequence[Sentence], w2i: Dict[str, int]):
     """Map to index, batch."""
     return pad_sequence(
         [map_to_index(sentence=sentence, w2i=w2i) for sentence in sentences],
@@ -108,7 +108,7 @@ def copy_into_larger_tensor(tensor: Tensor, like_tensor: Tensor) -> Tensor:
     return base
 
 
-def collate_fn(batch: Sequence[Tuple[Tokens, ...]]) -> Dict[BATCH_KEYS, Any]:
+def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[BATCH_KEYS, Any]:
     """Map the inputs to batches."""
     batch_dict = {}
     if len(batch[0]) >= 1:  # we assume we are given the tokens
@@ -148,7 +148,7 @@ def read_datasets(
         )
     # DEBUG - read a subset of the data
     if max_lines:
-        ds = ds[:max_lines]
+        ds = FieldedDataset(ds[:max_lines], ds.fields)  # type: ignore
     return ds
 
 

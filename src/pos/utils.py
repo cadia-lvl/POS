@@ -7,7 +7,7 @@ log = logging.getLogger(__name__)
 
 def tokens_to_sentences(
     tsv_lines: Iterable[Optional[Tuple[str, ...]]]
-) -> Iterable[Tuple[Sequence[str], ...]]:
+) -> Iterable[Tuple[Tuple[str, ...], ...]]:
     """Accept a sequence of tuples (token, tag, ...) and returns a sequence of sentences (tokens, tags).
 
     An end of sentence is marked with a None element.
@@ -58,6 +58,5 @@ def sentences_to_tokens(
 def write_tsv(f, data: Iterable[Tuple[str, ...]]):
     """Write a tsv in many columns."""
     for line in data:
-        log.info(tuple(line))
         f.write("\t".join(line) + "\n")
     f.write("\n")

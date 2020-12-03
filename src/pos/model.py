@@ -1,17 +1,18 @@
 """The tagging Module."""
+from enum import Enum
 import logging
-from typing import Sequence, Tuple, Any, Dict, Optional, cast
+from typing import Mapping, Sequence, Tuple, Any, Dict, Optional, cast
 import abc
 import random
 
 from flair.embeddings import TransformerWordEmbeddings
-from flair.data import Sentence
+from flair.data import Sentence as f_sentence
 import torch
 from torch import Tensor, stack
-from torch.nn.utils.rnn import pad_sequence
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
 
-from .core import Tokens, VocabMap
+from .core import Sentence, Sentences, VocabMap
 from .data import (
     copy_into_larger_tensor,
     map_to_index,
@@ -24,11 +25,24 @@ from .data import (
 log = logging.getLogger(__name__)
 
 
+class Modules(Enum):
+    """To hold the module names."""
+
+    Pretrained = "pretrained"
+    Trained = "trained"
+    MorphLex = "morphlex"
+    CharactersToTokens = "chars"
+    BiLSTM = "bilstm"
+    BERT = "bert"
+    Tagger = "tagger"
+    Lemmatizer = "lemmatizer"
+
+
 class BatchPostprocess(metaclass=abc.ABCMeta):
     """An interface to handle postprocessing for modules."""
 
     @abc.abstractmethod
-    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sequence[Tokens]:
+    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sentences:
         """Postprocess the model output."""
         raise NotImplementedError
 
@@ -37,7 +51,7 @@ class BatchPreprocess(metaclass=abc.ABCMeta):
     """An interface to handle preprocessing for modules."""
 
     @abc.abstractmethod
-    def preprocess(self, batch: Sequence[Tokens]) -> Tensor:
+    def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
         raise NotImplementedError
 
@@ -45,7 +59,7 @@ class BatchPreprocess(metaclass=abc.ABCMeta):
 class Embedding(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
     """A module which accepts string inputs and embeds them to tensors."""
 
-    def forward(self, batch: Sequence[Tokens]) -> Tensor:
+    def forward(self, batch: Sequence[Sentence]) -> Tensor:
         """Run a generic forward pass for the Embeddings."""
         device = next(self.parameters()).device
         return self.embed(self.preprocess(batch).to(device))
@@ -88,7 +102,7 @@ class ClassingWordEmbedding(Embedding):
         # Skip the first index, should be zero
         nn.init.xavier_uniform_(self.embedding.weight[1:, :])
 
-    def preprocess(self, batch: Sequence[Tokens]) -> Tensor:
+    def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
         return pad_sequence(
             [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch],
@@ -170,7 +184,7 @@ class CharacterAsWordEmbedding(Embedding):
                 nn.init.xavier_uniform_(param)
         self._output_dim = 2 * char_lstm_dim
 
-    def preprocess(self, batch: Sequence[Tokens]) -> Tensor:
+    def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
         return map_to_chars_batch(batch, self.vocab_map.w2i)
 
@@ -243,13 +257,13 @@ class FlairTransformerEmbedding(Embedding):
         )
         self._output_dim = 256
 
-    def preprocess(self, batch: Sequence[Tokens]) -> Tensor:
+    def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
-        f_sentences = [Sentence(" ".join(sentence)) for sentence in batch]
+        f_sentences = [f_sentence(" ".join(sentence)) for sentence in batch]
         self.emb.embed(f_sentences)
         return pad_sequence(
             [
-                stack([token.embedding for token in sentence])
+                stack(tuple(token.embedding for token in sentence))  # type: ignore
                 for sentence in f_sentences
             ],
             batch_first=True,
@@ -342,7 +356,7 @@ class GRUDecoder(Decoder):
         """Return the output dimension."""
         return self._output_dim
 
-    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sequence[Tokens]:
+    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sequence[Sentence]:
         """Postprocess the model output."""
 
     def add_targets(self, batch: Dict[BATCH_KEYS, Any]):
@@ -412,10 +426,11 @@ class GRUDecoder(Decoder):
 class Tagger(Decoder):
     """A tagger; accept some tensor input and return logits over classes."""
 
-    def __init__(self, vocab_map: VocabMap, input_dim, output_dim):
+    def __init__(self, vocab_map: VocabMap, input_dim):
         """Initialize."""
         super().__init__()
         self.vocab_map = vocab_map
+        output_dim = len(vocab_map)
         self.tagger = nn.Linear(input_dim, output_dim)
         nn.init.xavier_uniform_(self.tagger.weight)
         self._output_dim = output_dim
@@ -436,7 +451,7 @@ class Tagger(Decoder):
                 batch[BATCH_KEYS.FULL_TAGS], self.vocab_map.w2i
             )
 
-    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sequence[Tokens]:
+    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sentences:
         """Postprocess the model output."""
         idxs = batch.argmax(dim=2).tolist()
 
@@ -451,7 +466,7 @@ class Tagger(Decoder):
             )
             for sent_idx, sent in enumerate(idxs)
         ]
-        return tags
+        return tuple(tags)
 
 
 class Encoder(nn.Module):
@@ -459,7 +474,7 @@ class Encoder(nn.Module):
 
     def __init__(
         self,
-        embeddings: Sequence[Embedding],
+        embeddings: Dict[Modules, Embedding],
         main_lstm_dim=64,  # The main LSTM dim will output with this dim
         main_lstm_layers=0,  # The main LSTM layers
         lstm_dropouts=0.0,
@@ -470,13 +485,17 @@ class Encoder(nn.Module):
         """Initialize the module given the parameters."""
         super().__init__()
         self.noise = noise
-        self.embeddings = nn.ModuleList(embeddings)
+        self.embeddings = nn.ModuleDict(
+            {key.value: emb for key, emb in embeddings.items()}
+        )
 
         self.use_bilstm = not main_lstm_layers == 0
         encoder_out_dim = sum(
-            emb.output_dim for emb in self.embeddings if not emb.to_bilstm
+            emb.output_dim for emb in self.embeddings.values() if not emb.to_bilstm
         )
-        bilstm_in_dim = sum(emb.output_dim for emb in self.embeddings if emb.to_bilstm)
+        bilstm_in_dim = sum(
+            emb.output_dim for emb in self.embeddings.values() if emb.to_bilstm
+        )
         if bilstm_in_dim and not self.use_bilstm:
             raise ValueError("Not using BiLSTM but Embedding is set to use BiLSTM")
 
@@ -501,14 +520,19 @@ class Encoder(nn.Module):
         self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
         self.output_dim = encoder_out_dim
 
-    def forward(self, batch: Sequence[Tokens], lengths: Sequence[int]):
+    def forward(self, batch: Sequence[Sentence], lengths: Sequence[int]):
         """Run a forward pass through the module. Input should be tensors."""
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # Embeddings
-        list_to_bilstm = [emb(batch) for emb in self.embeddings if emb.to_bilstm]
+        list_to_bilstm = [
+            emb(batch) for emb in self.embeddings.values() if emb.to_bilstm
+        ]
+        embs_to_bilstm = None
         if list_to_bilstm:
             embs_to_bilstm = torch.cat(list_to_bilstm, dim=2)
-        list_embs = [emb(batch) for emb in self.embeddings if not emb.to_bilstm]
+        list_embs = [
+            emb(batch) for emb in self.embeddings.values() if not emb.to_bilstm
+        ]
         embs = None
         if list_embs:
             embs = torch.cat(list_embs, dim=2)
@@ -518,10 +542,10 @@ class Encoder(nn.Module):
         #     main_in = main_in + torch.empty_like(main_in).normal_(0, self.noise)
         # (b, seq, f)
 
-        if self.use_bilstm:
+        if self.use_bilstm and embs_to_bilstm is not None:
 
             # Pack the paddings
-            packed = torch.nn.utils.rnn.pack_padded_sequence(
+            packed = pack_padded_sequence(
                 embs_to_bilstm,
                 lengths,
                 batch_first=True,
@@ -532,9 +556,7 @@ class Encoder(nn.Module):
             # Ignore the hidden outputs
             packed_out, _ = self.bilstm(packed)
             # Unpack and ignore the lengths
-            bilstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(
-                packed_out, batch_first=True
-            )
+            bilstm_out, _ = pad_packed_sequence(packed_out, batch_first=True)
             bilstm_out = self.main_bilstm_out_dropout(bilstm_out)
             if embs:
                 embs = torch.cat([embs, bilstm_out], dim=2)
@@ -547,16 +569,20 @@ class Encoder(nn.Module):
 class ABLTagger(nn.Module):
     """The ABLTagger, consists of an Encoder(multipart) and a Tagger."""
 
-    def __init__(self, encoder: nn.Module, decoders: Sequence[Decoder]):
+    def __init__(self, encoder: nn.Module, decoders: Dict[Modules, Decoder]):
         """Initialize the tagger."""
         super().__init__()
         self.encoder = encoder
-        self.decoders = nn.ModuleList(decoders)
+        self.decoders = nn.ModuleDict({key.value: emb for key, emb in decoders.items()})
+        self.decoders = cast(Mapping[str, Decoder], self.decoders)
 
-    def forward(self, batch: Dict[BATCH_KEYS, Any]) -> Tuple[Tensor, ...]:
+    def forward(self, batch: Dict[BATCH_KEYS, Any]) -> Dict[Modules, Tensor]:
         """Forward pass."""
         encoded = self.encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
-        return tuple([decoder(encoded, batch) for decoder in self.decoders])
+        return {
+            Modules(key): decoder(encoded, batch)
+            for key, decoder in self.decoders.items()
+        }
 
 
 def pack_sequence(padded_sequence):
@@ -571,7 +597,7 @@ def pack_sequence(padded_sequence):
         dim=1,
     )
     return (
-        torch.nn.utils.rnn.pack_padded_sequence(
+        pack_padded_sequence(
             padded_sequence, lengths, batch_first=True, enforce_sorted=False
         ),
         lengths,
@@ -580,4 +606,4 @@ def pack_sequence(padded_sequence):
 
 def unpack_sequence(packed_sequence):
     """Inverse of pack_sequence."""
-    return torch.nn.utils.rnn.pad_packed_sequence(packed_sequence, batch_first=True)[0]
+    return pad_packed_sequence(packed_sequence, batch_first=True)[0]

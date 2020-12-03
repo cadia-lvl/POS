@@ -1,6 +1,15 @@
 """The main abstractions in the project."""
 from enum import Enum
-from typing import Tuple, Iterable, List, Dict, Optional, Sequence, cast, Any
+from typing import (
+    Iterator,
+    Tuple,
+    Iterable,
+    List,
+    Dict,
+    Optional,
+    Sequence,
+    Union,
+)
 import logging
 
 from torch.utils.data import Dataset
@@ -9,8 +18,8 @@ from .utils import read_tsv, tokens_to_sentences, write_tsv
 
 log = logging.getLogger(__name__)
 
-Tokens = Sequence[str]
-Tags = Sequence[str]
+Sentence = Tuple[str, ...]
+Sentences = Tuple[Sentence, ...]
 
 
 class Dicts(Enum):
@@ -27,7 +36,7 @@ class Vocab(set):
     """A Vocab is an unordered set of symbols."""
 
     @staticmethod
-    def from_symbols(sentences: Iterable[Tokens]):
+    def from_symbols(sentences: Iterable[Union[Sentence, str]]):
         """Create a Vocab from a sequence of Symbols."""
         return Vocab((tok for sent in sentences for tok in sent))
 
@@ -87,113 +96,6 @@ class VocabMap:
         return len(self.w2i)
 
 
-class TokenizedDataset(Dataset):
-    """A dataset to hold tokenized text."""
-
-    def __init__(
-        self,
-        examples: Sequence[Any],
-    ):
-        """Initialize a dataset given a sequence of examples."""
-        self.examples = examples
-
-    @staticmethod
-    def from_file(
-        filepath: str,
-    ):
-        """Initialize a dataset given a filepath."""
-        with open(filepath) as f:
-            examples = tuple(tokens_to_sentences(read_tsv(f)))
-        if len(examples) != 0:
-            # We expect to get List[Tokens]
-            assert len(examples[0]) == 1
-        return TokenizedDataset([example[0] for example in examples])
-
-    def __getitem__(self, idx):
-        """Support itemgetter."""
-        return self.examples[idx]
-
-    def __len__(self):
-        """Support len."""
-        return len(self.examples)
-
-    def __iter__(self):
-        """Support iteration."""
-        return iter(self.examples)
-
-    def __add__(self, other):
-        """Support addition."""
-        return self.__class__(self.examples + other.examples)
-
-    def unpack(self) -> Tuple[Sequence[Tokens], ...]:
-        """Unpack to Tokens and tags."""
-        return (tuple(tokens for tokens in self),)
-
-    def get_vocab(self) -> Vocab:
-        """Return the Vocabulary in the dataset."""
-        return Vocab.from_symbols(self.unpack()[0])
-
-    def get_vocab_map(self, special_tokens=None) -> VocabMap:
-        """Return the VocabularyMapping in the dataset."""
-        return VocabMap(self.get_vocab(), special_tokens=special_tokens)
-
-    def get_char_vocab(self) -> Vocab:
-        """Return the character Vocabulary in the dataset."""
-        return Vocab.from_symbols((tok for sent in self.unpack()[0] for tok in sent))
-
-    def get_char_vocab_map(self, special_tokens=None) -> VocabMap:
-        """Return the character VocabularyMapping in the dataset."""
-        return VocabMap(self.get_char_vocab(), special_tokens=special_tokens)
-
-
-class SequenceTaggingDataset(TokenizedDataset):
-    """A dataset to hold pairs of tokens and tags."""
-
-    @staticmethod
-    def from_file(
-        filepath: str,
-    ):
-        """Initialize a dataset given a filepath."""
-        with open(filepath) as f:
-            examples = tuple(tokens_to_sentences(read_tsv(f)))
-        if len(examples) != 0:
-            # We expect to get List[Tokens, Tags]
-            assert len(examples[0]) == 2
-        examples = cast(Tuple[Tuple[Sequence[str], Sequence[str]]], examples)
-        return SequenceTaggingDataset(examples)
-
-    def unpack(self) -> Tuple[Sequence[Tokens], ...]:
-        """Unpack to Tokens and tags."""
-        return (tuple(tokens for tokens, _ in self), tuple(tags for _, tags in self))
-
-    def get_tag_vocab(self) -> Vocab:
-        """Return the tag Vocabulary in the dataset."""
-        return Vocab.from_symbols(self.unpack()[1])
-
-    def get_tag_vocab_map(self, special_tokens) -> VocabMap:
-        """Return the tag VocabularyMapping in the dataset."""
-        return VocabMap(self.get_tag_vocab(), special_tokens=special_tokens)
-
-
-class DoubleTaggedDataset(SequenceTaggingDataset):
-    """A dataset containing two tags per token."""
-
-    def unpack(self) -> Tuple[Sequence[Tokens], ...]:
-        """Unpack to Tokens and other token tags."""
-        return (
-            tuple(tokens for tokens, _, _ in self),
-            tuple(tags for _, tags, _ in self),
-            tuple(preds for _, _, preds in self),
-        )
-
-    @staticmethod
-    def from_file(filepath):
-        """Construct from a file."""
-        with open(filepath) as f:
-            examples = tuple(tokens_to_sentences(read_tsv(f)))
-        return DoubleTaggedDataset(examples)
-
-
 class Fields:
     """Common fields used."""
 
@@ -201,25 +103,26 @@ class Fields:
     Tags = "tags"
     Lemmas = "lemmas"
     GoldTags = "gold_tags"
+    GoldLemmas = "gold_lemmas"
 
 
 class FieldedDataset(Dataset):
     """A generic dataset built from group tsv lines."""
 
-    def __init__(self, data: Tuple[Sequence[Tokens], ...], fields: Sequence[str]):
+    def __init__(self, data: Tuple[Sentences, ...], fields: Tuple[str, ...]):
         """Initialize the dataset."""
-        self.data: Tuple[Sequence[Tokens], ...] = data
-        self.fields: Sequence[str] = fields
+        self.data: Tuple[Sentences, ...] = data
+        self.fields: Tuple[str, ...] = fields
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> Tuple[Sentence, ...]:
         """Support itemgetter."""
         return tuple(data_field[idx] for data_field in self.data)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Support len."""
         return len(self.data[0])
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Tuple[Sentence, ...]]:
         """Support iteration."""
         return zip(*self.data)
 
@@ -228,7 +131,7 @@ class FieldedDataset(Dataset):
         assert self.fields == other.fields
         return self.__class__(self.data + other.data, self.fields)
 
-    def get_field(self, field=Fields.Tokens):
+    def get_field(self, field=Fields.Tokens) -> Sentences:
         """Get the field."""
         return self.data[self.fields.index(field)]
 
@@ -250,20 +153,24 @@ class FieldedDataset(Dataset):
         """Return the character VocabularyMapping in the dataset."""
         return VocabMap(self.get_char_vocab(field), special_tokens=special_tokens)
 
-    def get_tag_vocab_map(self, special_tokens=None, field=Fields.Tags) -> VocabMap:
+    def get_tag_vocab_map(self, special_tokens=None, field=Fields.GoldTags) -> VocabMap:
         """Return the VocabularyMapping in the dataset."""
         return VocabMap(self.get_vocab(field), special_tokens=special_tokens)
 
-    def add_field(self, data_field, field):
+    def add_field(self, data_field: Sequence[Sentence], field: str):
         """Return a new FieldDataset which has an added data_field."""
-        return FieldedDataset(self.data + (data_field,), self.fields + [field])
+        return FieldedDataset(self.data + (data_field,), self.fields + (field,))
 
     def _iter_for_tsv(self):
         """Iterate for TSV which includes empty lines between sentences."""
-        for field_sentences in iter(self):
+        yield_empty = False
+        for field_sentences in self:
+            if yield_empty:
+                # Yield an empty tuple for empty lines between sentences.
+                yield tuple()
             for fields in zip(*field_sentences):
                 yield fields
-            yield tuple()
+                yield_empty = True
 
     def to_tsv_file(self, path: str):
         """Write the dataset to a file as TSV."""
@@ -271,8 +178,10 @@ class FieldedDataset(Dataset):
             write_tsv(f, self._iter_for_tsv())
 
     @staticmethod
-    def from_file(filepath, fields):
-        """Construct from a file."""
+    def from_file(filepath: str, fields: Tuple[str, ...] = None):
+        """Construct from a file. By default we assume there are only Tokens."""
+        if not fields:
+            fields = (Fields.Tokens,)
         with open(filepath) as f:
             examples = tuple(zip(*tuple(tokens_to_sentences(read_tsv(f)))))
         return FieldedDataset(examples, fields=fields)

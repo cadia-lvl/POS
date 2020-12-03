@@ -2,11 +2,11 @@
 from pytest import fixture
 from typing import Dict
 
-import torch
+from torch.utils.data.dataloader import DataLoader
 
-from pos.core import SequenceTaggingDataset, VocabMap, Dicts, FieldedDataset
+from pos.core import Fields, VocabMap, Dicts, FieldedDataset
 from pos.data import collate_fn, load_dicts
-from pos.model import Encoder, ClassingWordEmbedding, Tagger
+from pos.model import ABLTagger, Encoder, ClassingWordEmbedding, Tagger, Modules
 
 
 def pytest_addoption(parser):
@@ -55,19 +55,21 @@ def test_tsv_lemma_file():
 @fixture
 def ds(test_tsv_file):
     """Return a sequence tagged dataset."""
-    return FieldedDataset.from_file(test_tsv_file, fields=["tokens", "tags"])
+    return FieldedDataset.from_file(
+        test_tsv_file, fields=(Fields.Tokens, Fields.GoldTags)
+    )
 
 
 @fixture
 def ds_lemma(test_tsv_lemma_file):
     """Return a sequence tagged dataset."""
     return FieldedDataset.from_file(
-        test_tsv_lemma_file, fields=["tokens", "tags", "lemmas"]
+        test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas)
     )
 
 
 @fixture
-def vocab_maps(ds_lemma) -> Dict[str, VocabMap]:
+def vocab_maps(ds_lemma) -> Dict[Dicts, VocabMap]:
     """Return the dictionaries for the dataset."""
     return load_dicts(ds_lemma)[1]
 
@@ -75,19 +77,38 @@ def vocab_maps(ds_lemma) -> Dict[str, VocabMap]:
 @fixture()
 def data_loader(ds_lemma):
     """Return a data loader over the unit testing data."""
-    return torch.utils.data.DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)
+    return DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)  # type: ignore
 
 
 @fixture
 def encoder(vocab_maps) -> Encoder:
     """Return an Encoder."""
     wembs = ClassingWordEmbedding(vocab_map=vocab_maps[Dicts.Tokens], embedding_dim=3)
-    return Encoder([wembs], main_lstm_layers=1)
+    return Encoder({Modules.Trained: wembs}, main_lstm_layers=1)
 
 
 @fixture
 def tagger_module(vocab_maps, encoder) -> Tagger:
     """Return a Tagger."""
-    return Tagger(
-        vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim, output_dim=5
-    )
+    return Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)
+
+
+@fixture
+def abl_tagger(encoder, tagger_module) -> ABLTagger:
+    return ABLTagger(encoder=encoder, decoders={Modules.Tagger: tagger_module})
+
+
+@fixture
+def kwargs():
+    return {
+        "tagger": True,
+        "lemmatizer": False,
+        "tagger_weight": 1,
+        "scheduler": "multiply",
+        "learning_rate": 5e-5,
+        "word_embedding_lr": 0.2,
+        "optimizer": "adam",
+        "label_smoothing": 0.1,
+        "output_dir": "tests/",
+        "epochs": 20,
+    }

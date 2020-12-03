@@ -1,9 +1,6 @@
-from os.path import isfile
-from functools import partial
-
-import pytest
 import torch
 from torch import Tensor
+from torch.utils.data.dataloader import DataLoader
 
 from pos.utils import read_tsv, tokens_to_sentences
 from pos.data import (
@@ -27,9 +24,8 @@ from pos.data import (
     BATCH_KEYS,
 )
 from pos.core import (
-    SequenceTaggingDataset,
-    DoubleTaggedDataset,
-    Vocab,
+    FieldedDataset,
+    Fields,
     VocabMap,
     Dicts,
 )
@@ -71,16 +67,33 @@ def test_read_tsv(test_tsv_file):
         ]
 
 
-def test_sequence_tagging_dataset_from_file(test_tsv_file):
-    test_ds = SequenceTaggingDataset.from_file(test_tsv_file)
+def test_dataset_from_file(test_tsv_file):
+    test_ds = FieldedDataset.from_file(
+        test_tsv_file, fields=(Fields.Tokens, Fields.GoldTags)
+    )
     tmp = test_ds[0]
     print(tmp)
     assert tmp == (("Hæ",), ("a",))
     assert len(test_ds) == 3
 
 
+def test_dataset_from_file_lemmas(test_tsv_lemma_file):
+    test_ds = FieldedDataset.from_file(
+        test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas)
+    )
+    tmp = test_ds[0]
+    print(tmp)
+    assert tmp == (("Hæ",), ("a",), ("hæ",))
+    assert len(test_ds) == 3
+    assert test_ds.get_field(Fields.GoldLemmas) == (
+        ("hæ",),
+        ("þetta", "vera", "test"),
+        ("já", "kannski"),
+    )
+
+
 def test_read_datasets(test_tsv_file):
-    fields = ["tokens", "tags"]
+    fields = (Fields.Tokens, Fields.GoldTags)
     test_ds = read_datasets([test_tsv_file], fields=fields)
     assert len(test_ds) == 3
     test_ds = read_datasets([test_tsv_file], max_lines=2, fields=fields)
@@ -117,18 +130,16 @@ def test_create_mappers_c_w_emb_only(ds):
     assert len(c_map.w2i) == 18
 
 
-def test_unpack_dataset(test_tsv_file):
-    test_ds = SequenceTaggingDataset.from_file(test_tsv_file)
-    tokens, _ = test_ds.unpack()
-    assert tokens == (("Hæ",), ("Þetta", "er", "test"), ("Já", "Kannski"))
-
-
 def test_read_predicted(tagged_test_tsv_file):
-    pred_ds = DoubleTaggedDataset.from_file(tagged_test_tsv_file)
-    tokens, tags, pred_tags = pred_ds.unpack()
-    assert tokens == (("Hæ",), ("Þetta", "er", "test"), ("Já", "Kannski"))
-    assert tags == (("a",), ("f", "s", "n"), ("a", "a"))
-    assert pred_tags == (("a",), ("n", "s", "a"), ("a", "a"))
+    fields = (Fields.Tokens, Fields.GoldTags, Fields.Tags)
+    pred_ds = FieldedDataset.from_file(tagged_test_tsv_file, fields=fields)
+    assert pred_ds.get_field(Fields.Tokens) == (
+        ("Hæ",),
+        ("Þetta", "er", "test"),
+        ("Já", "Kannski"),
+    )
+    assert pred_ds.get_field(Fields.GoldTags) == (("a",), ("f", "s", "n"), ("a", "a"))
+    assert pred_ds.get_field(Fields.Tags) == (("a",), ("n", "s", "a"), ("a", "a"))
 
 
 def test_load_modules(ds):
@@ -141,7 +152,7 @@ def test_load_modules(ds):
 
 def test_map_to_idx():
     mapping = {"a": 1, "b": 2, "<unk>": 0}
-    idxs = map_to_index(["a", "a", "b", "a", "c"], mapping)
+    idxs = map_to_index(("a", "a", "b", "a", "c"), mapping)
     assert idxs.tolist() == [1, 1, 2, 1, 0]
 
 
@@ -175,13 +186,12 @@ def test_map_to_chars_batch(ds):
     print(batch)
 
 
-def test_collate_fn(test_tsv_file):
-    ds = SequenceTaggingDataset.from_file(test_tsv_file)
-    _, dicts = load_dicts(ds)
-    dl = torch.utils.data.DataLoader(ds, batch_size=3, collate_fn=collate_fn)
+def test_collate_fn(ds_lemma):
+    _, dicts = load_dicts(ds_lemma)
+    dl = DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)
     assert len(dl) == 1
     for batch in dl:
-        assert len(batch) == 3
+        assert len(batch) == 4  # The keys
         assert list(batch[BATCH_KEYS.LENGTHS]) == [
             1,
             3,

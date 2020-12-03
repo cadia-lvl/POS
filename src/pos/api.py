@@ -3,9 +3,12 @@ import pickle
 from typing import Union, cast, Sequence
 import logging
 
-import torch
+from torch.utils.data.dataloader import DataLoader
+from torch import device, load
 
-from .core import FieldedDataset
+from pos.model import Modules
+
+from .core import FieldedDataset, Fields, Sentence, Sentences
 from .train import tag_data_loader
 from .data import collate_fn
 
@@ -17,21 +20,17 @@ class Tagger:
 
     Args:
         model_path: Path to the "tagger.pt".
-        dictionaries: Path to the "dictionaries.pickle".
         device: The (computational) device to use. Either "cpu" for CPU or "cuda:x" for GPU. X is an integer from 0 and up and refers to which GPU to use.
     """
 
-    def __init__(self, model_file=None, dictionaries_file=None, device="cpu"):
+    def __init__(self, model_file=None, device="cpu"):
         """Initialize a Tagger. Reads the given files."""
         log.info("Setting device.")
-        self.device = torch.device(device)
-        log.info("Reading dictionaries")
-        with open(dictionaries_file, "rb") as f:
-            self.dictionaries = pickle.load(f)
-        log.info("Reading model file")
-        self.model = torch.load(model_file, map_location=self.device)
+        self.device = device(device)
+        log.info("Reading model file...")
+        self.model = load(model_file, map_location=self.device)
 
-    def tag_sent(self, sent: Sequence[str]) -> Sequence[str]:
+    def tag_sent(self, sent: Sentence) -> Sentence:
         """Tag a (single) sentence. To tag multiple sentences at once (faster) use "tag_bulk".
 
         Args:
@@ -39,11 +38,11 @@ class Tagger:
 
         Returns: The POS tags a Sequence[str].
         """
-        return self.tag_bulk([sent], batch_size=1)[0]
+        return self.tag_bulk((sent,), batch_size=1)[0]
 
     def tag_bulk(
         self,
-        dataset: Union[Sequence[Sequence[str]], FieldedDataset],
+        dataset: Union[Sentences, FieldedDataset],
         batch_size=16,
     ):
         """Tag multiple sentence. This is a faster alternative to "tag_sent", used for batch processing.
@@ -58,26 +57,24 @@ class Tagger:
         # Initialize DataLoader
         # with collate_fn - that function needs the dict
         # The dict needs to be loaded based on some files
-        dl = torch.utils.data.DataLoader(
+        dl = DataLoader(
             dataset,
             collate_fn=collate_fn,
             shuffle=False,
             batch_size=batch_size,
         )
 
-        predicted_tags = tag_data_loader(self.model, dl)
+        _, values = tag_data_loader(self.model, dl)
         log.info("Done predicting!")
-        return predicted_tags
+        # TODO: Add lemmas
+        return values[Modules.Tagger]
 
 
-def cast_types(
-    sentences: Union[Sequence[Sequence[str]], FieldedDataset]
-) -> FieldedDataset:
+def cast_types(sentences: Union[Sentences, FieldedDataset]) -> FieldedDataset:
     """Convert list/tuple to TokenizedDataset."""
     if type(sentences) == FieldedDataset:
         return cast(FieldedDataset, sentences)
-    elif type(sentences) == list or type(sentences) == tuple:
-        sentences = tuple(sentence for sentence in sentences)
-        return FieldedDataset(sentences, fields=["tokens"])
     else:
-        raise TypeError(f"Invalid type={type(sentences)} to taggin model")
+        sentences = cast(Sentences, sentences)
+        sentences = (sentences,)  # type: ignore
+        return FieldedDataset(sentences, fields=(Fields.Tokens,))  # type: ignore
