@@ -82,9 +82,7 @@ def _cross_entropy(**kwargs):
     if not label_smoothing:
         return CrossEntropyLoss(ignore_index=PAD_ID, reduction="sum")
     return partial(  # type: ignore
-        smooth_ce_loss,
-        pad_idx=PAD_ID,
-        smoothing=label_smoothing,
+        smooth_ce_loss, pad_idx=PAD_ID, smoothing=label_smoothing,
     )
 
 
@@ -167,10 +165,7 @@ def run_batch(
 
 
 def tag_batch(
-    model: ABLTagger,
-    batch: Dict[BATCH_KEYS, Any],
-    criterion=None,
-    optimizer=None,
+    model: ABLTagger, batch: Dict[BATCH_KEYS, Any], criterion=None, optimizer=None,
 ) -> Tuple[Dict[Modules, float], Dict[Modules, Sentences]]:
     """Tag (apply POS) on a given data set."""
     preds, losses = run_batch(model, batch, criterion, optimizer)
@@ -182,9 +177,7 @@ def tag_batch(
 
 
 def tag_data_loader(
-    model: ABLTagger,
-    data_loader: DataLoader,
-    criterion=None,
+    model: ABLTagger, data_loader: DataLoader, criterion=None,
 ) -> Tuple[Dict[Modules, float], Dict[Modules, Sentences]]:
     """Tag (apply POS) on a given data set. Sets the model to evaluation mode."""
     total_values: Dict[Modules, Sentences] = {
@@ -209,11 +202,7 @@ def tag_data_loader(
 
 
 def train_model(
-    model,
-    optimizer,
-    criterion,
-    data_loader: DataLoader,
-    log_prepend: str,
+    model, optimizer, criterion, data_loader: DataLoader, log_prepend: str,
 ) -> Dict[Modules, float]:
     """Run a single training epoch and evaluate the model."""
     model.train()
@@ -273,11 +262,9 @@ def run_epochs(
         log.info(f"Training took={end-start} seconds")
         # We just run the validation using a larger batch size
         val_losses, val_preds = tag_data_loader(
-            model,
-            data_loader=test_data_loader,
-            criterion=criterion,
+            model, data_loader=test_data_loader, criterion=criterion,
         )
-        write_losses(writer, "Val", train_losses, epoch)
+        write_losses(writer, "Val", val_losses, epoch)
         for module_name, evaluator in evaluators.items():
             accuracies, _ = evaluator(val_preds[module_name])
             write_accuracies(writer, module_name, accuracies, epoch)

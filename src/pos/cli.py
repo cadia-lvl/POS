@@ -208,16 +208,8 @@ def train_and_tag(**kwargs):
 
     # Read train and test data
 
-    train_ds = read_datasets(
-        kwargs["training_files"],
-        max_sent_length=128,
-        fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas),
-    )
-    test_ds = read_datasets(
-        [kwargs["test_file"]],
-        max_sent_length=128,
-        fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas),
-    )
+    train_ds = read_datasets(kwargs["training_files"], max_sent_length=128,)
+    test_ds = read_datasets([kwargs["test_file"]], max_sent_length=128,)
 
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
