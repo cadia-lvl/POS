@@ -15,6 +15,7 @@ tests/test_lemma.tsv \
 tests/test_lemma.tsv \
 debug/ \
 --tagger \
+--lemmatizer \
 --word_embedding_dim 100 \
 --main_lstm_layers 1 \
 --label_smoothing 0.1 \

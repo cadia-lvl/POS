@@ -5,13 +5,11 @@ import pos
 from pos.core import FieldedDataset
 
 
-def test_tagger(tagger, dictionaries):
+def test_tagger(pretrained_tagger):
     """Test all methods of the Tagger."""
-    if not tagger or not dictionaries:
-        pytest.skip("No --tagger or --dictionaries given")
     # Initialize the tagger
     tagger = pos.Tagger(
-        model_file=tagger,
+        model_file=pretrained_tagger,
         device="cpu",
     )
     # Tag a single sentence

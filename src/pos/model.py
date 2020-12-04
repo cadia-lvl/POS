@@ -1,7 +1,7 @@
 """The tagging Module."""
 from enum import Enum
 import logging
-from typing import Mapping, Sequence, Tuple, Any, Dict, Optional, cast
+from typing import List, Mapping, Sequence, Tuple, Any, Dict, Optional, cast
 import abc
 import random
 
@@ -105,7 +105,8 @@ class ClassingWordEmbedding(Embedding):
     def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
         return pad_sequence(
-            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch], batch_first=True,
+            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch],
+            batch_first=True,
         )
 
     def embed(self, batch: Tensor) -> Tensor:
@@ -142,7 +143,9 @@ class PretrainedEmbedding(ClassingWordEmbedding):
             pass_to_bilstm=pass_to_bilstm,
         )  # we overwrite the embedding
         self.embedding = nn.Embedding.from_pretrained(
-            embeddings, freeze=freeze, padding_idx=padding_idx,
+            embeddings,
+            freeze=freeze,
+            padding_idx=padding_idx,
         )
 
 
@@ -315,7 +318,6 @@ class GRUDecoder(Decoder):
         vocab_map: VocabMap,
         hidden_dim,
         context_dim,
-        output_dim,
         emb_dim,
         teacher_forcing=0.0,
         dropout=0.0,
@@ -327,25 +329,25 @@ class GRUDecoder(Decoder):
             teacher_forcing  # if rand < teacher_forcing we will use teacher forcing.
         )
         self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
-        self._output_dim = (
-            output_dim  # The number of characters, these will be interpreted as logits.
-        )
-        # Seq-len = 1, since it is auto-regressive
-        self.initial_hidden = lambda batch_size: torch.zeros(
-            size=(1, batch_size, hidden_dim)
-        )
+        self._output_dim = len(
+            vocab_map
+        )  # The number of characters, these will be interpreted as logits.
 
         self.embedding = nn.Embedding(
-            output_dim, emb_dim
+            len(vocab_map), emb_dim
         )  # We map the input idx to vectors.
         self.rnn = nn.GRU(
             emb_dim + context_dim, hidden_dim, batch_first=True
         )  # The input is the embedding and context
 
         self.fc_out = nn.Linear(
-            emb_dim + hidden_dim + context_dim, output_dim
+            emb_dim + hidden_dim + context_dim, len(vocab_map)
         )  # Map to logits.
-
+        self.illegal_chars_output = {
+            self.vocab_map.SOS_ID,
+            self.vocab_map.PAD_ID,
+            self.vocab_map.UNK_ID,
+        }
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
 
     @property
@@ -353,8 +355,45 @@ class GRUDecoder(Decoder):
         """Return the output dimension."""
         return self._output_dim
 
+    def initial_hidden(self, batch_size: int) -> Tensor:
+        """Initialize the hidden."""
+        # Seq-len = 1, since it is auto-regressive
+        return torch.zeros(size=(1, batch_size, self.hidden_dim))
+
+    def map_lemma_from_char_idx(self, char_idxs: List[int]) -> str:
+        """Map a lemma from character indices."""
+        chars = [
+            self.vocab_map.i2w[char_idx]
+            for char_idx in char_idxs
+            if char_idx not in self.illegal_chars_output
+        ]
+        # If we find an EOS, we cut from there.
+        if self.vocab_map.EOS in chars:
+            eos_idx = chars.index(self.vocab_map.EOS)
+            chars = chars[:eos_idx]
+        return "".join(chars)
+
+    def map_sentence_chars(
+        self, sent: List[List[int]], sent_length: int
+    ) -> Tuple[str, ...]:
+        """Map a sentence characters from idx to strings and join to lemmas."""
+        lemmas: List[str] = []
+        for tok_num in range(sent_length):
+            lemmas.append(self.map_lemma_from_char_idx(sent[tok_num]))
+        return tuple(lemmas)
+
     def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sequence[Sentence]:
         """Postprocess the model output."""
+        # Get the character predictions
+        char_preds = batch.argmax(dim=2)
+        # Map to batch of sentences again.
+        sent_char_preds = char_preds.view(size=(len(lengths), -1, char_preds.shape[-1]))
+        as_list = sent_char_preds.tolist()
+
+        sentence_lemmas = []
+        for sent, sent_length in zip(as_list, lengths):
+            sentence_lemmas.append(self.map_sentence_chars(sent, sent_length))
+        return tuple(sentence_lemmas)
 
     def add_targets(self, batch: Dict[BATCH_KEYS, Any]):
         """Preprocess the sentence batch. HAS SIDE-EFFECTS!."""
@@ -543,7 +582,10 @@ class Encoder(nn.Module):
 
             # Pack the paddings
             packed = pack_padded_sequence(
-                embs_to_bilstm, lengths, batch_first=True, enforce_sorted=False,
+                embs_to_bilstm,
+                lengths,
+                batch_first=True,
+                enforce_sorted=False,
             )
             # Make sure that the parameters are contiguous.
             self.bilstm.flatten_parameters()
@@ -587,7 +629,8 @@ def pack_sequence(padded_sequence):
     lengths = torch.sum(torch.pow(padded_sequence, 2), dim=2)
     # lengths = (b)
     lengths = torch.sum(
-        lengths != torch.Tensor([0.0]).to(padded_sequence.device), dim=1,
+        lengths != torch.Tensor([0.0]).to(padded_sequence.device),
+        dim=1,
     )
     return (
         pack_padded_sequence(

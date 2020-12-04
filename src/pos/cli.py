@@ -290,20 +290,19 @@ def train_and_tag(**kwargs):
         embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(dicts[Dicts.Chars])
     encoder = Encoder(embeddings=embs, **kwargs)
     decoders: Dict[Modules, Decoder] = {}
+    if kwargs["tagger"]:
+        decoders[Modules.Tagger] = Tagger(
+            vocab_map=dicts[Dicts.FullTag],
+            input_dim=encoder.output_dim,
+        )
     if kwargs["lemmatizer"]:
         decoders[Modules.Lemmatizer] = GRUDecoder(
             vocab_map=dicts[Dicts.Chars],
             hidden_dim=64,
             context_dim=encoder.output_dim,
-            output_dim=64,
             emb_dim=64,
             teacher_forcing=0.0,
             dropout=0.0,
-        )
-    if kwargs["tagger"]:
-        decoders[Modules.Tagger] = Tagger(
-            vocab_map=dicts[Dicts.FullTag],
-            input_dim=encoder.output_dim,
         )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(device)
 

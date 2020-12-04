@@ -46,8 +46,6 @@ def test_chars_as_words():
 
 
 def test_transformer_embedding_electra_small(electra_model, data_loader):
-    if not electra_model:
-        pytest.skip("No --electra_model given")
     wemb = FlairTransformerEmbedding(electra_model)
     # The TransformerEmbedding expects the input to be a Sentence, not vectors.
     for batch in data_loader:
@@ -73,14 +71,12 @@ def test_tagger(encoder, data_loader, tagger_module):
 
 def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
     hidden_dim = 3
-    output_dim = 4
     context_dim = encoder.output_dim
     emb_dim = 5
     gru = GRUDecoder(
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=hidden_dim,
         context_dim=context_dim,
-        output_dim=output_dim,
         emb_dim=emb_dim,
     )
     for batch in data_loader:
@@ -89,14 +85,12 @@ def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
         assert tok_embs.shape == (
             9,
             8,
-            4,
-        )  # 9 tokens, 8 chars at most, each char uses 4 emb_dim
+            len(vocab_maps[Dicts.Chars]),
+        )  # 9 tokens, 8 chars at most, each char emb
         assert tok_embs.requires_grad == True
 
 
 def test_full_run(data_loader, vocab_maps, electra_model):
-    if not electra_model:
-        pytest.skip("No --electra_model given")
     emb = FlairTransformerEmbedding(electra_model)
     encoder = Encoder(embeddings={Modules.BERT: emb})
     tagger = Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)

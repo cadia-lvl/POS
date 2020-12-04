@@ -1,6 +1,7 @@
 """Fixtures for tests."""
 from pytest import fixture
 from typing import Dict
+import pytest
 
 from torch.utils.data.dataloader import DataLoader
 from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
@@ -8,32 +9,40 @@ from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
 from pos.core import Fields, Vocab, VocabMap, Dicts, FieldedDataset
 from pos.data import collate_fn, load_dicts
 from pos.evaluate import Experiment
-from pos.model import ABLTagger, Encoder, ClassingWordEmbedding, Tagger, Modules
+from pos.model import (
+    ABLTagger,
+    Encoder,
+    ClassingWordEmbedding,
+    GRUDecoder,
+    Tagger,
+    Modules,
+)
 
 
 def pytest_addoption(parser):
     """Add extra command-line options to pytest."""
     parser.addoption("--tagger", action="store")
-    parser.addoption("--dictionaries", action="store")
     parser.addoption("--electra_model", action="store")
-
-
-@fixture()
-def dictionaries(request):
-    """Exposes the command-line option to a test case."""
-    return request.config.getoption("--dictionaries")
 
 
 @fixture()
 def electra_model(request):
     """Exposes the command-line option to a test case."""
-    return request.config.getoption("--electra_model")
+    electra_model_path = request.config.getoption("--electra_model")
+    if not electra_model_path:
+        pytest.skip("No --electra_model given")
+    else:
+        return electra_model_path
 
 
 @fixture()
-def tagger(request):
+def pretrained_tagger(request):
     """Exposes the command-line option to a test case."""
-    return request.config.getoption("--tagger")
+    pretrained_tagger_path = request.config.getoption("--tagger")
+    if not pretrained_tagger_path:
+        pytest.skip("No --tagger or --dictionaries given")
+    else:
+        return pretrained_tagger_path
 
 
 @fixture()
@@ -96,8 +105,24 @@ def tagger_module(vocab_maps, encoder) -> Tagger:
 
 
 @fixture
-def abl_tagger(encoder, tagger_module) -> ABLTagger:
-    return ABLTagger(encoder=encoder, decoders={Modules.Tagger: tagger_module})
+def lemmatizer_module(vocab_maps, encoder) -> GRUDecoder:
+    """Return a Tagger."""
+    return GRUDecoder(
+        vocab_map=vocab_maps[Dicts.Chars],
+        hidden_dim=10,
+        context_dim=encoder.output_dim,
+        emb_dim=20,
+        teacher_forcing=0.0,
+        dropout=0.0,
+    )
+
+
+@fixture
+def abl_tagger(encoder, tagger_module, lemmatizer_module) -> ABLTagger:
+    return ABLTagger(
+        encoder=encoder,
+        decoders={Modules.Tagger: tagger_module, Modules.Lemmatizer: lemmatizer_module},
+    )
 
 
 @fixture
@@ -114,8 +139,9 @@ def tagger_evaluator(ds_lemma):
 def kwargs():
     return {
         "tagger": True,
-        "lemmatizer": False,
+        "lemmatizer": True,
         "tagger_weight": 1,
+        "lemmatizer_weight": 1,
         "scheduler": "multiply",
         "learning_rate": 5e-5,
         "word_embedding_lr": 0.2,
