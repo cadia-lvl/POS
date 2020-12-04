@@ -399,7 +399,7 @@ class GRUDecoder(Decoder):
         if BATCH_KEYS.LEMMAS in batch:
             batch[BATCH_KEYS.TARGET_LEMMAS] = map_to_chars_batch(
                 batch[BATCH_KEYS.LEMMAS], self.vocab_map.w2i, add_sos=False
-            ).to(device)
+            )
 
     @staticmethod
     def _get_char_input_next_timestep(
@@ -439,6 +439,7 @@ class GRUDecoder(Decoder):
                     predictions,
                     teacher_forcing=self.teacher_forcing,
                 )
+                log.info(next_char_input.device)
                 emb_chars = self.dropout(self.embedding(next_char_input))
                 gru_in = torch.cat((emb_chars, context), dim=1).unsqueeze(
                     1
@@ -449,6 +450,7 @@ class GRUDecoder(Decoder):
                     predictions = prediction
                 else:
                     predictions = torch.cat((predictions, prediction), dim=1)
+                log.info(predictions.device)
 
         # We decode
         # TODO: support decoding until EOS/PAD for all
