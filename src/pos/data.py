@@ -258,7 +258,6 @@ def read_pretrained_word_embeddings(filepath: str) -> Tuple[VocabMap, Tensor]:
         filter_on=None,
         special_tokens=[(UNK, UNK_ID), (PAD, PAD_ID)],
     )
-    w_embedding = from_numpy(w_embedding).float()
     return w_map, w_embedding
 
 
@@ -294,7 +293,10 @@ def load_dicts(
         char_vocab = Vocab.from_file(known_chars_file)
     else:
         char_vocab = train_ds.get_char_vocab()
-    c_map = VocabMap(char_vocab, special_tokens=VocabMap.UNK_PAD_EOS_SOS,)
+    c_map = VocabMap(
+        char_vocab,
+        special_tokens=VocabMap.UNK_PAD_EOS_SOS,
+    )
     dictionaries[Dicts.Chars] = c_map
 
     # TAGS (POS)
