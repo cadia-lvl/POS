@@ -12,7 +12,8 @@ from torch import Tensor, stack
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
 
-from .core import Sentence, Sentences, VocabMap, device
+from . import core
+from .core import Sentence, Sentences, VocabMap
 from .data import (
     copy_into_larger_tensor,
     map_to_index,
@@ -61,7 +62,7 @@ class Embedding(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
 
     def forward(self, batch: Sequence[Sentence]) -> Tensor:
         """Run a generic forward pass for the Embeddings."""
-        return self.embed(self.preprocess(batch).to(device))
+        return self.embed(self.preprocess(batch).to(core.device))
 
     @abc.abstractmethod
     def embed(self, batch: Tensor) -> Tensor:
@@ -104,8 +105,7 @@ class ClassingWordEmbedding(Embedding):
     def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
         return pad_sequence(
-            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch],
-            batch_first=True,
+            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch], batch_first=True,
         )
 
     def embed(self, batch: Tensor) -> Tensor:
@@ -142,9 +142,7 @@ class PretrainedEmbedding(ClassingWordEmbedding):
             pass_to_bilstm=pass_to_bilstm,
         )  # we overwrite the embedding
         self.embedding = nn.Embedding.from_pretrained(
-            embeddings,
-            freeze=freeze,
-            padding_idx=padding_idx,
+            embeddings, freeze=freeze, padding_idx=padding_idx,
         )
 
 
@@ -357,7 +355,7 @@ class GRUDecoder(Decoder):
     def initial_hidden(self, batch_size: int) -> Tensor:
         """Initialize the hidden."""
         # Seq-len = 1, since it is auto-regressive
-        return torch.zeros(size=(1, batch_size, self.hidden_dim)).to(device)
+        return torch.zeros(size=(1, batch_size, self.hidden_dim)).to(core.device)
 
     def map_lemma_from_char_idx(self, char_idxs: List[int]) -> str:
         """Map a lemma from character indices."""
@@ -438,8 +436,7 @@ class GRUDecoder(Decoder):
                     batch,
                     predictions,
                     teacher_forcing=self.teacher_forcing,
-                )
-                log.info(next_char_input.device)
+                ).to(core.device)
                 emb_chars = self.dropout(self.embedding(next_char_input))
                 gru_in = torch.cat((emb_chars, context), dim=1).unsqueeze(
                     1
@@ -450,7 +447,6 @@ class GRUDecoder(Decoder):
                     predictions = prediction
                 else:
                     predictions = torch.cat((predictions, prediction), dim=1)
-                log.info(predictions.device)
 
         # We decode
         # TODO: support decoding until EOS/PAD for all
@@ -583,10 +579,7 @@ class Encoder(nn.Module):
 
             # Pack the paddings
             packed = pack_padded_sequence(
-                embs_to_bilstm,
-                lengths,
-                batch_first=True,
-                enforce_sorted=False,
+                embs_to_bilstm, lengths, batch_first=True, enforce_sorted=False,
             )
             # Make sure that the parameters are contiguous.
             self.bilstm.flatten_parameters()
@@ -630,8 +623,7 @@ def pack_sequence(padded_sequence):
     lengths = torch.sum(torch.pow(padded_sequence, 2), dim=2)
     # lengths = (b)
     lengths = torch.sum(
-        lengths != torch.Tensor([0.0]).to(padded_sequence.device),
-        dim=1,
+        lengths != torch.Tensor([0.0]).to(padded_sequence.device), dim=1,
     )
     return (
         pack_padded_sequence(

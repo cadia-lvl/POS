@@ -150,6 +150,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
                     output.write(f"{token} {' '.join((str(x) for x in value))}\n")
 
 
+# fmt: off
 @cli.command()
 @click.argument("training_files", nargs=-1)
 @click.argument("test_file")
@@ -157,74 +158,28 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--gpu/--no_gpu", default=False)
 @click.option("--save_model/--no_save_model", default=False)
 @click.option("--save_vocab/--no_save_vocab", default=False)
-@click.option("--tagger/--no_tagger", is_flag=True, default=True, help="Train tagger")
+@click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
 @click.option("--tagger_weight", default=1, help="Value to multiply tagging loss")
-@click.option(
-    "--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer"
-)
-@click.option(
-    "--lemmatizer_weight", default=1, help="Value to multiply lemmatizer loss"
-)
-@click.option(
-    "--known_chars_file",
-    default=None,
-    help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",
-)
-@click.option(
-    "--char_lstm_layers",
-    default=0,
-    help="The number of layers in character LSTM embedding. Set to 0 to disable.",
-)
-@click.option(
-    "--morphlex_embeddings_file",
-    default=None,
-    help="A file which contains the morphological embeddings.",
-)
+@click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
+@click.option("--lemmatizer_weight", default=1, help="Value to multiply lemmatizer loss")
+@click.option("--lemmatizer_hidden_dim", default=64, help="The hidden dimension of the lemmatizer.")
+@click.option("--known_chars_file", default=None, help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
+@click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
+@click.option("--morphlex_embeddings_file", default=None, help="A file which contains the morphological embeddings.")
 @click.option("--morphlex_freeze", is_flag=True, default=True)
-@click.option(
-    "--pretrained_word_embeddings_file",
-    default=None,
-    help="A file which contains pretrained word embeddings. See implementation for supported formats.",
-)
-@click.option(
-    "--word_embedding_dim",
-    default=0,
-    help="The word/token embedding dimension. Set to 0 to disable word embeddings.",
-)
-@click.option(
-    "--word_embedding_lr", default=0.2, help="The word/token embedding learning rate."
-)
-@click.option(
-    "--bert_encoder_dim",
-    default=256,
-    help="The dimension the BERT encoder outputs.",
-)
-@click.option(
-    "--bert_encoder",
-    default=None,
-    help="A folder which contains a pretrained BERT-like model. Set to None to disable.",
-)
-@click.option(
-    "--main_lstm_layers",
-    default=0,
-    help="The number of bilstm layers to use in the encoder. Set to 0 to disable.",
-)
+@click.option("--pretrained_word_embeddings_file", default=None, help="A file which contains pretrained word embeddings. See implementation for supported formats.")
+@click.option("--word_embedding_dim", default=0, help="The word/token embedding dimension. Set to 0 to disable word embeddings.")
+@click.option("--word_embedding_lr", default=0.2, help="The word/token embedding learning rate.")
+@click.option("--bert_encoder_dim", default=256, help="The dimension the BERT encoder outputs.")
+@click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
+@click.option("--main_lstm_layers", default=0, help="The number of bilstm layers to use in the encoder. Set to 0 to disable.")
 @click.option("--label_smoothing", default=0.0)
 @click.option("--learning_rate", default=0.20)
 @click.option("--epochs", default=20)
 @click.option("--batch_size", default=32)
-@click.option(
-    "--optimizer",
-    default="sgd",
-    type=click.Choice(["sgd", "adam"], case_sensitive=False),
-    help="The optimizer to use.",
-)
-@click.option(
-    "--scheduler",
-    default="multiply",
-    type=click.Choice(["multiply", "plateau"], case_sensitive=False),
-    help="The learning rate scheduler to use.",
-)
+@click.option("--optimizer", default="sgd", type=click.Choice(["sgd", "adam"], case_sensitive=False), help="The optimizer to use.")
+@click.option("--scheduler", default="multiply", type=click.Choice(["multiply", "plateau"], case_sensitive=False), help="The learning rate scheduler to use.")
+# fmt: on
 def train_and_tag(**kwargs):
     """Train a POS tagger on intpus and write out the tagged the test files.
 
@@ -292,14 +247,16 @@ def train_and_tag(**kwargs):
     encoder = Encoder(embeddings=embs, **kwargs)
     decoders: Dict[Modules, Decoder] = {}
     if kwargs["tagger"]:
+        log.info("Training Tagger")
         decoders[Modules.Tagger] = Tagger(
             vocab_map=dicts[Dicts.FullTag],
             input_dim=encoder.output_dim,
         )
     if kwargs["lemmatizer"]:
+        log.info("Training Lemmatizer")
         decoders[Modules.Lemmatizer] = GRUDecoder(
             vocab_map=dicts[Dicts.Chars],
-            hidden_dim=64,
+            hidden_dim=kwargs["lemmatizer_hidden_dim"],
             context_dim=encoder.output_dim,
             emb_dim=64,
             teacher_forcing=0.0,

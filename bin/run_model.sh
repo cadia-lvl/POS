@@ -22,12 +22,10 @@ train-and-tag \
 "$TRAIN" \
 "$TEST" \
 "$OUT_DIR" \
---tagger \
---lemmatizer \
 --bert_encoder roberta \
 --bert_encoder_dim 768 \
 --label_smoothing 0.1 \
---epochs 25 \
+--epochs 10 \
 --batch_size 16 \
 --save_vocab \
 --save_model \
