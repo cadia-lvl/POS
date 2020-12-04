@@ -3,6 +3,7 @@ OUT_DIR=$1
 TRAIN=$2
 TEST=$3
 
+mkdir -p $OUT_DIR
 echo $OUT_DIR
 echo $TRAIN
 echo $TEST
