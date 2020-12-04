@@ -3,9 +3,11 @@ from pytest import fixture
 from typing import Dict
 
 from torch.utils.data.dataloader import DataLoader
+from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
 
-from pos.core import Fields, VocabMap, Dicts, FieldedDataset
+from pos.core import Fields, Vocab, VocabMap, Dicts, FieldedDataset
 from pos.data import collate_fn, load_dicts
+from pos.evaluate import Experiment
 from pos.model import ABLTagger, Encoder, ClassingWordEmbedding, Tagger, Modules
 
 
@@ -96,6 +98,16 @@ def tagger_module(vocab_maps, encoder) -> Tagger:
 @fixture
 def abl_tagger(encoder, tagger_module) -> ABLTagger:
     return ABLTagger(encoder=encoder, decoders={Modules.Tagger: tagger_module})
+
+
+@fixture
+def tagger_evaluator(ds_lemma):
+    return Experiment.all_accuracy_closure(
+        ds_lemma,
+        train_vocab=ds_lemma.get_vocab(),
+        morphlex_vocab=Vocab.from_file(MORPHLEX_VOCAB_PATH),
+        pretrained_vocab=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+    )
 
 
 @fixture
