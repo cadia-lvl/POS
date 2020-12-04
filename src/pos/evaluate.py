@@ -1,5 +1,5 @@
 """A collection of types and function used to evaluate the performance of a tagger."""
-from typing import Callable, Tuple, List, Dict, Set, Any, Union
+from typing import Callable, Iterable, Tuple, List, Dict, Set, Any, Union
 import logging
 from collections import Counter
 from pathlib import Path
@@ -26,7 +26,7 @@ class Experiment:
         # Get the tokens and retrive the vocab.
         self.test_vocab = Vocab.from_symbols(self.predictions.get_field(Fields.Tokens))
         self.known_vocab = train_vocab.intersection(self.test_vocab)
-        log.info("Creating vocabs")
+        log.debug("Creating vocabs")
         morphlex_vocab = morphlex_vocab.intersection(self.test_vocab)  # type: ignore
         wemb_vocab = pretrained_vocab.intersection(self.test_vocab)  # type: ignore
         # fmt: off
@@ -44,17 +44,17 @@ class Experiment:
     @staticmethod
     def from_file(path: Path, morphlex_path: Path, pretrained_path: Path):
         """Create an Experiment from a given directory of an experimental results."""
-        log.info(f"Reading experiment={path}")
-        log.info("Reading predictions")
+        log.debug(f"Reading experiment={path}")
+        log.debug("Reading predictions")
         predictions = FieldedDataset.from_file(
             str(path / "predictions.tsv"), (Fields.Tokens, Fields.GoldTags, Fields.Tags)
         )
-        log.info("Reading vocabs")
+        log.debug("Reading vocabs")
         morphlex_vocab = Vocab.from_file(str(morphlex_path))
         pretrained_vocab = Vocab.from_file(str(pretrained_path))
-        log.info("Reading training vocab")
+        log.debug("Reading training vocab")
         train_vocab = Vocab.from_file(str(path / "known_toks.txt"))
-        log.info(f"Done reading experiment={path}")
+        log.debug(f"Done reading experiment={path}")
         return Experiment(
             predictions=predictions,
             train_vocab=train_vocab,
@@ -272,3 +272,19 @@ def collect_experiments(
         return [
             Experiment.from_file(root, Path(morphlex_vocab), Path(pretrained_vocab))
         ]
+
+
+def format_results(
+    results: Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]
+) -> str:
+    """Format the Accuracy results for pretty printing."""
+
+    def rows(
+        results: Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]
+    ) -> Iterable[str]:
+        accuracies, totals = results
+        keys = accuracies.keys()
+        for key in keys:
+            yield f"{key:<20}: {accuracies[key][0]*100:>02.2f} ±{accuracies[key][1]*100:>02.2f}, {totals[key][0]:>} ±{totals[key][1]:>}"
+
+    return "\n".join(rows(results))

@@ -450,4 +450,4 @@ def evaluate_predictions(directory, pretrained_vocab, morphlex_vocab):
     experiments = evaluate.collect_experiments(
         directory, morphlex_vocab, pretrained_vocab
     )
-    log.info(pformat(evaluate.all_accuracy_average(experiments)))
+    click.echo(evaluate.format_results(evaluate.all_accuracy_average(experiments)))
