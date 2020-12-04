@@ -4,6 +4,7 @@ import logging
 from collections import Counter
 from pathlib import Path
 import pickle
+from statistics import stdev
 
 from .core import Sentences, Vocab, VocabMap, FieldedDataset, Dicts, Fields
 
@@ -47,11 +48,11 @@ class Experiment:
 
     @staticmethod
     def from_file(path: Path):
-        """Create an Experiment from a given path of an experimental results. Optionally point to a specific prediction ds."""
+        """Create an Experiment from a given directory of an experimental results."""
         log.info(f"Reading experiment={path}")
         log.info("Reading predictions")
         predictions = FieldedDataset.from_file(
-            str(path), (Fields.Tokens, Fields.GoldTags, Fields.Tags)
+            str(path / "predictions.tsv"), (Fields.Tokens, Fields.GoldTags, Fields.Tags)
         )
         log.info("Reading dicts")
         with (path / "dictionaries.pickle").open("rb") as f:
@@ -189,21 +190,31 @@ def get_by_key_backup(key1, key2, dictionary: Dict[Any, VocabMap]) -> Set:
         return set()
 
 
-def get_average(accuracies: List[Dict[str, Union[float, int]]]) -> Dict[str, float]:
-    """Get the average percentage and total of a list of accuracies."""
+def get_average(
+    accuracies: List[Dict[str, Union[float, int]]]
+) -> Dict[str, Tuple[float, float]]:
+    """Get the average (accuracy, std_dev) and (total, std_dev) of a list of accuracies."""
     length = len(accuracies)
     keys = list(accuracies[0].keys())
-    totals = {}
+    totals: Dict[str, Tuple[float, float]] = {}
     for key in keys:
-        totals[key] = 0
-        for accuracy in accuracies:
-            totals[key] += accuracy[key]
-    return {key: total / length for key, total in totals.items()}
+        totals[key] = (
+            average([accuracy[key] for accuracy in accuracies]),
+            stdev([accuracy[key] for accuracy in accuracies])
+            if len(accuracies) >= 2
+            else 0.0,
+        )
+    return totals
+
+
+def average(values: List[Union[int, float]]) -> float:
+    """Return the average."""
+    return sum(values) / len(values)
 
 
 def all_accuracy_average(
     experiments: List[Experiment],
-) -> Tuple[Dict[str, float], Dict[str, float]]:
+) -> Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]:
     """Return the average of all accuracies."""
     all_accuracies = []
     all_totals = []
@@ -211,4 +222,28 @@ def all_accuracy_average(
         accuracies, totals = experiment.all_accuracy()
         all_accuracies.append(accuracies)
         all_totals.append(totals)
-    return (get_average(all_accuracies), get_average(all_totals))
+    return (
+        get_average(all_accuracies),
+        get_average(
+            all_totals,
+        ),
+    )
+
+
+def collect_experiments(directory: str) -> List[Experiment]:
+    """Collect model predictions in the directory. If the directory contains other directories, it will recurse into it."""
+    experiments: List[Experiment] = []
+    root = Path(directory)
+    directories = [d for d in root.iterdir() if d.is_dir()]
+    if directories:
+        experiments.extend(
+            [
+                experiment
+                for d in directories
+                for experiment in collect_experiments(str(d))
+            ]
+        )
+        return experiments
+    # No directories found
+    else:
+        return [Experiment.from_file(root)]

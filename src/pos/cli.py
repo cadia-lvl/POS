@@ -2,7 +2,7 @@
 """The main entrypoint to training and running a POS-tagger."""
 from dataclasses import Field
 import pickle
-from pprint import pprint
+from pprint import pprint, pformat
 import random
 import logging
 import json
@@ -57,6 +57,7 @@ from .train import (
 from .api import Tagger as api_tagger
 from .evaluate import Experiment
 from .utils import write_tsv
+from pos import evaluate
 
 DEBUG = False
 log = logging.getLogger(__name__)
@@ -81,9 +82,9 @@ def cli(debug, log):  # pylint: disable=redefined-outer-name
 def gather_tags(filepaths, output):
     """Read all input tsv files and extract all tags in files."""
     ds = read_datasets(filepaths)
-    tags = Vocab.from_symbols(y for x, y in ds)
-    for tag_ in sorted(list(tags)):
-        output.write(f"{tag_}\n")
+    tags = Vocab.from_symbols(ds.get_field(Fields.GoldTags))
+    for tag in sorted(list(tags)):
+        output.write(f"{tag}\n")
 
 
 @cli.command()
@@ -166,7 +167,9 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     "--word_embedding_lr", default=0.2, help="The word/token embedding learning rate."
 )
 @click.option(
-    "--bert_encoder_dim", default=256, help="The dimension the BERT encoder outputs.",
+    "--bert_encoder_dim",
+    default=256,
+    help="The dimension the BERT encoder outputs.",
 )
 @click.option(
     "--bert_encoder",
@@ -208,8 +211,14 @@ def train_and_tag(**kwargs):
 
     # Read train and test data
 
-    train_ds = read_datasets(kwargs["training_files"], max_sent_length=128,)
-    test_ds = read_datasets([kwargs["test_file"]], max_sent_length=128,)
+    train_ds = read_datasets(
+        kwargs["training_files"],
+        max_sent_length=128,
+    )
+    test_ds = read_datasets(
+        [kwargs["test_file"]],
+        max_sent_length=128,
+    )
 
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
@@ -266,7 +275,8 @@ def train_and_tag(**kwargs):
         )
     if kwargs["tagger"]:
         decoders[Modules.Tagger] = Tagger(
-            vocab_map=dicts[Dicts.FullTag], input_dim=encoder.output_dim,
+            vocab_map=dicts[Dicts.FullTag],
+            input_dim=encoder.output_dim,
         )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(device)
 
@@ -298,7 +308,10 @@ def train_and_tag(**kwargs):
         epochs=kwargs["epochs"],
         output_dir=output_dir,
     )
-    _, values = tag_data_loader(model=abl_tagger, data_loader=test_dl,)
+    _, values = tag_data_loader(
+        model=abl_tagger,
+        data_loader=test_dl,
+    )
     log.info("Writing predictions, dictionaries and model")
     for module_name, value in values.items():
         test_ds = test_ds.add_field(value, MODULE_TO_FIELD[module_name])
@@ -386,3 +399,11 @@ def tag(model_file, data_in, output, device, contains_tags):
     log.info("Writing results")
     ds.to_tsv_file(output)
     log.info("Done!")
+
+
+@cli.command()
+@click.argument("directory")
+def evaluate_predictions(directory):
+    """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
+    experiments = evaluate.collect_experiments(directory)
+    log.info(pformat(evaluate.all_accuracy_average(experiments)))

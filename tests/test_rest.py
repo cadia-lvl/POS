@@ -1,4 +1,4 @@
-from pos import cli, evaluate, train, vectorize_dim
+from pos import cli, vectorize_dim
 
 
 def test_import():
