@@ -8,13 +8,12 @@ from enum import Enum
 from tqdm import tqdm
 from torch import (
     Tensor,
-    from_numpy,
     zeros_like,
     zeros,
 )
 from torch.nn.utils.rnn import pad_sequence
 
-from .core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset
+from .core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset, device
 
 
 log = logging.getLogger(__name__)
@@ -45,9 +44,11 @@ class BATCH_KEYS(Enum):
 
 def map_to_index(sentence: Sentence, w2i: Dict[str, int]) -> Tensor:
     """Map a sequence to indices."""
-    return Tensor(
-        [w2i[token] if token in w2i else w2i[UNK] for token in sentence]
-    ).long()
+    return (
+        Tensor([w2i[token] if token in w2i else w2i[UNK] for token in sentence])
+        .long()
+        .to(device)
+    )
 
 
 def map_to_chars_and_index(
@@ -67,7 +68,7 @@ def map_to_chars_and_index(
         ],
         batch_first=True,
         padding_value=w2i[PAD],
-    )
+    ).to(device)
 
 
 def map_to_chars_batch(
@@ -89,16 +90,17 @@ def map_to_chars_batch(
         pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
         .reshape(shape=(-1, max_chars))
         .long()
+        .to(device)
     )
 
 
-def map_to_index_batch(sentences: Sequence[Sentence], w2i: Dict[str, int]):
+def map_to_index_batch(sentences: Sequence[Sentence], w2i: Dict[str, int]) -> Tensor:
     """Map to index, batch."""
     return pad_sequence(
         [map_to_index(sentence=sentence, w2i=w2i) for sentence in sentences],
         batch_first=True,
         padding_value=w2i[PAD],
-    )
+    ).to(device)
 
 
 def copy_into_larger_tensor(tensor: Tensor, like_tensor: Tensor) -> Tensor:

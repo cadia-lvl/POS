@@ -28,6 +28,7 @@ from .data import (
     wemb_str_to_emb_pair,
     collate_fn,
 )
+from . import core
 from .core import (
     Vocab,
     FieldedDataset,
@@ -234,7 +235,7 @@ def train_and_tag(**kwargs):
     """
     pprint(kwargs)
     set_seed()
-    device = set_device(gpu_flag=kwargs["gpu"])
+    set_device(gpu_flag=kwargs["gpu"])
 
     # Read train and test data
 
@@ -304,7 +305,7 @@ def train_and_tag(**kwargs):
             teacher_forcing=0.0,
             dropout=0.0,
         )
-    abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(device)
+    abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(core.device)
 
     # Train a model
     print_tagger(abl_tagger)
@@ -394,7 +395,7 @@ def set_device(gpu_flag=False):
         set_num_threads(threads)
         flair.device = device
         log.info(f"Using {threads} CPU threads")
-    return device
+    core.device = device
 
 
 @cli.command()

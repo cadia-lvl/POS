@@ -12,7 +12,7 @@ from torch import Tensor, stack
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
 
-from .core import Sentence, Sentences, VocabMap
+from .core import Sentence, Sentences, VocabMap, device
 from .data import (
     copy_into_larger_tensor,
     map_to_index,
@@ -61,7 +61,6 @@ class Embedding(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
 
     def forward(self, batch: Sequence[Sentence]) -> Tensor:
         """Run a generic forward pass for the Embeddings."""
-        device = next(self.parameters()).device
         return self.embed(self.preprocess(batch).to(device))
 
     @abc.abstractmethod
@@ -358,7 +357,7 @@ class GRUDecoder(Decoder):
     def initial_hidden(self, batch_size: int) -> Tensor:
         """Initialize the hidden."""
         # Seq-len = 1, since it is auto-regressive
-        return torch.zeros(size=(1, batch_size, self.hidden_dim))
+        return torch.zeros(size=(1, batch_size, self.hidden_dim)).to(device)
 
     def map_lemma_from_char_idx(self, char_idxs: List[int]) -> str:
         """Map a lemma from character indices."""
@@ -400,7 +399,7 @@ class GRUDecoder(Decoder):
         if BATCH_KEYS.LEMMAS in batch:
             batch[BATCH_KEYS.TARGET_LEMMAS] = map_to_chars_batch(
                 batch[BATCH_KEYS.LEMMAS], self.vocab_map.w2i, add_sos=False
-            )
+            ).to(device)
 
     @staticmethod
     def _get_char_input_next_timestep(

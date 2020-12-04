@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 Sentence = Tuple[str, ...]
 Sentences = Tuple[Sentence, ...]
 
+device = None
+
 
 class Dicts(Enum):
     """An enum to name all model parts."""
