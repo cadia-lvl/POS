@@ -23,6 +23,8 @@ from .data import (
     read_datasets,
     emb_pairs_to_dict,
     bin_str_to_emb_pair,
+    read_morphlex,
+    read_pretrained_word_embeddings,
     wemb_str_to_emb_pair,
     collate_fn,
 )
@@ -79,12 +81,33 @@ def cli(debug, log):  # pylint: disable=redefined-outer-name
 @cli.command()
 @click.argument("filepaths", nargs=-1)
 @click.argument("output", type=click.File("w"))
-def gather_tags(filepaths, output):
-    """Read all input tsv files and extract all tags in files."""
-    ds = read_datasets(filepaths)
-    tags = Vocab.from_symbols(ds.get_field(Fields.GoldTags))
-    for tag in sorted(list(tags)):
-        output.write(f"{tag}\n")
+@click.option(
+    "--type",
+    type=click.Choice(
+        ["tags", "tokens", "lemmas", "morphlex", "pretrained"], case_sensitive=False
+    ),
+    default="tags",
+)
+def collect_vocabularies(filepaths, output, type):
+    """Read all input files and extract relevant vocabulary."""
+    result = []
+    if type == "tags":
+        ds = read_datasets(filepaths)
+        result = list(Vocab.from_symbols(ds.get_field(Fields.GoldTags)))
+    elif type == "tokens":
+        ds = read_datasets(filepaths)
+        result = list(Vocab.from_symbols(ds.get_field(Fields.Tokens)))
+    elif type == "lemmas":
+        ds = read_datasets(filepaths)
+        result = list(Vocab.from_symbols(ds.get_field(Fields.GoldLemmas)))
+    elif type == "morphlex":
+        vocab_map, _ = read_morphlex(filepaths[0])
+        result = list(vocab_map.w2i.keys())
+    elif type == "pretrained":
+        vocab_map, _ = read_pretrained_word_embeddings(filepaths[0])
+        result = list(vocab_map.w2i.keys())
+    for element in sorted(result):
+        output.write(f"{element}\n")
 
 
 @cli.command()
