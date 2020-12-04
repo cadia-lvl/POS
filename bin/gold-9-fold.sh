@@ -9,6 +9,8 @@ shift
 # --begin=now+8hour \
 for fold in $FOLDS
 do
+    TRAIN=$DATA_DIR/${fold}TM.plain
+    TEST=$DATA_DIR/${fold}PM.plain
     out_folder=./out/"$NAME"/$fold
     mkdir -p "$out_folder"
     sbatch \
