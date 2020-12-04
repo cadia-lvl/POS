@@ -13,17 +13,13 @@ from pos.train import (
 )
 
 
-def test_train_tagger(abl_tagger, data_loader, kwargs, ds_lemma, vocab_maps):
+def test_train_tagger(abl_tagger, data_loader, kwargs, tagger_evaluator):
     criterion = get_criterion(**kwargs)
     parameter_groups = get_parameter_groups(abl_tagger.named_parameters(), **kwargs)
     optimizer = get_optimizer(parameter_groups, **kwargs)
     scheduler = get_scheduler(optimizer, **kwargs)
     # TODO: Add evaluator for Lemmas
-    evaluators = {
-        Modules.Tagger: Experiment.all_accuracy_closure(
-            test_ds=ds_lemma, dicts=vocab_maps
-        )
-    }
+    evaluators = {Modules.Tagger: tagger_evaluator}
 
     # Write all configuration to disk
     output_dir = pathlib.Path(kwargs["output_dir"])

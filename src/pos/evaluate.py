@@ -18,22 +18,17 @@ class Experiment:
         self,
         predictions: FieldedDataset,
         train_vocab: Vocab,
-        dicts: Dict[Dicts, VocabMap],
+        morphlex_vocab: Vocab,
+        pretrained_vocab: Vocab,
     ):
         """Initialize an experiment given the predictions and vocabulary."""
         self.predictions = predictions
         # Get the tokens and retrive the vocab.
         self.test_vocab = Vocab.from_symbols(self.predictions.get_field(Fields.Tokens))
         self.known_vocab = train_vocab.intersection(self.test_vocab)
-        self.dicts = dicts
-
         log.info("Creating vocabs")
-        morphlex_vocab = get_by_key_backup(
-            "m_map", Dicts.MorphLex, self.dicts
-        ).intersection(self.test_vocab)
-        wemb_vocab = get_by_key_backup("w_map", Dicts.Tokens, self.dicts).intersection(
-            self.test_vocab
-        )
+        morphlex_vocab = morphlex_vocab.intersection(self.test_vocab)  # type: ignore
+        wemb_vocab = pretrained_vocab.intersection(self.test_vocab)  # type: ignore
         # fmt: off
         self.unknown_vocab = self.test_vocab.difference(self.known_vocab)  # pylint: disable=no-member
         self.known_wemb_vocab = self.known_vocab.intersection(wemb_vocab).difference(morphlex_vocab)
@@ -47,29 +42,65 @@ class Experiment:
         # fmt: on
 
     @staticmethod
-    def from_file(path: Path):
+    def from_file(path: Path, morphlex_path: Path, pretrained_path: Path):
         """Create an Experiment from a given directory of an experimental results."""
         log.info(f"Reading experiment={path}")
         log.info("Reading predictions")
         predictions = FieldedDataset.from_file(
             str(path / "predictions.tsv"), (Fields.Tokens, Fields.GoldTags, Fields.Tags)
         )
-        log.info("Reading dicts")
-        with (path / "dictionaries.pickle").open("rb") as f:
-            dicts = pickle.load(f)
+        log.info("Reading vocabs")
+        morphlex_vocab = Vocab.from_file(str(morphlex_path))
+        pretrained_vocab = Vocab.from_file(str(pretrained_path))
         log.info("Reading training vocab")
-        train_vocab = Vocab.from_file(path / "known_toks.txt")
+        train_vocab = Vocab.from_file(str(path / "known_toks.txt"))
         log.info(f"Done reading experiment={path}")
-        return Experiment(predictions=predictions, train_vocab=train_vocab, dicts=dicts)
+        return Experiment(
+            predictions=predictions,
+            train_vocab=train_vocab,
+            morphlex_vocab=morphlex_vocab,
+            pretrained_vocab=pretrained_vocab,
+        )
 
     @staticmethod
     def from_tag_predictions(
-        test_ds: FieldedDataset, dicts: Dict[Dicts, VocabMap], tags: Sentences
+        test_ds: FieldedDataset,
+        tags: Sentences,
+        train_vocab: Vocab,
+        morphlex_vocab: Vocab,
+        pretrained_vocab: Vocab,
     ):
         """Create an Experiment from predicted tags, test_dataset and dictionaries."""
-        train_vocab = Vocab(dicts[Dicts.Tokens].w2i.keys())
         test_ds = test_ds.add_field(tags, Fields.Tags)
-        return Experiment(test_ds, train_vocab=train_vocab, dicts=dicts)
+        return Experiment(
+            test_ds,
+            train_vocab=train_vocab,
+            morphlex_vocab=morphlex_vocab,
+            pretrained_vocab=pretrained_vocab,
+        )
+
+    @staticmethod
+    def all_accuracy_closure(
+        test_ds: FieldedDataset,
+        train_vocab: Vocab,
+        morphlex_vocab: Vocab,
+        pretrained_vocab: Vocab,
+    ) -> Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]:
+        """Create an Experiment from predicted tags, test_dataset and dictionaries."""
+
+        def calculate_accuracy(
+            tags: Sentences,
+        ) -> Tuple[Dict[str, float], Dict[str, int]]:
+            """Closure."""
+            return Experiment.from_tag_predictions(
+                test_ds,
+                tags,
+                train_vocab=train_vocab,
+                morphlex_vocab=morphlex_vocab,
+                pretrained_vocab=pretrained_vocab,
+            ).all_accuracy()
+
+        return calculate_accuracy
 
     def calculate_accuracy(self, vocab: Set[str] = None) -> Tuple[float, int]:
         """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter."""
@@ -125,20 +156,6 @@ class Experiment:
             )
         )
         return (correct / total, total)
-
-    @staticmethod
-    def all_accuracy_closure(
-        test_ds: FieldedDataset, dicts: Dict[Dicts, VocabMap]
-    ) -> Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]:
-        """Create an Experiment from predicted tags, test_dataset and dictionaries."""
-
-        def calculate_accuracy(
-            tags: Sentences,
-        ) -> Tuple[Dict[str, float], Dict[str, int]]:
-            """Closure."""
-            return Experiment.from_tag_predictions(test_ds, dicts, tags).all_accuracy()
-
-        return calculate_accuracy
 
     def all_accuracy(self) -> Tuple[Dict[str, float], Dict[str, int]]:
         """Return all accuracies."""
@@ -230,7 +247,9 @@ def all_accuracy_average(
     )
 
 
-def collect_experiments(directory: str) -> List[Experiment]:
+def collect_experiments(
+    directory: str, morphlex_vocab: str, pretrained_vocab: str
+) -> List[Experiment]:
     """Collect model predictions in the directory. If the directory contains other directories, it will recurse into it."""
     experiments: List[Experiment] = []
     root = Path(directory)
@@ -240,10 +259,16 @@ def collect_experiments(directory: str) -> List[Experiment]:
             [
                 experiment
                 for d in directories
-                for experiment in collect_experiments(str(d))
+                for experiment in collect_experiments(
+                    str(d),
+                    morphlex_vocab=morphlex_vocab,
+                    pretrained_vocab=pretrained_vocab,
+                )
             ]
         )
         return experiments
     # No directories found
     else:
-        return [Experiment.from_file(root)]
+        return [
+            Experiment.from_file(root, Path(morphlex_vocab), Path(pretrained_vocab))
+        ]

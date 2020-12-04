@@ -62,6 +62,10 @@ from .utils import write_tsv
 from pos import evaluate
 
 DEBUG = False
+
+MORPHLEX_VOCAB_PATH = "./data/extra/morphlex_vocab.txt"
+PRETRAINED_VOCAB_PATH = "./data/extra/pretrained_vocab.txt"
+
 log = logging.getLogger(__name__)
 
 
@@ -312,7 +316,12 @@ def train_and_tag(**kwargs):
     scheduler = get_scheduler(optimizer, **kwargs)
     # TODO: Add evaluator for Lemmas
     evaluators = {
-        Modules.Tagger: Experiment.all_accuracy_closure(test_ds=test_ds, dicts=dicts)
+        Modules.Tagger: Experiment.all_accuracy_closure(
+            test_ds=test_ds,
+            train_vocab=train_ds.get_vocab(),
+            morphlex_vocab=Vocab.from_file(MORPHLEX_VOCAB_PATH),
+            pretrained_vocab=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+        )
     }
 
     # Write all configuration to disk
@@ -426,7 +435,19 @@ def tag(model_file, data_in, output, device, contains_tags):
 
 @cli.command()
 @click.argument("directory")
-def evaluate_predictions(directory):
+@click.option(
+    "--pretrained_vocab",
+    help="The location of the pretrained vocabulary.",
+    default=PRETRAINED_VOCAB_PATH,
+)
+@click.option(
+    "--morphlex_vocab",
+    help="The location of the morphlex vocabulary.",
+    default=MORPHLEX_VOCAB_PATH,
+)
+def evaluate_predictions(directory, pretrained_vocab, morphlex_vocab):
     """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
-    experiments = evaluate.collect_experiments(directory)
+    experiments = evaluate.collect_experiments(
+        directory, morphlex_vocab, pretrained_vocab
+    )
     log.info(pformat(evaluate.all_accuracy_average(experiments)))

@@ -99,9 +99,7 @@ def test_full_run(data_loader, vocab_maps, electra_model):
         pytest.skip("No --electra_model given")
     emb = FlairTransformerEmbedding(electra_model)
     encoder = Encoder(embeddings={Modules.BERT: emb})
-    tagger = Tagger(
-        vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim, output_dim=5
-    )
+    tagger = Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)
     abl_tagger = ABLTagger(encoder=encoder, decoders={Modules.Tagger: tagger})
     for batch in data_loader:
         abl_tagger(batch)

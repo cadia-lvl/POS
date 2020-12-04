@@ -41,7 +41,7 @@ class Vocab(set):
         return Vocab((tok for sent in sentences for tok in sent))
 
     @staticmethod
-    def from_file(filepath):
+    def from_file(filepath: str):
         """Create a Vocab from a file with a sequence of Symbols."""
         with open(filepath) as f:
             return Vocab(
