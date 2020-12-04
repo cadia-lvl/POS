@@ -109,6 +109,6 @@ def kwargs():
         "word_embedding_lr": 0.2,
         "optimizer": "adam",
         "label_smoothing": 0.1,
-        "output_dir": "tests/",
+        "output_dir": "debug/",
         "epochs": 20,
     }

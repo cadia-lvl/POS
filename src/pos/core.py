@@ -128,7 +128,6 @@ class FieldedDataset(Dataset):
 
     def __add__(self, other):
         """Support addition."""
-        assert self.fields == other.fields
         return self.__class__(self.data + other.data, self.fields)
 
     def get_field(self, field=Fields.Tokens) -> Sentences:
@@ -190,4 +189,8 @@ class FieldedDataset(Dataset):
                 fields = fields + (Fields.GoldTags,)
             if len(examples) >= 3:
                 fields = fields + (Fields.GoldLemmas,)
+            if len(examples) >= 4:
+                raise ValueError(
+                    "Unable to guess fields in TSV file. Please set 'fields'"
+                )
         return FieldedDataset(examples, fields=fields)

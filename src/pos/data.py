@@ -139,12 +139,11 @@ def read_datasets(
             FieldedDataset.from_file(training_file, fields)
             for training_file in file_paths
         ),
-        FieldedDataset(tuple(), fields),
     )
     if max_sent_length:
         # We want to filter out sentences which are too long (and throw them away, for now)
         ds = FieldedDataset(
-            tuple(zip(*[x for x in ds if len(x[0]) <= max_sent_length])), fields
+            tuple(zip(*[x for x in ds if len(x[0]) <= max_sent_length])), ds.fields
         )
     # DEBUG - read a subset of the data
     if max_lines:
@@ -264,7 +263,7 @@ def read_pretrained_word_embeddings(filepath: str) -> Tuple[VocabMap, Tensor]:
 
 
 def load_dicts(
-    train_ds,
+    train_ds: FieldedDataset,
     pretrained_word_embeddings_file=None,
     morphlex_embeddings_file=None,
     known_chars_file=None,
@@ -295,10 +294,7 @@ def load_dicts(
         char_vocab = Vocab.from_file(known_chars_file)
     else:
         char_vocab = train_ds.get_char_vocab()
-    c_map = VocabMap(
-        char_vocab,
-        special_tokens=VocabMap.UNK_PAD_EOS_SOS,
-    )
+    c_map = VocabMap(char_vocab, special_tokens=VocabMap.UNK_PAD_EOS_SOS,)
     dictionaries[Dicts.Chars] = c_map
 
     # TAGS (POS)

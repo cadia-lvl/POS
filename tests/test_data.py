@@ -92,6 +92,24 @@ def test_dataset_from_file_lemmas(test_tsv_lemma_file):
     )
 
 
+def test_add_field(test_tsv_lemma_file):
+    test_ds = FieldedDataset.from_file(
+        test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas)
+    )
+    test_ds = test_ds.add_field(test_ds.get_field(Fields.GoldTags), Fields.Tags)
+    assert len(test_ds.fields) == 4
+    for element in test_ds:
+        assert len(element) == 4
+
+
+def test_add_field_wrong_creation(test_tsv_file):
+    test_ds = FieldedDataset.from_file(test_tsv_file)
+    test_ds = test_ds.add_field(test_ds.get_field(Fields.GoldTags), Fields.Tags)
+    assert len(test_ds.fields) == 3
+    for element in test_ds:
+        assert len(element) == 3
+
+
 def test_read_datasets(test_tsv_file):
     fields = (Fields.Tokens, Fields.GoldTags)
     test_ds = read_datasets([test_tsv_file], fields=fields)
@@ -142,12 +160,17 @@ def test_read_predicted(tagged_test_tsv_file):
     assert pred_ds.get_field(Fields.Tags) == (("a",), ("n", "s", "a"), ("a", "a"))
 
 
-def test_load_modules(ds):
+def test_load_dicts(ds):
     _, dicts = load_dicts(ds)
     assert Dicts.Tokens in dicts
     assert Dicts.Chars in dicts
     assert Dicts.FullTag in dicts
     assert len(dicts) == 3
+
+
+def test_load_dicts_read_datasets(test_tsv_file):
+    train_ds = read_datasets([test_tsv_file], max_sent_length=128,)
+    _, dicts = load_dicts(train_ds)
 
 
 def test_map_to_idx():
