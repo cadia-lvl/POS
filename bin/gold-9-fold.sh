@@ -11,11 +11,6 @@ for fold in $FOLDS
 do
     TRAIN=$DATA_DIR/${fold}TM.plain
     TEST=$DATA_DIR/${fold}PM.plain
-    out_folder=./out/"$NAME"/$fold
-    mkdir -p "$out_folder"
-    sbatch \
-    --output="$out_folder/slurm-%j.out" \
-    --gres=gpu \
-    --mem=10G \
-    --wrap="bin/run_model.sh $out_folder $TRAIN $TEST --gpu"
+    OUT_DIR=./out/"$NAME"/$fold
+    ./bin/wrap_sbatch.sh $OUT_DIR $TRAIN $TEST $*
 done
