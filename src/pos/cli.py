@@ -162,9 +162,10 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--tagger_weight", default=1, help="Value to multiply tagging loss")
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option("--lemmatizer_weight", default=1, help="Value to multiply lemmatizer loss")
-@click.option("--lemmatizer_hidden_dim", default=64, help="The hidden dimension of the lemmatizer.")
+@click.option("--lemmatizer_hidden_dim", default=256, help="The hidden dimension of the lemmatizer.")
 @click.option("--known_chars_file", default=None, help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
 @click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
+@click.option("--char_emb_dim", default=20, help="The embedding size for characters.")
 @click.option("--char_lstm_dim", default=64, help="The hidden dimension in the character LSTM.")
 @click.option("--char_lstm_to_bilstm/--no_char_lstm_to_bilstm", is_flag=True, default=True, help="Put the character embeddings to the main BiLSTM.")
 @click.option("--morphlex_embeddings_file", default=None, help="A file which contains the morphological embeddings.")
@@ -247,6 +248,7 @@ def train_and_tag(**kwargs):
     if kwargs["char_lstm_layers"]:
         embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(
             dicts[Dicts.Chars],
+            character_embedding_dim=kwargs["char_emb_dim"],
             char_lstm_layers=kwargs["char_lstm_layers"],
             char_lstm_dim=kwargs["char_lstm_dim"],
             pass_to_bilstm=kwargs["char_lstm_to_bilstm"],
