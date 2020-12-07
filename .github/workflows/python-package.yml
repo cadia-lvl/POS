@@ -25,9 +25,6 @@ jobs:
     - name: Run Pylint
       run: |
         poetry run pylint -E pos
-    - name: Lint with mypy
-      run: |
-        poetry run mypy --ignore-missing-imports --pretty src/
     - name: Check documentation with pydocstyle
       run: |
         poetry run pydocstyle --match-dir src

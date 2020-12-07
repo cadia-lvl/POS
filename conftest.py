@@ -125,6 +125,7 @@ def decoders(tagger_module, lemmatizer_module):
 
 @fixture
 def abl_tagger(encoder, tagger_module, lemmatizer_module) -> ABLTagger:
+    """Return a default ABLTagger."""
     return ABLTagger(
         encoder=encoder,
         decoders={Modules.Tagger: tagger_module, Modules.Lemmatizer: lemmatizer_module},
@@ -133,6 +134,7 @@ def abl_tagger(encoder, tagger_module, lemmatizer_module) -> ABLTagger:
 
 @fixture
 def tagger_evaluator(ds_lemma):
+    """Return a tagger evaluator."""
     return Experiment.tag_accuracy_closure(
         ds_lemma,
         train_vocab=ds_lemma.get_vocab(),
@@ -143,6 +145,7 @@ def tagger_evaluator(ds_lemma):
 
 @fixture
 def lemma_evaluator(ds_lemma):
+    """Return a lemma evaluator."""
     return Experiment.lemma_accuracy_closure(
         ds_lemma,
         train_tokens=ds_lemma.get_vocab(),
@@ -154,6 +157,7 @@ def lemma_evaluator(ds_lemma):
 
 @fixture
 def kwargs():
+    """Return a default set of arguments."""
     return {
         "tagger": True,
         "lemmatizer": True,
