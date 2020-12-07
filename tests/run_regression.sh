@@ -19,7 +19,7 @@ debug/ \
 --word_embedding_dim 100 \
 --main_lstm_layers 1 \
 --label_smoothing 0.1 \
---epochs 25 \
+--epochs 125 \
 --batch_size 16 \
 --save_vocab \
 --save_model \
