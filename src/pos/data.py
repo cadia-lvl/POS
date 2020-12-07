@@ -13,7 +13,8 @@ from torch import (
 )
 from torch.nn.utils.rnn import pad_sequence
 
-from .core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset, device
+from . import core
+from .core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset
 
 
 log = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ def map_to_index(sentence: Sentence, w2i: Dict[str, int]) -> Tensor:
     return (
         Tensor([w2i[token] if token in w2i else w2i[UNK] for token in sentence])
         .long()
-        .to(device)
+        .to(core.device)
     )
 
 
@@ -68,7 +69,7 @@ def map_to_chars_and_index(
         ],
         batch_first=True,
         padding_value=w2i[PAD],
-    ).to(device)
+    ).to(core.device)
 
 
 def map_to_chars_batch(
@@ -90,7 +91,7 @@ def map_to_chars_batch(
         pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
         .reshape(shape=(-1, max_chars))
         .long()
-        .to(device)
+        .to(core.device)
     )
 
 
@@ -100,7 +101,7 @@ def map_to_index_batch(sentences: Sequence[Sentence], w2i: Dict[str, int]) -> Te
         [map_to_index(sentence=sentence, w2i=w2i) for sentence in sentences],
         batch_first=True,
         padding_value=w2i[PAD],
-    ).to(device)
+    ).to(core.device)
 
 
 def copy_into_larger_tensor(tensor: Tensor, like_tensor: Tensor) -> Tensor:
