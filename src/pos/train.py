@@ -12,17 +12,20 @@ from functools import partial
 from math import inf
 
 from torch.nn import CrossEntropyLoss, Module
+from torch.nn.modules.container import ModuleList
 from torch.optim import Optimizer, SGD, Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 from torch.nn.utils import clip_grad_norm_
 from torch import Tensor, no_grad, numel, cat, zeros_like, log_softmax, stack
 from torch.utils.data import DataLoader
 
+from pos.evaluate import Experiment
+
 from .data import (
     PAD_ID,
     BATCH_KEYS,
 )
-from .model import ABLTagger, Modules
+from .model import ABLTagger, Decoder, Modules
 from .core import Fields, Sentences
 
 
@@ -76,30 +79,32 @@ def get_optimizer(parameters, **kwargs) -> Optimizer:
         raise ValueError("Unknown optimizer")
 
 
-def _cross_entropy(**kwargs):
-    label_smoothing = kwargs.get("label_smoothing", 0.0)
+def _cross_entropy(label_smoothing):
     log.info(f"Label smoothing={label_smoothing}")
     if not label_smoothing:
         return CrossEntropyLoss(ignore_index=PAD_ID, reduction="sum")
     return partial(  # type: ignore
-        smooth_ce_loss, pad_idx=PAD_ID, smoothing=label_smoothing,
+        smooth_ce_loss,
+        pad_idx=PAD_ID,
+        smoothing=label_smoothing,
     )
 
 
 def get_criterion(
-    **kwargs,
+    decoders: Dict[Modules, Decoder], label_smoothing=0.0
 ) -> Callable[[Modules, Tensor, Dict[BATCH_KEYS, Any]], Tensor]:
     """Return the criterion to use based on options."""
-    weights = {}
-    if kwargs["lemmatizer"]:
-        weights[Modules.Lemmatizer] = kwargs["lemmatizer_weight"]
-    if kwargs["tagger"]:
-        weights[Modules.Tagger] = kwargs["tagger_weight"]
-    loss = _cross_entropy(**kwargs)
+    loss = _cross_entropy(label_smoothing)
 
-    def weight_loss(key, pred, batch):
+    def weight_loss(key: Modules, pred: Tensor, batch):
         """Combine the losses with their corresponding weights."""
-        return loss(pred, batch[MODULE_TO_BATCHKEY[key]].to(pred.device)) * weights[key]
+        return (
+            loss(
+                pred.view((-1, pred.shape[-1])),
+                batch[MODULE_TO_BATCHKEY[key]].to(pred.device).view((-1)),
+            )
+            * decoders[key].weight
+        )
 
     return weight_loss
 
@@ -165,7 +170,10 @@ def run_batch(
 
 
 def tag_batch(
-    model: ABLTagger, batch: Dict[BATCH_KEYS, Any], criterion=None, optimizer=None,
+    model: ABLTagger,
+    batch: Dict[BATCH_KEYS, Any],
+    criterion=None,
+    optimizer=None,
 ) -> Tuple[Dict[Modules, float], Dict[Modules, Sentences]]:
     """Tag (apply POS) on a given data set."""
     preds, losses = run_batch(model, batch, criterion, optimizer)
@@ -177,7 +185,9 @@ def tag_batch(
 
 
 def tag_data_loader(
-    model: ABLTagger, data_loader: DataLoader, criterion=None,
+    model: ABLTagger,
+    data_loader: DataLoader,
+    criterion=None,
 ) -> Tuple[Dict[Modules, float], Dict[Modules, Sentences]]:
     """Tag (apply POS) on a given data set. Sets the model to evaluation mode."""
     total_values: Dict[Modules, Sentences] = {
@@ -202,7 +212,11 @@ def tag_data_loader(
 
 
 def train_model(
-    model, optimizer, criterion, data_loader: DataLoader, log_prepend: str,
+    model,
+    optimizer,
+    criterion,
+    data_loader: DataLoader,
+    log_prepend: str,
 ) -> Dict[Modules, float]:
     """Run a single training epoch and evaluate the model."""
     model.train()
@@ -262,7 +276,9 @@ def run_epochs(
         log.info(f"Training took={end-start} seconds")
         # We just run the validation using a larger batch size
         val_losses, val_preds = tag_data_loader(
-            model, data_loader=test_data_loader, criterion=criterion,
+            model,
+            data_loader=test_data_loader,
+            criterion=criterion,
         )
         write_losses(writer, "Val", val_losses, epoch)
         for module_name, evaluator in evaluators.items():

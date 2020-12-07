@@ -12,33 +12,39 @@ log = logging.getLogger(__name__)
 
 
 class Experiment:
-    """An Experiment holds information about an experiment, i.e. predicted tags and vocabularies."""
+    """An Experiment holds information about an experiment, i.e. predicted tags, lemmas and vocabularies."""
 
     def __init__(
         self,
         predictions: FieldedDataset,
-        train_vocab: Vocab,
-        morphlex_vocab: Vocab,
+        train_tokens: Vocab,
+        morphlex_tokens: Vocab,
         pretrained_vocab: Vocab,
+        train_lemmas: Vocab = None,
     ):
         """Initialize an experiment given the predictions and vocabulary."""
         self.predictions = predictions
         # Get the tokens and retrive the vocab.
-        self.test_vocab = Vocab.from_symbols(self.predictions.get_field(Fields.Tokens))
-        self.known_vocab = train_vocab.intersection(self.test_vocab)
+        self.test_tokens = Vocab.from_symbols(self.predictions.get_field(Fields.Tokens))
+        self.known_tokens = train_tokens.intersection(self.test_tokens)
+        if Fields.Lemmas in self.predictions.fields:
+            self.test_lemmas = Vocab.from_symbols(
+                self.predictions.get_field(Fields.GoldLemmas)
+            )
+            self.known_lemmas = train_lemmas.intersection(self.test_lemmas)
         log.debug("Creating vocabs")
-        morphlex_vocab = morphlex_vocab.intersection(self.test_vocab)  # type: ignore
-        wemb_vocab = pretrained_vocab.intersection(self.test_vocab)  # type: ignore
+        morphlex_tokens = morphlex_tokens.intersection(self.test_tokens)  # type: ignore
+        pretrained_tokens = pretrained_vocab.intersection(self.test_tokens)  # type: ignore
         # fmt: off
-        self.unknown_vocab = self.test_vocab.difference(self.known_vocab)  # pylint: disable=no-member
-        self.known_wemb_vocab = self.known_vocab.intersection(wemb_vocab).difference(morphlex_vocab)
-        self.known_wemb_morphlex_vocab = self.known_vocab.intersection(wemb_vocab).intersection(morphlex_vocab)
-        self.known_morphlex_vocab = self.known_vocab.intersection(morphlex_vocab).difference(wemb_vocab)
-        self.seen_vocab = self.known_vocab.difference(wemb_vocab).difference(morphlex_vocab)
-        self.unknown_wemb_vocab = self.unknown_vocab.intersection(wemb_vocab).difference(morphlex_vocab)
-        self.unknown_wemb_morphlex_vocab = self.unknown_vocab.intersection(wemb_vocab).intersection(morphlex_vocab)
-        self.unknown_morphlex_vocab = self.unknown_vocab.intersection(morphlex_vocab).difference(wemb_vocab)
-        self.unseen_vocab = self.unknown_vocab.difference(wemb_vocab).difference(morphlex_vocab)
+        self.unknown_tokens = self.test_tokens.difference(self.known_tokens)  # pylint: disable=no-member
+        self.train_pretrained_tokens = self.known_tokens.intersection(pretrained_tokens).difference(morphlex_tokens)
+        self.train_pretrained_morphlex_tokens = self.known_tokens.intersection(pretrained_tokens).intersection(morphlex_tokens)
+        self.train_morphlex_tokens = self.known_tokens.intersection(morphlex_tokens).difference(pretrained_tokens)
+        self.train_tokens_only = self.known_tokens.difference(pretrained_tokens).difference(morphlex_tokens)
+        self.test_pretrained_tokens = self.unknown_tokens.intersection(pretrained_tokens).difference(morphlex_tokens)
+        self.test_pretrained_morphlex_tokens = self.unknown_tokens.intersection(pretrained_tokens).intersection(morphlex_tokens)
+        self.test_morphlex_tokens = self.unknown_tokens.intersection(morphlex_tokens).difference(pretrained_tokens)
+        self.test_tokens_only = self.unknown_tokens.difference(pretrained_tokens).difference(morphlex_tokens)
         # fmt: on
 
     @staticmethod
@@ -57,30 +63,33 @@ class Experiment:
         log.debug(f"Done reading experiment={path}")
         return Experiment(
             predictions=predictions,
-            train_vocab=train_vocab,
-            morphlex_vocab=morphlex_vocab,
+            train_tokens=train_vocab,
+            morphlex_tokens=morphlex_vocab,
             pretrained_vocab=pretrained_vocab,
         )
 
     @staticmethod
-    def from_tag_predictions(
+    def from_predictions(
         test_ds: FieldedDataset,
-        tags: Sentences,
-        train_vocab: Vocab,
-        morphlex_vocab: Vocab,
-        pretrained_vocab: Vocab,
+        predictions: Sentences,
+        train_tokens: Vocab,
+        morphlex_tokens: Vocab,
+        pretrained_tokens: Vocab,
+        train_lemmas: Vocab = None,
+        field=Fields.Tags,
     ):
         """Create an Experiment from predicted tags, test_dataset and dictionaries."""
-        test_ds = test_ds.add_field(tags, Fields.Tags)
+        test_ds = test_ds.add_field(predictions, field)
         return Experiment(
             test_ds,
-            train_vocab=train_vocab,
-            morphlex_vocab=morphlex_vocab,
-            pretrained_vocab=pretrained_vocab,
+            train_tokens=train_tokens,
+            morphlex_tokens=morphlex_tokens,
+            pretrained_vocab=pretrained_tokens,
+            train_lemmas=train_lemmas,
         )
 
     @staticmethod
-    def all_accuracy_closure(
+    def tag_accuracy_closure(
         test_ds: FieldedDataset,
         train_vocab: Vocab,
         morphlex_vocab: Vocab,
@@ -92,53 +101,61 @@ class Experiment:
             tags: Sentences,
         ) -> Tuple[Dict[str, float], Dict[str, int]]:
             """Closure."""
-            return Experiment.from_tag_predictions(
+            return Experiment.from_predictions(
                 test_ds,
                 tags,
-                train_vocab=train_vocab,
-                morphlex_vocab=morphlex_vocab,
-                pretrained_vocab=pretrained_vocab,
-            ).all_accuracy()
+                train_tokens=train_vocab,
+                morphlex_tokens=morphlex_vocab,
+                pretrained_tokens=pretrained_vocab,
+            ).tagging_accuracy()
 
         return calculate_accuracy
 
-    def calculate_accuracy(self, vocab: Set[str] = None) -> Tuple[float, int]:
+    @staticmethod
+    def lemma_accuracy_closure(
+        test_ds: FieldedDataset,
+        train_tokens: Vocab,
+        morphlex_tokens: Vocab,
+        pretrained_tokens: Vocab,
+        train_lemmas: Vocab,
+    ) -> Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]:
+        """Create an Experiment from predicted tags, test_dataset and dictionaries."""
+
+        def calculate_accuracy(
+            lemmas: Sentences,
+        ) -> Tuple[Dict[str, float], Dict[str, int]]:
+            """Closure."""
+            return Experiment.from_predictions(
+                test_ds,
+                lemmas,
+                train_tokens=train_tokens,
+                morphlex_tokens=morphlex_tokens,
+                pretrained_tokens=pretrained_tokens,
+                train_lemmas=train_lemmas,
+                field=Fields.Lemmas,
+            ).lemma_accuracy()
+
+        return calculate_accuracy
+
+    def accuracy(
+        self, vocab: Set[str] = None, gold_field=Fields.GoldTags, pred_field=Fields.Tags
+    ) -> Tuple[float, int]:
         """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter."""
-        if vocab is None:
-            total = sum(
-                (
-                    1
-                    for tokens, gold_tags, predicted_tags in zip(
-                        self.predictions.get_field(Fields.Tokens),
-                        self.predictions.get_field(Fields.GoldTags),
-                        self.predictions.get_field(Fields.Tags),
-                    )
-                    for _ in zip(tokens, gold_tags, predicted_tags)
-                )
-            )
-            correct = sum(
-                (
-                    predicted == gold
-                    for tokens, gold_tags, predicted_tags in zip(
-                        self.predictions.get_field(Fields.Tokens),
-                        self.predictions.get_field(Fields.GoldTags),
-                        self.predictions.get_field(Fields.Tags),
-                    )
-                    for _, gold, predicted in zip(tokens, gold_tags, predicted_tags)
-                )
-            )
-            return (correct / total, total)
-        # We need to filter based on the given vocabulary
+
+        def in_vocabulary(token, vocab):
+            """Filter condition."""
+            # Empty vocab implies all
+            if vocab is None:
+                return True
+            else:
+                return token in vocab
+
         total = sum(
             (
                 1
-                for tokens, gold_tags, predicted_tags in zip(
-                    self.predictions.get_field(Fields.Tokens),
-                    self.predictions.get_field(Fields.GoldTags),
-                    self.predictions.get_field(Fields.Tags),
-                )
-                for token, _, _ in zip(tokens, gold_tags, predicted_tags)
-                if token in vocab
+                for tokens in self.predictions.get_field(Fields.Tokens)
+                for token in tokens
+                if in_vocabulary(token, vocab)
             )
         )
         if total == 0:
@@ -146,45 +163,65 @@ class Experiment:
         correct = sum(
             (
                 predicted == gold
-                for tokens, gold_tags, predicted_tags in zip(
+                for tokens, golds, predicted in zip(
                     self.predictions.get_field(Fields.Tokens),
-                    self.predictions.get_field(Fields.GoldTags),
-                    self.predictions.get_field(Fields.Tags),
+                    self.predictions.get_field(gold_field),
+                    self.predictions.get_field(pred_field),
                 )
-                for token, gold, predicted in zip(tokens, gold_tags, predicted_tags)
-                if token in vocab
+                for token, gold, predicted in zip(tokens, golds, predicted)
+                if in_vocabulary(token, vocab)
             )
         )
         return (correct / total, total)
 
-    def all_accuracy(self) -> Tuple[Dict[str, float], Dict[str, int]]:
+    def tagging_accuracy(self) -> Tuple[Dict[str, float], Dict[str, int]]:
         """Return all accuracies."""
 
-        def _all_accuracy(index):
+        def _tagging_accuracy(index):
             return {
-                "Total": self.calculate_accuracy()[index],
-                "Unknown": self.calculate_accuracy(self.unknown_vocab)[index],
-                "Known": self.calculate_accuracy(self.known_vocab)[index],
-                "Known-Wemb": self.calculate_accuracy(self.known_wemb_vocab)[index],
-                "Known-Wemb+Morph": self.calculate_accuracy(
-                    self.known_wemb_morphlex_vocab
+                "Total": self.accuracy()[index],
+                "Unknown": self.accuracy(self.unknown_tokens)[index],
+                "Known": self.accuracy(self.known_tokens)[index],
+                "Known-Wemb": self.accuracy(self.train_pretrained_tokens)[index],
+                "Known-Wemb+Morph": self.accuracy(
+                    self.train_pretrained_morphlex_tokens
                 )[index],
-                "Known-Morph": self.calculate_accuracy(self.known_morphlex_vocab)[
-                    index
-                ],
-                "Seen": self.calculate_accuracy(self.seen_vocab)[index],
-                "Unknown-Wemb": self.calculate_accuracy(self.unknown_wemb_vocab)[index],
-                "Unknown-Wemb+Morph": self.calculate_accuracy(
-                    self.unknown_wemb_morphlex_vocab
+                "Known-Morph": self.accuracy(self.train_morphlex_tokens)[index],
+                "Seen": self.accuracy(self.train_tokens_only)[index],
+                "Unknown-Wemb": self.accuracy(self.test_pretrained_tokens)[index],
+                "Unknown-Wemb+Morph": self.accuracy(
+                    self.test_pretrained_morphlex_tokens
                 )[index],
-                "Unknown-Morph": self.calculate_accuracy(self.unknown_morphlex_vocab)[
-                    index
-                ],
-                "Unseen": self.calculate_accuracy(self.unseen_vocab)[index],
+                "Unknown-Morph": self.accuracy(self.test_morphlex_tokens)[index],
+                "Unseen": self.accuracy(self.test_tokens_only)[index],
             }
 
-        accuracy = _all_accuracy(0)
-        total = _all_accuracy(1)
+        accuracy = _tagging_accuracy(0)
+        total = _tagging_accuracy(1)
+        return accuracy, total  # type: ignore
+
+    def lemma_accuracy(self) -> Tuple[Dict[str, float], Dict[str, int]]:
+        """Return all lemma accuracies."""
+
+        def _tagging_accuracy(index):
+            return {
+                "Total": self.accuracy(
+                    gold_field=Fields.GoldLemmas, pred_field=Fields.Lemmas
+                )[index],
+                "Unknown": self.accuracy(
+                    self.unknown_tokens,
+                    gold_field=Fields.GoldLemmas,
+                    pred_field=Fields.Lemmas,
+                )[index],
+                "Known": self.accuracy(
+                    self.known_tokens,
+                    gold_field=Fields.GoldLemmas,
+                    pred_field=Fields.Lemmas,
+                )[index],
+            }
+
+        accuracy = _tagging_accuracy(0)
+        total = _tagging_accuracy(1)
         return accuracy, total  # type: ignore
 
     def error_profile(self):
@@ -195,16 +232,6 @@ class Experiment:
             for token, gold, predicted in zip(tokens, gold_tags, predicted_tags)
             if gold != predicted
         )
-
-
-def get_by_key_backup(key1, key2, dictionary: Dict[Any, VocabMap]) -> Set:
-    """Fetch value from dict by key1 first, then key2 or return empty set."""
-    if key1 in dictionary:
-        return set(dictionary[key1].w2i.keys())
-    elif key2 in dictionary:
-        return set(dictionary[key2].w2i.keys())
-    else:
-        return set()
 
 
 def get_average(
@@ -236,7 +263,7 @@ def all_accuracy_average(
     all_accuracies = []
     all_totals = []
     for experiment in experiments:
-        accuracies, totals = experiment.all_accuracy()
+        accuracies, totals = experiment.tagging_accuracy()
         all_accuracies.append(accuracies)
         all_totals.append(totals)
     return (

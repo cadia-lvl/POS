@@ -267,19 +267,27 @@ def train_and_tag(**kwargs):
     # Train a model
     print_tagger(abl_tagger)
 
-    criterion = get_criterion(**kwargs)
+    criterion = get_criterion(decoders=decoders)
     parameter_groups = get_parameter_groups(abl_tagger.named_parameters(), **kwargs)
     optimizer = get_optimizer(parameter_groups, **kwargs)
     scheduler = get_scheduler(optimizer, **kwargs)
     # TODO: Add evaluator for Lemmas
-    evaluators = {
-        Modules.Tagger: Experiment.all_accuracy_closure(
+    evaluators = {}
+    if Modules.Tagger in decoders:
+        evaluators[Modules.Tagger] = Experiment.tag_accuracy_closure(
             test_ds=test_ds,
             train_vocab=train_ds.get_vocab(),
             morphlex_vocab=Vocab.from_file(MORPHLEX_VOCAB_PATH),
             pretrained_vocab=Vocab.from_file(PRETRAINED_VOCAB_PATH),
         )
-    }
+    if Modules.Lemmatizer in decoders:
+        evaluators[Modules.Lemmatizer] = Experiment.lemma_accuracy_closure(
+            test_ds=test_ds,
+            train_tokens=train_ds.get_vocab(),
+            morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
+            pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+            train_lemmas=Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)),
+        )
 
     # Write all configuration to disk
     output_dir = pathlib.Path(kwargs["output_dir"])
@@ -309,6 +317,10 @@ def train_and_tag(**kwargs):
     with (output_dir / "known_toks.txt").open("w+") as f:
         for token in Vocab.from_symbols(train_ds.get_field(Fields.Tokens)):
             f.write(f"{token}\n")
+    if Fields.GoldLemmas in train_ds.fields:
+        with (output_dir / "known_lemmas.txt").open("w+") as f:
+            for lemma in Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)):
+                f.write(f"{lemma}\n")
     if kwargs["save_vocab"]:
         save_location = output_dir.joinpath("dictionaries.pickle")
         with save_location.open("wb+") as f:

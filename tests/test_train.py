@@ -13,13 +13,15 @@ from pos.train import (
 )
 
 
-def test_train_tagger(abl_tagger, data_loader, kwargs, tagger_evaluator):
-    criterion = get_criterion(**kwargs)
+def test_train_tagger(
+    abl_tagger, data_loader, kwargs, tagger_evaluator, lemma_evaluator
+):
+    criterion = get_criterion(abl_tagger.decoders)
     parameter_groups = get_parameter_groups(abl_tagger.named_parameters(), **kwargs)
     optimizer = get_optimizer(parameter_groups, **kwargs)
     scheduler = get_scheduler(optimizer, **kwargs)
     # TODO: Add evaluator for Lemmas
-    evaluators = {Modules.Tagger: tagger_evaluator}
+    evaluators = {Modules.Tagger: tagger_evaluator, Modules.Lemmatizer: lemma_evaluator}
 
     # Write all configuration to disk
     output_dir = pathlib.Path(kwargs["output_dir"])

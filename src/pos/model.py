@@ -105,7 +105,8 @@ class ClassingWordEmbedding(Embedding):
     def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
         return pad_sequence(
-            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch], batch_first=True,
+            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch],
+            batch_first=True,
         )
 
     def embed(self, batch: Tensor) -> Tensor:
@@ -142,7 +143,9 @@ class PretrainedEmbedding(ClassingWordEmbedding):
             pass_to_bilstm=pass_to_bilstm,
         )  # we overwrite the embedding
         self.embedding = nn.Embedding.from_pretrained(
-            embeddings, freeze=freeze, padding_idx=padding_idx,
+            embeddings,
+            freeze=freeze,
+            padding_idx=padding_idx,
         )
 
 
@@ -290,6 +293,12 @@ class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
         """Return the output dimension."""
         raise NotImplementedError
 
+    @property
+    @abc.abstractmethod
+    def weight(self) -> int:
+        """Return the decoder weight."""
+        raise NotImplementedError
+
     @abc.abstractmethod
     def add_targets(self, batch: Dict[BATCH_KEYS, Any]):
         """Add the decoder targets to the batch dictionary. SIDE-EFFECTS!."""
@@ -318,6 +327,7 @@ class GRUDecoder(Decoder):
         emb_dim,
         teacher_forcing=0.0,
         dropout=0.0,
+        weight=1,
     ):
         """Initialize the model."""
         super().__init__()
@@ -329,6 +339,7 @@ class GRUDecoder(Decoder):
         self._output_dim = len(
             vocab_map
         )  # The number of characters, these will be interpreted as logits.
+        self._weight = weight
 
         self.embedding = nn.Embedding(
             len(vocab_map), emb_dim
@@ -351,6 +362,11 @@ class GRUDecoder(Decoder):
     def output_dim(self) -> int:
         """Return the output dimension."""
         return self._output_dim
+
+    @property
+    def weight(self) -> int:
+        """Return the decoder weight."""
+        return self._weight
 
     def initial_hidden(self, batch_size: int) -> Tensor:
         """Initialize the hidden."""
@@ -379,7 +395,7 @@ class GRUDecoder(Decoder):
             lemmas.append(self.map_lemma_from_char_idx(sent[tok_num]))
         return tuple(lemmas)
 
-    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sequence[Sentence]:
+    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sentences:
         """Postprocess the model output."""
         # Get the character predictions
         char_preds = batch.argmax(dim=2)
@@ -459,7 +475,7 @@ class GRUDecoder(Decoder):
 class Tagger(Decoder):
     """A tagger; accept some tensor input and return logits over classes."""
 
-    def __init__(self, vocab_map: VocabMap, input_dim):
+    def __init__(self, vocab_map: VocabMap, input_dim, weight=1):
         """Initialize."""
         super().__init__()
         self.vocab_map = vocab_map
@@ -467,11 +483,17 @@ class Tagger(Decoder):
         self.tagger = nn.Linear(input_dim, output_dim)
         nn.init.xavier_uniform_(self.tagger.weight)
         self._output_dim = output_dim
+        self._weight = weight
 
     @property
     def output_dim(self) -> int:
         """Return the output dimension."""
         return self._output_dim
+
+    @property
+    def weight(self) -> int:
+        """Return the decoder weight."""
+        return self._weight
 
     def decode(self, encoded: Tensor, batch: Dict[BATCH_KEYS, Any]) -> Tensor:
         """Run the decoder on the batch."""
@@ -579,7 +601,10 @@ class Encoder(nn.Module):
 
             # Pack the paddings
             packed = pack_padded_sequence(
-                embs_to_bilstm, lengths, batch_first=True, enforce_sorted=False,
+                embs_to_bilstm,
+                lengths,
+                batch_first=True,
+                enforce_sorted=False,
             )
             # Make sure that the parameters are contiguous.
             self.bilstm.flatten_parameters()
@@ -623,7 +648,8 @@ def pack_sequence(padded_sequence):
     lengths = torch.sum(torch.pow(padded_sequence, 2), dim=2)
     # lengths = (b)
     lengths = torch.sum(
-        lengths != torch.Tensor([0.0]).to(padded_sequence.device), dim=1,
+        lengths != torch.Tensor([0.0]).to(padded_sequence.device),
+        dim=1,
     )
     return (
         pack_padded_sequence(

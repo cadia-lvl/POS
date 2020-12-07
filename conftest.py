@@ -127,11 +127,22 @@ def abl_tagger(encoder, tagger_module, lemmatizer_module) -> ABLTagger:
 
 @fixture
 def tagger_evaluator(ds_lemma):
-    return Experiment.all_accuracy_closure(
+    return Experiment.tag_accuracy_closure(
         ds_lemma,
         train_vocab=ds_lemma.get_vocab(),
         morphlex_vocab=Vocab.from_file(MORPHLEX_VOCAB_PATH),
         pretrained_vocab=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+    )
+
+
+@fixture
+def lemma_evaluator(ds_lemma):
+    return Experiment.lemma_accuracy_closure(
+        ds_lemma,
+        train_tokens=ds_lemma.get_vocab(),
+        morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
+        pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+        train_lemmas=Vocab.from_symbols(ds_lemma.get_field(Fields.GoldLemmas)),
     )
 
 
