@@ -118,6 +118,12 @@ def lemmatizer_module(vocab_maps, encoder) -> GRUDecoder:
 
 
 @fixture
+def decoders(tagger_module, lemmatizer_module):
+    """Return the decoders."""
+    return {Modules.Lemmatizer: lemmatizer_module, Modules.Tagger: tagger_module}
+
+
+@fixture
 def abl_tagger(encoder, tagger_module, lemmatizer_module) -> ABLTagger:
     return ABLTagger(
         encoder=encoder,

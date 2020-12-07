@@ -60,12 +60,12 @@ class BatchPreprocess(metaclass=abc.ABCMeta):
 class Embedding(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
     """A module which accepts string inputs and embeds them to tensors."""
 
-    def forward(self, batch: Sequence[Sentence]) -> Tensor:
+    def forward(self, batch: Sequence[Sentence], lengths: Sequence[int]) -> Tensor:
         """Run a generic forward pass for the Embeddings."""
-        return self.embed(self.preprocess(batch).to(core.device))
+        return self.embed(self.preprocess(batch), lengths).to(core.device)
 
     @abc.abstractmethod
-    def embed(self, batch: Tensor) -> Tensor:
+    def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
         raise NotImplementedError
 
@@ -109,7 +109,7 @@ class ClassingWordEmbedding(Embedding):
             batch_first=True,
         )
 
-    def embed(self, batch: Tensor) -> Tensor:
+    def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
         return self.embedding(batch)
 
@@ -188,46 +188,17 @@ class CharacterAsWordEmbedding(Embedding):
         """Preprocess the sentence batch."""
         return map_to_chars_batch(batch, self.vocab_map.w2i)
 
-    def embed(self, batch: Tensor) -> Tensor:
+    def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
-        # (b, seq, chars, f)
+        # (b * seq, chars)
         char_embs = self.character_embedding(batch)
+        # (b * seq, chars, f)
         self.char_bilstm.flatten_parameters()
-        # One sentence at a time
-        words_as_chars = []
-        for b in range(char_embs.shape[0]):
-            # w = words in sent, c = chars in word, f = char features
-            # (w, c, f)
-            sent_chars = char_embs[b, :, :, :]
-            # some sentences might only contain PADs for some words, which pack_sequence does not like
-            # Count the number of non-PAD words
-            num_non_zero = torch.sum(
-                torch.sum(torch.sum(sent_chars, dim=2), dim=1) != 0.0
-            ).item()
-            # Drop them
-            dropped_pads = sent_chars[: int(num_non_zero), :, :]
-            packed, lengths = pack_sequence(dropped_pads)
-            sent_chars_rep = self.char_bilstm(packed)[0]
-            un_packed = unpack_sequence(sent_chars_rep)
-            # Get the last timestep, taking the PADs on char level into account
-            sent_chars_rep_last_ts = torch.cat(
-                [
-                    un_packed[idx, length - 1, :][None, :]
-                    for idx, length in enumerate(lengths.tolist())
-                ],
-                dim=0,
-            )
-            # Re-add the PAD words we removed before
-            added_pads = copy_into_larger_tensor(
-                sent_chars_rep_last_ts,
-                sent_chars_rep_last_ts.new_zeros(
-                    size=(sent_chars.shape[0], sent_chars_rep_last_ts.shape[1])
-                ),
-            )
-            # Collect and add dimension to sum up
-            words_as_chars.append(added_pads[None, :, :])
-        chars_as_word = torch.cat(words_as_chars, dim=0)
-        return chars_as_word
+        out, _ = self.char_bilstm(char_embs)
+        last_timestep = out[:, -1, :]  # Only the last timestep
+        return last_timestep.reshape(
+            len(lengths), -1, out.shape[-1]
+        )  # Map to (batch, tokens, features)
 
     @property
     def to_bilstm(self):
@@ -269,7 +240,7 @@ class FlairTransformerEmbedding(Embedding):
             batch_first=True,
         )
 
-    def embed(self, batch: Tensor) -> Tensor:
+    def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
         return batch
 
@@ -580,13 +551,13 @@ class Encoder(nn.Module):
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # Embeddings
         list_to_bilstm = [
-            emb(batch) for emb in self.embeddings.values() if emb.to_bilstm
+            emb(batch, lengths) for emb in self.embeddings.values() if emb.to_bilstm
         ]
         embs_to_bilstm = None
         if list_to_bilstm:
             embs_to_bilstm = torch.cat(list_to_bilstm, dim=2)
         list_embs = [
-            emb(batch) for emb in self.embeddings.values() if not emb.to_bilstm
+            emb(batch, lengths) for emb in self.embeddings.values() if not emb.to_bilstm
         ]
         embs = None
         if list_embs:
@@ -624,7 +595,7 @@ class Encoder(nn.Module):
 class ABLTagger(nn.Module):
     """The ABLTagger, consists of an Encoder(multipart) and a Tagger."""
 
-    def __init__(self, encoder: nn.Module, decoders: Dict[Modules, Decoder]):
+    def __init__(self, encoder: Encoder, decoders: Dict[Modules, Decoder]):
         """Initialize the tagger."""
         super().__init__()
         self.encoder = encoder
