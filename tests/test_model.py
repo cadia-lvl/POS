@@ -1,9 +1,11 @@
 """To test parts of the model."""
 import pytest
 from torch import zeros
+import torch
 
 from pos.model import (
     ClassingWordEmbedding,
+    DotAttention,
     Modules,
     PretrainedEmbedding,
     FlairTransformerEmbedding,
@@ -95,3 +97,10 @@ def test_full_run(data_loader, vocab_maps, electra_model):
     abl_tagger = ABLTagger(encoder=encoder, decoders={Modules.Tagger: tagger})
     for batch in data_loader:
         abl_tagger(batch)
+
+
+def test_attention():
+    hidden_decoder = torch.rand(size=(4, 2))
+    hiddens_encoder = torch.rand(size=(4, 3, 2))
+    attention = DotAttention()
+    result = attention(hidden_decoder, hiddens_encoder)

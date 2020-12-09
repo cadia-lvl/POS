@@ -8,7 +8,7 @@ import random
 from flair.embeddings import TransformerWordEmbeddings
 from flair.data import Sentence as f_sentence
 import torch
-from torch import Tensor, stack
+from torch import Tensor, stack, softmax, diagonal, cat
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
 
@@ -255,6 +255,53 @@ class FlairTransformerEmbedding(Embedding):
         return self._output_dim
 
 
+class DotAttention(nn.Module):
+    """Dot attention module as described in Luong et al. 2015."""
+
+    def __init__(self):
+        """Initialize it."""
+        super().__init__()
+
+    @staticmethod
+    def score(hidden_decoder: Tensor, hidden_encoder: Tensor):
+        """Compute the dot product as a score.
+
+        Args:
+            hidden_decoder: (b, f)
+            hidden_encoder: (b, f)
+        Returns:
+            score: (b)
+        """
+        # both are (b, f)
+        return diagonal(hidden_decoder.matmul(hidden_encoder.T))
+
+    def forward(self, hidden_decoder: Tensor, hiddens_encoder: Tensor):
+        """Forward pass.
+
+        Args:
+            hidden_decoder: (b, f), b is the batch_size, f the features
+            hiddens_encoder: (b, t, f) where t is timeseries to attend to.
+        Returns:
+            context: (b, f)
+        """
+
+        scores = stack(
+            tuple(
+                self.score(hidden_decoder, hiddens_encoder[:, i, :])
+                for i in range(hiddens_encoder.shape[1])
+            ),
+            dim=1,
+        )
+        # The attention weights; (b, t)
+        a = softmax(scores, dim=1)
+        # (b, t, f)
+        a_stack = stack(tuple(a for _ in range(hidden_decoder.shape[1])), dim=2)
+        weighted_hiddens = a_stack.multiply(hiddens_encoder)
+        # (b, f)
+        context = weighted_hiddens.sum(dim=1)
+        return context
+
+
 class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
     """A module which accepts an sentence embedding and outputs another tensor."""
 
@@ -390,6 +437,7 @@ class GRUDecoder(Decoder):
         batch: Dict[BATCH_KEYS, Any],
         previous_predictions: Optional[Tensor] = None,
         teacher_forcing=0.5,
+        training=True,
     ):
         """Get the next character timestep to feed the model."""
         if previous_predictions is None:  # First timestep
@@ -397,7 +445,11 @@ class GRUDecoder(Decoder):
             return map_to_chars_batch(batch[BATCH_KEYS.TOKENS], vocab_map.w2i)[:, 0]
         previous_timestep = previous_predictions.shape[1] - 1  # -1 for 0 indexing
         # We have the targets and teacher forcing
-        if BATCH_KEYS.TARGET_LEMMAS in batch and random.random() < teacher_forcing:
+        if (
+            BATCH_KEYS.TARGET_LEMMAS in batch
+            and training
+            and random.random() < teacher_forcing
+        ):
             return batch[BATCH_KEYS.TARGET_LEMMAS][:, previous_timestep]
         # We don't have targets or no teacher forcing
         return previous_predictions[:, previous_timestep, :].argmax(dim=1)
@@ -433,6 +485,7 @@ class GRUDecoder(Decoder):
                     batch,
                     predictions,
                     teacher_forcing=self.teacher_forcing,
+                    training=self.training,
                 ).to(core.device)
                 emb_chars = self.dropout(self.embedding(next_char_input))
                 gru_in = torch.cat((emb_chars, context), dim=1).unsqueeze(
