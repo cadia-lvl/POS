@@ -33,6 +33,6 @@ train-and-tag \
 --batch_size 16 \
 --save_vocab \
 --save_model \
---optimizer sgd \
---learning_rate 5e-2 \
+--optimizer adam \
+--learning_rate 5e-5 \
 $*
