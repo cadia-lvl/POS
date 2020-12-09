@@ -294,7 +294,6 @@ class GRUDecoder(Decoder):
         self,
         vocab_map: VocabMap,
         hidden_dim,
-        context_dim,
         emb_dim,
         teacher_forcing=0.0,
         dropout=0.0,
@@ -316,11 +315,11 @@ class GRUDecoder(Decoder):
             len(vocab_map), emb_dim
         )  # We map the input idx to vectors.
         self.rnn = nn.GRU(
-            emb_dim + context_dim, hidden_dim, batch_first=True
+            emb_dim + hidden_dim, hidden_dim, batch_first=True
         )  # The input is the embedding and context
 
         self.fc_out = nn.Linear(
-            emb_dim + hidden_dim + context_dim, len(vocab_map)
+            emb_dim + hidden_dim + hidden_dim, len(vocab_map)
         )  # Map to logits.
         self.illegal_chars_output = {
             self.vocab_map.SOS_ID,
@@ -338,11 +337,6 @@ class GRUDecoder(Decoder):
     def weight(self) -> int:
         """Return the decoder weight."""
         return self._weight
-
-    def initial_hidden(self, batch_size: int) -> Tensor:
-        """Initialize the hidden."""
-        # Seq-len = 1, since it is auto-regressive
-        return torch.zeros(size=(1, batch_size, self.hidden_dim)).to(core.device)
 
     def map_lemma_from_char_idx(self, char_idxs: List[int]) -> str:
         """Map a lemma from character indices."""
@@ -412,7 +406,9 @@ class GRUDecoder(Decoder):
         # [batch_size * max_seq_len, max_token_len, emb_size]
         predictions: Optional[Tensor] = None
 
-        hidden = self.initial_hidden(context.shape[0])
+        hidden = context.reshape((1, context.shape[0], context.shape[1]))
+        # return torch.zeros(size=(1, batch_size, self.hidden_dim)).to(core.device)
+        # self.initial_hidden(context.shape[0])
         # We are training
         if BATCH_KEYS.TARGET_LEMMAS in batch:
             for _ in range(

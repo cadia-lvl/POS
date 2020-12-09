@@ -109,8 +109,7 @@ def lemmatizer_module(vocab_maps, encoder) -> GRUDecoder:
     """Return a Tagger."""
     return GRUDecoder(
         vocab_map=vocab_maps[Dicts.Chars],
-        hidden_dim=10,
-        context_dim=encoder.output_dim,
+        hidden_dim=encoder.output_dim,
         emb_dim=20,
         teacher_forcing=0.0,
         dropout=0.0,

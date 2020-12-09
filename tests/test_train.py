@@ -56,8 +56,7 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
     encoder = Encoder(embeddings=embs, **kwargs)
     decoders[Modules.Lemmatizer] = GRUDecoder(
         vocab_map=dicts[Dicts.Chars],
-        hidden_dim=20,
-        context_dim=encoder.output_dim,
+        hidden_dim=encoder.output_dim,
         emb_dim=64,
     )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders)

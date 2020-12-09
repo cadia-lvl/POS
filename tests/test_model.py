@@ -22,7 +22,7 @@ def test_classic_wemb(vocab_maps, data_loader):
         vocab_map=vocab_maps[Dicts.Tokens], embedding_dim=emb_dim
     )
     for batch in data_loader:
-        embs = wemb(batch[BATCH_KEYS.TOKENS])
+        embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         assert embs.shape == (3, 3, emb_dim)
         assert embs.requires_grad == True
 
@@ -36,7 +36,7 @@ def test_pretrained_wemb(vocab_maps, data_loader):
         freeze=True,
     )
     for batch in data_loader:
-        embs = wemb(batch[BATCH_KEYS.TOKENS])
+        embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         assert embs.shape == (3, 3, emb_dim)
         assert embs.requires_grad == False
 
@@ -70,13 +70,11 @@ def test_tagger(encoder, data_loader, tagger_module):
 
 
 def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
-    hidden_dim = 3
-    context_dim = encoder.output_dim
+    hidden_dim = encoder.output_dim
     emb_dim = 5
     gru = GRUDecoder(
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=hidden_dim,
-        context_dim=context_dim,
         emb_dim=emb_dim,
     )
     for batch in data_loader:
