@@ -162,7 +162,8 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--tagger_weight", default=1, help="Value to multiply tagging loss")
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option("--lemmatizer_weight", default=1, help="Value to multiply lemmatizer loss")
-@click.option("--lemmatizer_hidden_dim", default=512, help="The hidden dimension of the lemmatizer.")
+@click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
+@click.option("--lemmatizer_teacher_forcing", default=0.0, help="Teacher forcing in Lemmatizer.")
 @click.option("--known_chars_file", default=None, help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
 @click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
 @click.option("--char_emb_dim", default=20, help="The embedding size for characters.")
@@ -265,10 +266,9 @@ def train_and_tag(**kwargs):
         log.info("Training Lemmatizer")
         decoders[Modules.Lemmatizer] = GRUDecoder(
             vocab_map=dicts[Dicts.Chars],
-            hidden_dim=kwargs["lemmatizer_hidden_dim"],
-            context_dim=encoder.output_dim,
-            emb_dim=64,
-            teacher_forcing=0.0,
+            hidden_dim=encoder.output_dim,
+            emb_dim=kwargs["lemmatizer_char_dim"],
+            teacher_forcing=kwargs["lemmatizer_teacher_forcing"],
             dropout=0.0,
         )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(core.device)
