@@ -57,8 +57,8 @@ def test_transformer_embedding_electra_small(electra_model, data_loader):
 def test_encoder(encoder: Encoder, data_loader):
     for batch in data_loader:
         embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
-        assert embs.shape == (3, 3, encoder.output_dim)
-        assert embs.requires_grad == True
+        assert embs[Modules.BiLSTM].shape == (3, 3, encoder.output_dim)
+        assert embs[Modules.BiLSTM].requires_grad == True
 
 
 def test_tagger(encoder, data_loader, tagger_module):
@@ -66,7 +66,7 @@ def test_tagger(encoder, data_loader, tagger_module):
         embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         tag_embs = tagger_module(embs, batch)
         assert tag_embs.shape == (3, 3, tagger_module.output_dim)
-        assert embs.requires_grad == True
+        assert embs[Modules.BiLSTM].requires_grad == True
 
 
 def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):

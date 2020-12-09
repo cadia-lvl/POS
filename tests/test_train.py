@@ -49,9 +49,7 @@ def test_train_tagger(
 def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
     dicts = vocab_maps
     embs = {}
-    embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(
-        dicts[Dicts.Chars], pass_to_bilstm=False
-    )
+    embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(dicts[Dicts.Chars])
     decoders = {}
     encoder = Encoder(embeddings=embs, **kwargs)
     decoders[Modules.Lemmatizer] = GRUDecoder(

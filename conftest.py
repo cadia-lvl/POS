@@ -162,6 +162,7 @@ def kwargs():
         "lemmatizer": True,
         "tagger_weight": 1,
         "lemmatizer_weight": 1,
+        "main_lstm_layers": 1,
         "scheduler": "multiply",
         "learning_rate": 5e-5,
         "word_embedding_lr": 0.2,

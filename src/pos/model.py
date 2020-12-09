@@ -275,10 +275,14 @@ class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
         """Add the decoder targets to the batch dictionary. SIDE-EFFECTS!."""
 
     @abc.abstractmethod
-    def decode(self, encoded: Tensor, batch: Dict[BATCH_KEYS, Any]) -> Tensor:
+    def decode(
+        self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
+    ) -> Tensor:
         """Run the decoder on the batch."""
 
-    def forward(self, encoded: Tensor, batch: Dict[BATCH_KEYS, Any]) -> Tensor:
+    def forward(
+        self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
+    ) -> Tensor:
         """Run a generic forward pass for the Embeddings."""
         self.add_targets(batch)
         return self.decode(encoded=encoded, batch=batch)
@@ -398,10 +402,20 @@ class GRUDecoder(Decoder):
         # We don't have targets or no teacher forcing
         return previous_predictions[:, previous_timestep, :].argmax(dim=1)
 
-    def decode(self, encoded: Tensor, batch: Dict[BATCH_KEYS, Any]) -> Tensor:
+    def decode(
+        self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
+    ) -> Tensor:
         """Run the decoder on the batch."""
         # [batch_size * max_seq_len, emb_size]
-        context = encoded.reshape(shape=(-1, encoded.shape[2]))
+        context = torch.cat(
+            tuple(
+                emb
+                for key, emb in encoded.items()
+                if key in {Modules.BERT, Modules.BiLSTM}
+            ),
+            dim=2,
+        )
+        context = context.reshape(shape=(-1, context.shape[2]))
 
         # [batch_size * max_seq_len, max_token_len, emb_size]
         predictions: Optional[Tensor] = None
@@ -462,9 +476,19 @@ class Tagger(Decoder):
         """Return the decoder weight."""
         return self._weight
 
-    def decode(self, encoded: Tensor, batch: Dict[BATCH_KEYS, Any]) -> Tensor:
+    def decode(
+        self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
+    ) -> Tensor:
         """Run the decoder on the batch."""
-        return self.tagger(encoded)
+        context = torch.cat(
+            tuple(
+                emb
+                for key, emb in encoded.items()
+                if key in {Modules.BERT, Modules.BiLSTM}
+            ),
+            dim=2,
+        )
+        return self.tagger(context)
 
     def add_targets(self, batch: Dict[BATCH_KEYS, Any]):
         """Add the decoder targets to the batch dictionary. SIDE-EFFECTS!."""
@@ -542,27 +566,26 @@ class Encoder(nn.Module):
         self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
         self.output_dim = encoder_out_dim
 
-    def forward(self, batch: Sequence[Sentence], lengths: Sequence[int]):
+    def forward(
+        self, batch: Sequence[Sentence], lengths: Sequence[int]
+    ) -> Dict[Modules, Tensor]:
         """Run a forward pass through the module. Input should be tensors."""
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # Embeddings
-        list_to_bilstm = [
-            emb(batch, lengths) for emb in self.embeddings.values() if emb.to_bilstm
-        ]
+        embedded = {key: emb(batch, lengths) for key, emb in self.embeddings.items()}
+
+        to_bilstm = {
+            key: embedded[key] for key, emb in self.embeddings.items() if emb.to_bilstm
+        }
         embs_to_bilstm = None
-        if list_to_bilstm:
-            embs_to_bilstm = torch.cat(list_to_bilstm, dim=2)
-        list_embs = [
-            emb(batch, lengths) for emb in self.embeddings.values() if not emb.to_bilstm
-        ]
-        embs = None
-        if list_embs:
-            embs = torch.cat(list_embs, dim=2)
+        if to_bilstm:
+            embs_to_bilstm = torch.cat(list(to_bilstm.values()), dim=2)
 
         # Add noise - like in dyney
         # if self.training and main_in is not None:
         #     main_in = main_in + torch.empty_like(main_in).normal_(0, self.noise)
         # (b, seq, f)
+        results = {Modules(key): emb for key, emb in embedded.items()}
 
         if self.use_bilstm and embs_to_bilstm is not None:
 
@@ -580,12 +603,9 @@ class Encoder(nn.Module):
             # Unpack and ignore the lengths
             bilstm_out, _ = pad_packed_sequence(packed_out, batch_first=True)
             bilstm_out = self.main_bilstm_out_dropout(bilstm_out)
-            if embs:
-                embs = torch.cat([embs, bilstm_out], dim=2)
-            else:
-                embs = bilstm_out
+            results[Modules.BiLSTM] = bilstm_out
 
-        return embs
+        return results
 
 
 class ABLTagger(nn.Module):
@@ -600,7 +620,9 @@ class ABLTagger(nn.Module):
 
     def forward(self, batch: Dict[BATCH_KEYS, Any]) -> Dict[Modules, Tensor]:
         """Forward pass."""
-        encoded = self.encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
+        encoded: Dict[Modules, Tensor] = self.encoder(
+            batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS]
+        )
         return {
             Modules(key): decoder(encoded, batch)
             for key, decoder in self.decoders.items()
