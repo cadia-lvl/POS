@@ -293,8 +293,8 @@ class DotAttention(nn.Module):
         # The attention weights; (b, t)
         a = softmax(scores, dim=1)
         # (b, t, f)
-        a_stack = stack(tuple(a for _ in range(hidden_decoder.shape[1])), dim=2)
-        weighted_hiddens = a_stack.multiply(hiddens_encoder)
+        a_stack: Tensor = stack(tuple(a for _ in range(hidden_decoder.shape[1])), dim=2)
+        weighted_hiddens = a_stack.mul(hiddens_encoder)
         # (b, f)
         context = weighted_hiddens.sum(dim=1)
         return context
