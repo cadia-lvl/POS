@@ -293,11 +293,15 @@ class DotAttention(nn.Module):
         # The attention weights; (b, t)
         a = softmax(scores, dim=1)
         # (b, t, f)
-        a_stack: Tensor = stack(tuple(a for _ in range(hidden_decoder.shape[1])), dim=2)
-        weighted_hiddens = a_stack.mul(hiddens_encoder)
-        # (b, f)
-        context = weighted_hiddens.sum(dim=1)
-        return context
+        return stack(
+            tuple(
+                # (b, t) * f
+                a.mul(hiddens_encoder[:, :, i])
+                for i in range(hiddens_encoder.shape[2])
+            ),
+            dim=2,
+            # (b, f)
+        ).sum(dim=1)
 
 
 class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
