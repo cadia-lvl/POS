@@ -178,10 +178,10 @@ def tag_batch(
     """Tag (apply POS) on a given data set."""
     preds, losses = run_batch(model, batch, criterion, optimizer)
     preds = {
-        key: model.decoders[key.value].postprocess(preds, batch[BATCH_KEYS.LENGTHS])
+        key: model.decoders[key.value].postprocess(preds, batch[BATCH_KEYS.LENGTHS])  # type: ignore
         for key, preds in preds.items()
     }
-    return losses, preds
+    return losses, preds  # type: ignore
 
 
 def tag_data_loader(

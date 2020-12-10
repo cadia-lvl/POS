@@ -167,7 +167,6 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--known_chars_file", default=None, help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
 @click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
 @click.option("--char_emb_dim", default=20, help="The embedding size for characters.")
-@click.option("--char_lstm_dim", default=64, help="The hidden dimension in the character LSTM.")
 @click.option("--morphlex_embeddings_file", default=None, help="A file which contains the morphological embeddings.")
 @click.option("--morphlex_freeze", is_flag=True, default=True)
 @click.option("--pretrained_word_embeddings_file", default=None, help="A file which contains pretrained word embeddings. See implementation for supported formats.")
@@ -176,6 +175,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--bert_encoder_dim", default=256, help="The dimension the BERT encoder outputs.")
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
 @click.option("--main_lstm_layers", default=0, help="The number of bilstm layers to use in the encoder. Set to 0 to disable.")
+@click.option("--main_lstm_dim", default=128, help="The dimension of the lstm to use in the encoder. Set to 0 to disable.")
 @click.option("--label_smoothing", default=0.0)
 @click.option("--learning_rate", default=0.20)
 @click.option("--epochs", default=20)
@@ -250,9 +250,16 @@ def train_and_tag(**kwargs):
             dicts[Dicts.Chars],
             character_embedding_dim=kwargs["char_emb_dim"],
             char_lstm_layers=kwargs["char_lstm_layers"],
-            char_lstm_dim=kwargs["char_lstm_dim"],
+            char_lstm_dim=kwargs["main_lstm_dim"],  # we use the same dimension
         )
-    encoder = Encoder(embeddings=embs, **kwargs)
+    encoder = Encoder(
+        embeddings=embs,
+        main_lstm_dim=kwargs["main_lstm_dim"],
+        main_lstm_layers=kwargs["main_lstm_layers"],
+        lstm_dropouts=0.0,
+        input_dropouts=0.0,
+        noise=0.1,
+    )
     decoders: Dict[Modules, Decoder] = {}
     if kwargs["tagger"]:
         log.info("Training Tagger")

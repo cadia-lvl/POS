@@ -593,7 +593,6 @@ class Encoder(nn.Module):
         lstm_dropouts=0.0,
         input_dropouts=0.0,
         noise=0.1,
-        **kwargs
     ):
         """Initialize the module given the parameters."""
         super().__init__()
