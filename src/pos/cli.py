@@ -266,6 +266,7 @@ def train_and_tag(**kwargs):
             vocab_map=dicts[Dicts.Chars],
             hidden_dim=encoder.output_dim,
             emb_dim=kwargs["lemmatizer_char_dim"],
+            char_attention=Modules.CharactersToTokens in embs,
             teacher_forcing=kwargs["lemmatizer_teacher_forcing"],
             dropout=0.0,
         )

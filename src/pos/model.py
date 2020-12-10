@@ -9,6 +9,7 @@ from flair.embeddings import TransformerWordEmbeddings
 from flair.data import Sentence as f_sentence
 import torch
 from torch import Tensor, stack, softmax, diagonal, cat
+from torch.nn.modules.module import Module
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
 
@@ -195,10 +196,7 @@ class CharacterAsWordEmbedding(Embedding):
         # (b * seq, chars, f)
         self.char_bilstm.flatten_parameters()
         out, _ = self.char_bilstm(char_embs)
-        last_timestep = out[:, -1, :]  # Only the last timestep
-        return last_timestep.reshape(
-            len(lengths), -1, out.shape[-1]
-        )  # Map to (batch, tokens, features)
+        return out
 
     @property
     def to_bilstm(self):
@@ -346,6 +344,7 @@ class GRUDecoder(Decoder):
         vocab_map: VocabMap,
         hidden_dim,
         emb_dim,
+        char_attention=False,
         teacher_forcing=0.0,
         dropout=0.0,
         weight=1,
@@ -361,22 +360,27 @@ class GRUDecoder(Decoder):
             vocab_map
         )  # The number of characters, these will be interpreted as logits.
         self._weight = weight
+        self.char_attention = char_attention
 
         self.embedding = nn.Embedding(
             len(vocab_map), emb_dim
         )  # We map the input idx to vectors.
+        # last character + sentence context + character attention
+        gru_in_dim = emb_dim + hidden_dim + (hidden_dim if self.char_attention else 0)
         self.rnn = nn.GRU(
-            emb_dim + hidden_dim, hidden_dim, batch_first=True
-        )  # The input is the embedding and context
+            gru_in_dim,
+            hidden_dim,
+            batch_first=True,
+        )
 
-        self.fc_out = nn.Linear(
-            emb_dim + hidden_dim + hidden_dim, len(vocab_map)
-        )  # Map to logits.
+        # We use the same input + the new hidden
+        self.fc_out = nn.Linear(gru_in_dim + hidden_dim, len(vocab_map))
         self.illegal_chars_output = {
             self.vocab_map.SOS_ID,
             self.vocab_map.PAD_ID,
             self.vocab_map.UNK_ID,
         }
+        self.attention = DotAttention()
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
 
     @property
@@ -444,21 +448,20 @@ class GRUDecoder(Decoder):
             # We assume that tokens and lemmas work equally well for the first timestep (PAD or SOS)
             return map_to_chars_batch(batch[BATCH_KEYS.TOKENS], vocab_map.w2i)[:, 0]
         previous_timestep = previous_predictions.shape[1] - 1  # -1 for 0 indexing
-        # We have the targets and teacher forcing
+        # We have the targets, are training and teacher forcing is set
         if (
             BATCH_KEYS.TARGET_LEMMAS in batch
             and training
             and random.random() < teacher_forcing
         ):
             return batch[BATCH_KEYS.TARGET_LEMMAS][:, previous_timestep]
-        # We don't have targets or no teacher forcing
+        # Otherwise, we will feed previous predictions.
         return previous_predictions[:, previous_timestep, :].argmax(dim=1)
 
     def decode(
         self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
     ) -> Tensor:
         """Run the decoder on the batch."""
-        # [batch_size * max_seq_len, emb_size]
         context = torch.cat(
             tuple(
                 emb
@@ -467,9 +470,10 @@ class GRUDecoder(Decoder):
             ),
             dim=2,
         )
+        # [batch_size * max_seq_len, emb_size] aka (b, f)
         context = context.reshape(shape=(-1, context.shape[2]))
 
-        # [batch_size * max_seq_len, max_token_len, emb_size]
+        # [batch_size * max_seq_len, max_token_len, emb_size] aka (b, t, f)
         predictions: Optional[Tensor] = None
 
         hidden = context.reshape((1, context.shape[0], context.shape[1]))
@@ -480,6 +484,7 @@ class GRUDecoder(Decoder):
             for _ in range(
                 batch[BATCH_KEYS.TARGET_LEMMAS].shape[1]
             ):  # Iterate over characters
+                # (b)
                 next_char_input = self._get_char_input_next_timestep(
                     self.vocab_map,
                     batch,
@@ -487,10 +492,19 @@ class GRUDecoder(Decoder):
                     teacher_forcing=self.teacher_forcing,
                     training=self.training,
                 ).to(core.device)
+                # (b, f)
                 emb_chars = self.dropout(self.embedding(next_char_input))
-                gru_in = torch.cat((emb_chars, context), dim=1).unsqueeze(
-                    1
-                )  # Add the time-step
+                gru_in = torch.cat((emb_chars, context), dim=1)
+                if self.char_attention:
+                    # (b, f)
+                    char_attention = self.attention(
+                        # (b, f)
+                        hidden.squeeze(),
+                        # (b, t, f)
+                        encoded[Modules.CharactersToTokens],
+                    )
+                    gru_in = cat((gru_in, char_attention), dim=1)
+                gru_in = gru_in.unsqueeze(1)  # Add the time-step
                 output, hidden = self.rnn(gru_in, hidden)
                 prediction = self.fc_out(torch.cat((gru_in, output), dim=2))
                 if predictions is None:
@@ -630,6 +644,13 @@ class Encoder(nn.Module):
         to_bilstm = {
             key: embedded[key] for key, emb in self.embeddings.items() if emb.to_bilstm
         }
+        if Modules.CharactersToTokens.value in to_bilstm:
+            last_timestep = to_bilstm[Modules.CharactersToTokens.value][
+                :, -1, :
+            ]  # Only the last timestep
+            to_bilstm[Modules.CharactersToTokens.value] = last_timestep.reshape(
+                len(lengths), -1, last_timestep.shape[-1]
+            )
         embs_to_bilstm = None
         if to_bilstm:
             embs_to_bilstm = torch.cat(list(to_bilstm.values()), dim=2)
