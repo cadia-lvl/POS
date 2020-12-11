@@ -363,8 +363,8 @@ class GRUDecoder(Decoder):
         self._weight = weight
         self.char_attention = char_attention
 
-        self.embedding = nn.Embedding(
-            len(vocab_map), emb_dim
+        self.sparse_embedding = nn.Embedding(
+            len(vocab_map), emb_dim, sparse=True
         )  # We map the input idx to vectors.
         # last character + sentence context + character attention
         gru_in_dim = emb_dim + hidden_dim + (hidden_dim if self.char_attention else 0)
@@ -494,7 +494,7 @@ class GRUDecoder(Decoder):
                     training=self.training,
                 ).to(core.device)
                 # (b, f)
-                emb_chars = self.dropout(self.embedding(next_char_input))
+                emb_chars = self.dropout(self.sparse_embedding(next_char_input))
                 gru_in = torch.cat((emb_chars, context), dim=1)
                 if self.char_attention:
                     # (b, f)
