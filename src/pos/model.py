@@ -9,6 +9,7 @@ from flair.embeddings import TransformerWordEmbeddings
 from flair.data import Sentence as f_sentence
 import torch
 from torch import Tensor, stack, softmax, diagonal, cat
+from torch.nn.modules.activation import MultiheadAttention
 from torch.nn.modules.module import Module
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
@@ -346,6 +347,7 @@ class GRUDecoder(Decoder):
         hidden_dim,
         emb_dim,
         char_attention=False,
+        use_multihead_attention=False,
         teacher_forcing=0.0,
         dropout=0.0,
         weight=1,
@@ -381,7 +383,12 @@ class GRUDecoder(Decoder):
             self.vocab_map.PAD_ID,
             self.vocab_map.UNK_ID,
         }
-        self.attention = DotAttention()
+        self.use_multiheaded_attention = use_multihead_attention
+        if self.char_attention:
+            if self.use_multiheaded_attention:
+                self.multi_attention = MultiheadAttention(hidden_dim, num_heads=1)
+            else:
+                self.attention = DotAttention()
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
 
     @property
@@ -497,13 +504,21 @@ class GRUDecoder(Decoder):
                 emb_chars = self.dropout(self.sparse_embedding(next_char_input))
                 gru_in = torch.cat((emb_chars, context), dim=1)
                 if self.char_attention:
-                    # (b, f)
-                    char_attention = self.attention(
+                    if self.use_multiheaded_attention:
+                        char_attention, _ = self.multi_attention(
+                            hidden,
+                            encoded[Modules.CharactersToTokens].permute(1, 0, 2),
+                            encoded[Modules.CharactersToTokens].permute(1, 0, 2),
+                        )
+                        char_attention = char_attention.squeeze()
+                    else:
                         # (b, f)
-                        hidden.squeeze(),
-                        # (b, t, f)
-                        encoded[Modules.CharactersToTokens],
-                    )
+                        char_attention = self.attention(
+                            # (b, f)
+                            hidden.squeeze(),
+                            # (b, t, f)
+                            encoded[Modules.CharactersToTokens],
+                        )
                     gru_in = cat((gru_in, char_attention), dim=1)
                 gru_in = gru_in.unsqueeze(1)  # Add the time-step
                 output, hidden = self.rnn(gru_in, hidden)
