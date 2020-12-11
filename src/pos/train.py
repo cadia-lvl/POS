@@ -5,7 +5,7 @@ During training this module handles:
 - Epochs (iterations) and evaluation.
 - Schedulers and optimizers. 
 """
-from typing import Any, Callable, Dict, Iterable, List, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 import logging
 from datetime import datetime
 from functools import partial
@@ -13,7 +13,7 @@ from math import inf
 
 from torch.nn import CrossEntropyLoss, Module
 from torch.nn.modules.container import ModuleList
-from torch.optim import Optimizer, SGD, Adam
+from torch.optim import Optimizer, SGD, Adam, SparseAdam
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 from torch.nn.utils import clip_grad_norm_
 from torch import Tensor, no_grad, numel, cat, zeros_like, log_softmax, stack
@@ -41,32 +41,60 @@ MODULE_TO_FIELD = {
 }
 
 
-def get_parameter_groups(parameters, **kwargs) -> List[Dict]:
+def get_parameter_groups(abl_tagger: ABLTagger, **kwargs) -> List[Dict]:
     """Return the parameters groups with differing learning rates."""
-    reduced_lr_names = ["token_embedding.weight"]
+    sparse_name = "sparse_embedding"
     params = [
         {
             "params": list(
                 param
                 for name, param in filter(
-                    lambda kv: kv[0] not in reduced_lr_names, parameters
+                    lambda kv: sparse_name not in kv[0],
+                    abl_tagger.named_parameters(),
                 )
-            )
+            ),
         },
         {
             "params": list(
                 param
                 for name, param in filter(
-                    lambda kv: kv[0] in reduced_lr_names, parameters
+                    lambda kv: sparse_name in kv[0],
+                    abl_tagger.named_parameters(),
                 )
             ),
-            "lr": kwargs["word_embedding_lr"],
+            "sparse": True,
         },
     ]
     return params
 
 
-def get_optimizer(parameters, **kwargs) -> Optimizer:
+class CombinedAdamOptimzer(Optimizer):
+    """An optimzer which combines Adam and SparseAdam based on layer name (sparse_embedding)."""
+
+    def __init__(self, params, lr) -> None:
+        """Initialize."""
+        super().__init__(params, {"lr": lr})
+        self.optimizers: List[Optimizer] = []
+        for group in params:
+            if "sparse" in group:
+                self.optimizers.append(SparseAdam([group], lr=lr))
+            else:
+                self.optimizers.append(Adam([group], lr=lr))
+
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+        """Take a step."""
+        result = None
+        for optimzer in self.optimizers:
+            res = optimzer.step(closure=closure)
+            if res is not None:
+                if result is None:
+                    result = res
+                else:
+                    result += res
+        return result
+
+
+def get_optimizer(parameters, **kwargs):
     """Return the optimizer to use based on options."""
     optimizer = kwargs.get("optimizer", "sgd")
     lr = kwargs["learning_rate"]
@@ -74,7 +102,7 @@ def get_optimizer(parameters, **kwargs) -> Optimizer:
     if optimizer == "sgd":
         return SGD(parameters, lr=lr)
     elif optimizer == "adam":
-        return Adam(parameters, lr=lr)
+        return CombinedAdamOptimzer(parameters, lr=lr)
     else:
         raise ValueError("Unknown optimizer")
 

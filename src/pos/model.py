@@ -97,11 +97,11 @@ class ClassingWordEmbedding(Embedding):
         super().__init__()
         self.vocab_map = vocab_map
         self.pass_to_bilstm = pass_to_bilstm
-        self.embedding = nn.Embedding(
-            len(vocab_map), embedding_dim, padding_idx=padding_idx
+        self.sparse_embedding = nn.Embedding(
+            len(vocab_map), embedding_dim, padding_idx=padding_idx, sparse=True
         )
         # Skip the first index, should be zero
-        nn.init.xavier_uniform_(self.embedding.weight[1:, :])
+        nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
 
     def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
@@ -112,7 +112,7 @@ class ClassingWordEmbedding(Embedding):
 
     def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
-        return self.embedding(batch)
+        return self.sparse_embedding(batch)
 
     @property
     def to_bilstm(self):
@@ -122,7 +122,7 @@ class ClassingWordEmbedding(Embedding):
     @property
     def output_dim(self):
         """Return the output dimension."""
-        return self.embedding.weight.data.shape[1]
+        return self.sparse_embedding.weight.data.shape[1]
 
 
 class PretrainedEmbedding(ClassingWordEmbedding):
@@ -143,10 +143,8 @@ class PretrainedEmbedding(ClassingWordEmbedding):
             padding_idx=padding_idx,
             pass_to_bilstm=pass_to_bilstm,
         )  # we overwrite the embedding
-        self.embedding = nn.Embedding.from_pretrained(
-            embeddings,
-            freeze=freeze,
-            padding_idx=padding_idx,
+        self.sparse_embedding = nn.Embedding.from_pretrained(
+            embeddings, freeze=freeze, padding_idx=padding_idx, sparse=True
         )
 
 
@@ -166,10 +164,13 @@ class CharacterAsWordEmbedding(Embedding):
         super().__init__()
         self.vocab_map = vocab_map
         self.pass_to_bilstm = pass_to_bilstm
-        self.character_embedding = nn.Embedding(
-            len(vocab_map), character_embedding_dim, padding_idx=padding_idx
+        self.sparse_embedding = nn.Embedding(
+            len(vocab_map),
+            character_embedding_dim,
+            padding_idx=padding_idx,
+            sparse=True,
         )
-        nn.init.xavier_uniform_(self.character_embedding.weight[1:, :])
+        nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
         # The character BiLSTM
         self.char_bilstm = nn.LSTM(
             input_size=character_embedding_dim,
@@ -192,7 +193,7 @@ class CharacterAsWordEmbedding(Embedding):
     def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
         # (b * seq, chars)
-        char_embs = self.character_embedding(batch)
+        char_embs = self.sparse_embedding(batch)
         # (b * seq, chars, f)
         self.char_bilstm.flatten_parameters()
         out, _ = self.char_bilstm(char_embs)

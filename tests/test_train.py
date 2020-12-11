@@ -19,7 +19,7 @@ def test_train_tagger(
 ):
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders)
     criterion = get_criterion(decoders)
-    parameter_groups = get_parameter_groups(abl_tagger.named_parameters(), **kwargs)
+    parameter_groups = get_parameter_groups(abl_tagger, **kwargs)
     optimizer = get_optimizer(parameter_groups, **kwargs)
     scheduler = get_scheduler(optimizer, **kwargs)
     # TODO: Add evaluator for Lemmas
@@ -72,7 +72,7 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
     )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders)
     criterion = get_criterion(decoders)
-    parameter_groups = get_parameter_groups(abl_tagger.named_parameters(), **kwargs)
+    parameter_groups = get_parameter_groups(abl_tagger, **kwargs)
     optimizer = get_optimizer(parameter_groups, **kwargs)
     scheduler = get_scheduler(optimizer, **kwargs)
     # TODO: Add evaluator for Lemmas

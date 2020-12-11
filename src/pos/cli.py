@@ -285,7 +285,10 @@ def train_and_tag(**kwargs):
     print_tagger(abl_tagger)
 
     criterion = get_criterion(decoders=decoders)
-    parameter_groups = get_parameter_groups(abl_tagger.named_parameters(), **kwargs)
+    parameter_groups = get_parameter_groups(abl_tagger, **kwargs)
+    log.info(
+        f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}"
+    )
     optimizer = get_optimizer(parameter_groups, **kwargs)
     scheduler = get_scheduler(optimizer, **kwargs)
     # TODO: Add evaluator for Lemmas
