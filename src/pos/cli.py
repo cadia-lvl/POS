@@ -176,6 +176,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--word_embedding_lr", default=0.2, help="The word/token embedding learning rate.")
 @click.option("--bert_encoder_dim", default=256, help="The dimension the BERT encoder outputs.")
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
+@click.option("--bert_to_bilstm/--no_bert_to_bilstm", default=True, help="Send the BERT embeddings to BiLSTM")
 @click.option("--main_lstm_layers", default=0, help="The number of bilstm layers to use in the encoder. Set to 0 to disable.")
 @click.option("--main_lstm_dim", default=128, help="The dimension of the lstm to use in the encoder. Set to 0 to disable.")
 @click.option("--label_smoothing", default=0.0)
@@ -230,7 +231,9 @@ def train_and_tag(**kwargs):
     )
     embs = {}
     if kwargs["bert_encoder"]:
-        embs[Modules.BERT] = FlairTransformerEmbedding(kwargs["bert_encoder"], **kwargs)
+        embs[Modules.BERT] = FlairTransformerEmbedding(
+            kwargs["bert_encoder"], **kwargs, pass_to_bilstm=kwargs["bert_to_bilstm"]
+        )
     if kwargs["morphlex_embeddings_file"]:
         embs[Modules.MorphLex] = PretrainedEmbedding(
             vocab_map=dicts[Dicts.MorphLex],

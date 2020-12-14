@@ -33,6 +33,9 @@ train-and-tag \
 --tagger \
 --bert_encoder roberta \
 --bert_encoder_dim 768 \
+--bert_to_bilstm \
+--main_lstm_dim 768 \
+--main_lstm_layers 1 \
 --label_smoothing 0.1 \
 --epochs 10 \
 --batch_size 16 \
