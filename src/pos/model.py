@@ -600,11 +600,13 @@ class Encoder(nn.Module):
         main_lstm_layers=0,  # The main LSTM layers
         lstm_dropouts=0.0,
         input_dropouts=0.0,
+        residual=True,
         noise=0.1,
     ):
         """Initialize the module given the parameters."""
         super().__init__()
         self.noise = noise
+        self.residual = residual
         self.embeddings = nn.ModuleDict(
             {key.value: emb for key, emb in embeddings.items()}
         )
@@ -684,6 +686,9 @@ class Encoder(nn.Module):
             # Unpack and ignore the lengths
             bilstm_out, _ = pad_packed_sequence(packed_out, batch_first=True)
             bilstm_out = self.main_bilstm_out_dropout(bilstm_out)
+            # Use residual connections
+            if self.residual:
+                bilstm_out = bilstm_out + embs_to_bilstm
             results[Modules.BiLSTM] = bilstm_out
 
         return results
