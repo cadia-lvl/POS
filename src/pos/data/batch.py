@@ -1,3 +1,5 @@
+"""Batch processing."""
+
 from typing import List, Tuple, Set, Dict, Optional, Iterable, Sequence, Callable, Any
 from functools import reduce
 from operator import add
