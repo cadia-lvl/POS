@@ -27,9 +27,9 @@ train-and-tag \
 --bert_encoder_dim 768 \
 --known_chars_file data/extra/characters_training.txt \
 --char_lstm_layers 1 \
---char_lstm_dim 128 \
 --char_emb_dim 64 \
---no_char_lstm_to_bilstm \
+--main_lstm_layers 1 \
+--main_lstm_dim 128 \
 --label_smoothing 0.1 \
 --epochs 10 \
 --batch_size 8 \
