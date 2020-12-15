@@ -222,7 +222,7 @@ class FlairTransformerEmbedding(Embedding):
             file_path,
             layers=kwargs.get("transformer_layers", "-1"),
             use_scalar_mix=kwargs.get("transformer_use_scalar_mix", False),
-            allow_long_sentences=kwargs.get("transformer_allow_long_sentences", True),
+            allow_long_sentences=False,
             fine_tune=True,
             batch_size=kwargs.get("batch_size", 1),
         )
