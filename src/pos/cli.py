@@ -244,9 +244,7 @@ def train_and_tag(**kwargs):
     )
     embs = {}
     if kwargs["bert_encoder"]:
-        embs[Modules.BERT] = FlairTransformerEmbedding(
-            kwargs["bert_encoder"], **kwargs, pass_to_bilstm=kwargs["bert_to_bilstm"]
-        )
+        embs[Modules.BERT] = FlairTransformerEmbedding(kwargs["bert_encoder"], **kwargs)
     if kwargs["morphlex_embeddings_file"]:
         embs[Modules.MorphLex] = PretrainedEmbedding(
             vocab_map=dicts[Dicts.MorphLex],

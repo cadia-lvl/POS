@@ -75,6 +75,7 @@ def chunk_dataset(
     ds: FieldedDataset, tokenizer: PreTrainedTokenizer, max_sequence_length
 ) -> FieldedDataset:
     """Split up sentences which are too long."""
+    log.info("Splitting sentences in order to fit BERT-like model")
     chunks: List[List[Sentence]] = [list() for _ in range(len(ds.fields))]
     for field_sentences in ds:
         tokens = field_sentences[ds.fields.index(Fields.Tokens)]
@@ -98,6 +99,7 @@ def dechunk_dataset(
     original_ds: FieldedDataset, chunked_ds: FieldedDataset
 ) -> FieldedDataset:
     """Reverse the chunking from the original dataset."""
+    log.info("Reversing the splitting of sentences in order to fit BERT-like model")
     dechunks: List[List[Sentence]] = [list() for _ in range(len(chunked_ds.fields))]
     index = 0
     append = True
