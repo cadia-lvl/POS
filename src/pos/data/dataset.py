@@ -47,7 +47,7 @@ def get_cut_index(
     )["input_ids"]
     token_ids = cast(List[int], token_ids)
     if len(token_ids) > max_sequence_length:
-        log.info(f"Subwords too long: {len(token_ids)}")
+        log.debug(f"Subwords too long: {len(token_ids)}")
         sub_tokens = [tokenizer._convert_id_to_token(idx) for idx in token_ids]
         # Create the word masks. 1 means start of word, 0 means continuation.
         word_masks = [

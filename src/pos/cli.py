@@ -175,13 +175,11 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--morphlex_freeze", is_flag=True, default=True)
 @click.option("--pretrained_word_embeddings_file", default=None, help="A file which contains pretrained word embeddings. See implementation for supported formats.")
 @click.option("--word_embedding_dim", default=0, help="The word/token embedding dimension. Set to 0 to disable word embeddings.")
-@click.option("--word_embedding_lr", default=0.2, help="The word/token embedding learning rate.")
 @click.option("--bert_encoder_dim", default=256, help="The dimension the BERT encoder outputs.")
 @click.option("--bert_encoder_length", default=128, help="The maximum sequence length for model.")
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
-@click.option("--bert_to_bilstm/--no_bert_to_bilstm", default=True, help="Send the BERT embeddings to BiLSTM")
-@click.option("--main_lstm_layers", default=0, help="The number of bilstm layers to use in the encoder. Set to 0 to disable.")
-@click.option("--main_lstm_dim", default=128, help="The dimension of the lstm to use in the encoder. Set to 0 to disable.")
+@click.option("--main_lstm_layers", default=1, help="The number of bilstm layers to use in the encoder.")
+@click.option("--main_lstm_dim", default=512, help="The dimension of the lstm to use in the encoder.")
 @click.option("--label_smoothing", default=0.0)
 @click.option("--learning_rate", default=0.20)
 @click.option("--epochs", default=20)
@@ -278,7 +276,6 @@ def train_and_tag(**kwargs):
         main_lstm_layers=kwargs["main_lstm_layers"],
         lstm_dropouts=0.0,
         input_dropouts=0.0,
-        noise=0.1,
     )
     decoders: Dict[Modules, Decoder] = {}
     if kwargs["tagger"]:

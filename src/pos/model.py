@@ -77,12 +77,6 @@ class Embedding(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
         """Return the output dimension."""
         raise NotImplementedError
 
-    @property
-    @abc.abstractmethod
-    def to_bilstm(self) -> bool:
-        """Return True if output should be added to BiLSTM."""
-        raise NotImplementedError
-
 
 class ClassingWordEmbedding(Embedding):
     """Classic word embeddings."""
@@ -92,12 +86,10 @@ class ClassingWordEmbedding(Embedding):
         vocab_map: VocabMap,
         embedding_dim: int,
         padding_idx=0,
-        pass_to_bilstm=True,
     ):
         """Create one."""
         super().__init__()
         self.vocab_map = vocab_map
-        self.pass_to_bilstm = pass_to_bilstm
         self.sparse_embedding = nn.Embedding(
             len(vocab_map), embedding_dim, padding_idx=padding_idx, sparse=True
         )
@@ -116,11 +108,6 @@ class ClassingWordEmbedding(Embedding):
         return self.sparse_embedding(batch)
 
     @property
-    def to_bilstm(self):
-        """Return True if output should be added to BiLSTM."""
-        return self.pass_to_bilstm
-
-    @property
     def output_dim(self):
         """Return the output dimension."""
         return self.sparse_embedding.weight.data.shape[1]
@@ -135,14 +122,12 @@ class PretrainedEmbedding(ClassingWordEmbedding):
         embeddings: Tensor,
         freeze=False,
         padding_idx=0,
-        pass_to_bilstm=True,
     ):
         """Create one."""
         super().__init__(
             vocab_map=vocab_map,
             embedding_dim=1,
             padding_idx=padding_idx,
-            pass_to_bilstm=pass_to_bilstm,
         )  # we overwrite the embedding
         self.sparse_embedding = nn.Embedding.from_pretrained(
             embeddings, freeze=freeze, padding_idx=padding_idx, sparse=True
@@ -159,12 +144,10 @@ class CharacterAsWordEmbedding(Embedding):
         char_lstm_dim=64,
         char_lstm_layers=1,
         padding_idx=0,
-        pass_to_bilstm=True,
     ):
         """Create one."""
         super().__init__()
         self.vocab_map = vocab_map
-        self.pass_to_bilstm = pass_to_bilstm
         self.sparse_embedding = nn.Embedding(
             len(vocab_map),
             character_embedding_dim,
@@ -201,11 +184,6 @@ class CharacterAsWordEmbedding(Embedding):
         return out
 
     @property
-    def to_bilstm(self):
-        """Return True if output should be added to BiLSTM."""
-        return self.pass_to_bilstm
-
-    @property
     def output_dim(self):
         """Return the output dimension."""
         return self._output_dim
@@ -214,10 +192,9 @@ class CharacterAsWordEmbedding(Embedding):
 class FlairTransformerEmbedding(Embedding):
     """A wrapper for the TransformerEmbedding from Flair. It's here to fit into the preprocessing setup."""
 
-    def __init__(self, file_path, pass_to_bilstm=False, **kwargs):
+    def __init__(self, file_path, **kwargs):
         """Initialize the embeddings."""
         super().__init__()
-        self.pass_to_bilstm = pass_to_bilstm
         self.emb = TransformerWordEmbeddings(
             file_path,
             layers=kwargs.get("transformer_layers", "-1"),
@@ -243,11 +220,6 @@ class FlairTransformerEmbedding(Embedding):
     def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
         return batch
-
-    @property
-    def to_bilstm(self):
-        """Return True if output should be added to BiLSTM."""
-        return self.pass_to_bilstm
 
     @property
     def output_dim(self):
@@ -597,50 +569,39 @@ class Encoder(nn.Module):
         self,
         embeddings: Dict[Modules, Embedding],
         main_lstm_dim=64,  # The main LSTM dim will output with this dim
-        main_lstm_layers=0,  # The main LSTM layers
+        main_lstm_layers=1,  # The main LSTM layers
         lstm_dropouts=0.0,
         input_dropouts=0.0,
         residual=True,
-        noise=0.1,
     ):
         """Initialize the module given the parameters."""
         super().__init__()
-        self.noise = noise
         self.residual = residual
         self.embeddings = nn.ModuleDict(
             {key.value: emb for key, emb in embeddings.items()}
         )
 
-        self.use_bilstm = not main_lstm_layers == 0
-        encoder_out_dim = sum(
-            emb.output_dim for emb in self.embeddings.values() if not emb.to_bilstm
-        )
-        bilstm_in_dim = sum(
-            emb.output_dim for emb in self.embeddings.values() if emb.to_bilstm
-        )
-        if bilstm_in_dim and not self.use_bilstm:
-            raise ValueError("Not using BiLSTM but Embedding is set to use BiLSTM")
+        bilstm_in_dim = sum(emb.output_dim for emb in self.embeddings.values())
+        self.linear = nn.Linear(bilstm_in_dim, main_lstm_dim)  # type: ignore
 
         # BiLSTM over all inputs
-        if self.use_bilstm:
-            self.bilstm = nn.LSTM(
-                input_size=bilstm_in_dim,
-                hidden_size=main_lstm_dim,
-                num_layers=main_lstm_layers,
-                dropout=lstm_dropouts,
-                batch_first=True,
-                bidirectional=True,
-            )
-            for name, param in self.bilstm.named_parameters():
-                if "bias" in name:
-                    nn.init.constant_(param, 0.0)
-                elif "weight" in name:
-                    nn.init.xavier_uniform_(param)
-                else:
-                    raise ValueError("Unknown parameter in lstm={name}")
-            encoder_out_dim += main_lstm_dim * 2
+        self.bilstm = nn.LSTM(
+            input_size=main_lstm_dim,
+            hidden_size=main_lstm_dim,
+            num_layers=main_lstm_layers,
+            dropout=lstm_dropouts,
+            batch_first=True,
+            bidirectional=True,
+        )
+        for name, param in self.bilstm.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0.0)
+            elif "weight" in name:
+                nn.init.xavier_uniform_(param)
+            else:
+                raise ValueError("Unknown parameter in lstm={name}")
         self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
-        self.output_dim = encoder_out_dim
+        self.output_dim = main_lstm_dim * 2
 
     def forward(
         self, batch: Sequence[Sentence], lengths: Sequence[int]
@@ -649,10 +610,9 @@ class Encoder(nn.Module):
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # Embeddings
         embedded = {key: emb(batch, lengths) for key, emb in self.embeddings.items()}
+        results = {Modules(key): emb for key, emb in embedded.items()}
 
-        to_bilstm = {
-            key: embedded[key] for key, emb in self.embeddings.items() if emb.to_bilstm
-        }
+        to_bilstm = {key: embedded[key] for key in self.embeddings.keys()}
         if Modules.CharactersToTokens.value in to_bilstm:
             last_timestep = to_bilstm[Modules.CharactersToTokens.value][
                 :, -1, :
@@ -660,36 +620,27 @@ class Encoder(nn.Module):
             to_bilstm[Modules.CharactersToTokens.value] = last_timestep.reshape(
                 len(lengths), -1, last_timestep.shape[-1]
             )
-        embs_to_bilstm = None
-        if to_bilstm:
-            embs_to_bilstm = torch.cat(list(to_bilstm.values()), dim=2)
+        embs_to_linear = torch.cat(list(to_bilstm.values()), dim=2)
+        embs_to_bilstm = self.linear(embs_to_linear)
 
-        # Add noise - like in dyney
-        # if self.training and main_in is not None:
-        #     main_in = main_in + torch.empty_like(main_in).normal_(0, self.noise)
-        # (b, seq, f)
-        results = {Modules(key): emb for key, emb in embedded.items()}
-
-        if self.use_bilstm and embs_to_bilstm is not None:
-
-            # Pack the paddings
-            packed = pack_padded_sequence(
-                embs_to_bilstm,
-                lengths,
-                batch_first=True,
-                enforce_sorted=False,
-            )
-            # Make sure that the parameters are contiguous.
-            self.bilstm.flatten_parameters()
-            # Ignore the hidden outputs
-            packed_out, _ = self.bilstm(packed)
-            # Unpack and ignore the lengths
-            bilstm_out, _ = pad_packed_sequence(packed_out, batch_first=True)
-            bilstm_out = self.main_bilstm_out_dropout(bilstm_out)
-            # Use residual connections
-            if self.residual:
-                bilstm_out = bilstm_out + embs_to_bilstm
-            results[Modules.BiLSTM] = bilstm_out
+        # Pack the paddings
+        packed = pack_padded_sequence(
+            embs_to_bilstm,
+            lengths,
+            batch_first=True,
+            enforce_sorted=False,
+        )
+        # Make sure that the parameters are contiguous.
+        self.bilstm.flatten_parameters()
+        # Ignore the hidden outputs
+        packed_out, _ = self.bilstm(packed)
+        # Unpack and ignore the lengths
+        bilstm_out, _ = pad_packed_sequence(packed_out, batch_first=True)
+        bilstm_out = self.main_bilstm_out_dropout(bilstm_out)
+        # Use residual connections
+        if self.residual:
+            bilstm_out = bilstm_out + cat((embs_to_bilstm, embs_to_bilstm), dim=2)
+        results[Modules.BiLSTM] = bilstm_out
 
         return results
 
@@ -713,27 +664,3 @@ class ABLTagger(nn.Module):
             Modules(key): decoder(encoded, batch)
             for key, decoder in self.decoders.items()
         }
-
-
-def pack_sequence(padded_sequence):
-    """Pack the PAD in a sequence. Assumes that PAD=0.0 and appended."""
-    # input:
-    # (b, s, f)
-    # lengths = (b, s)
-    lengths = torch.sum(torch.pow(padded_sequence, 2), dim=2)
-    # lengths = (b)
-    lengths = torch.sum(
-        lengths != torch.Tensor([0.0]).to(padded_sequence.device),
-        dim=1,
-    )
-    return (
-        pack_padded_sequence(
-            padded_sequence, lengths, batch_first=True, enforce_sorted=False
-        ),
-        lengths,
-    )
-
-
-def unpack_sequence(packed_sequence):
-    """Inverse of pack_sequence."""
-    return pad_packed_sequence(packed_sequence, batch_first=True)[0]
