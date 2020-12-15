@@ -40,7 +40,7 @@ def pretrained_tagger(request):
     """Exposes the command-line option to a test case."""
     pretrained_tagger_path = request.config.getoption("--tagger")
     if not pretrained_tagger_path:
-        pytest.skip("No --tagger or --dictionaries given")
+        pytest.skip("No --tagger given")
     else:
         return pretrained_tagger_path
 
