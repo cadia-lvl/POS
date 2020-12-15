@@ -211,12 +211,12 @@ def train_and_tag(**kwargs):
         train_ds = chunk_dataset(
             unchunked_train_ds,
             load_tokenizer(kwargs["bert_encoder"]),
-            kwargs["bert_encoder_length"] - 2,  # Subtract because of [CLS] and [SEP]
+            kwargs["bert_encoder_length"],
         )
         test_ds = chunk_dataset(
             unchunked_test_ds,
             load_tokenizer(kwargs["bert_encoder"]),
-            kwargs["bert_encoder_length"] - 2,  # Subtract because of [CLS] and [SEP]
+            kwargs["bert_encoder_length"],
         )
     else:
         train_ds = unchunked_train_ds
@@ -442,8 +442,7 @@ def tag(model_file, data_in, output, device, contains_tags):
         tokenizer=tagger.model.encoders[Modules.BERT].emb.tokenizer,
         max_sequence_length=tagger.model.encoders[
             Modules.BERT
-        ].emb.tokenizer.model_max_length
-        - 2,
+        ].emb.tokenizer.model_max_length,
     )
     predicted_tags = tagger.tag_bulk(dataset=chunked_ds, batch_size=16)
     chunked_ds = chunked_ds.add_field(predicted_tags, Fields.Tags)
