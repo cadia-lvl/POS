@@ -115,6 +115,8 @@ class FieldedDataset(Dataset):
         """Initialize the dataset."""
         self.data: Tuple[Sentences, ...] = data
         self.fields: Tuple[str, ...] = fields
+        # the data is columnar
+        assert len(data) == len(fields)
 
     def __getitem__(self, idx) -> Tuple[Sentence, ...]:
         """Support itemgetter."""

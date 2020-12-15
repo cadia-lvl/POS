@@ -25,6 +25,7 @@ train-and-tag \
 --lemmatizer \
 --bert_encoder roberta \
 --bert_encoder_dim 768 \
+--bert_encoder_length 514 \
 --known_chars_file data/extra/characters_training.txt \
 --char_lstm_layers 1 \
 --char_emb_dim 64 \

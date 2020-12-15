@@ -101,34 +101,6 @@ def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[BATCH_KEYS, Any]:
     return batch_dict
 
 
-def read_datasets(
-    file_paths: List[str], max_sent_length=0, max_lines=0, fields=None
-) -> FieldedDataset:
-    """Read tagged datasets from multiple files.
-
-    Args:
-        max_sent_length: Sentences longer than "max_sent_length" are thrown away.
-        max_lines: Will only keep the first "max_lines" sentences.
-        fields: The tagged fields in the dataset
-    """
-    ds = reduce(
-        add,
-        (
-            FieldedDataset.from_file(training_file, fields)
-            for training_file in file_paths
-        ),
-    )
-    if max_sent_length:
-        # We want to filter out sentences which are too long (and throw them away, for now)
-        ds = FieldedDataset(
-            tuple(zip(*[x for x in ds if len(x[0]) <= max_sent_length])), ds.fields
-        )
-    # DEBUG - read a subset of the data
-    if max_lines:
-        ds = FieldedDataset(ds[:max_lines], ds.fields)  # type: ignore
-    return ds
-
-
 def load_dicts(
     train_ds: FieldedDataset,
     pretrained_word_embeddings_file=None,

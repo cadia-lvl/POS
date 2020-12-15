@@ -1,6 +1,7 @@
 import torch
 from torch import Tensor
 from torch.utils.data.dataloader import DataLoader
+from pos.data.dataset import dechunk_dataset
 
 from pos.utils import read_tsv, tokens_to_sentences
 from pos.data import (
@@ -22,6 +23,8 @@ from pos.data import (
     UNK,
     UNK_ID,
     BATCH_KEYS,
+    chunk_dataset,
+    load_tokenizer,
 )
 from pos.core import (
     FieldedDataset,
@@ -114,14 +117,6 @@ def test_read_datasets(test_tsv_file):
     fields = (Fields.Tokens, Fields.GoldTags)
     test_ds = read_datasets([test_tsv_file], fields=fields)
     assert len(test_ds) == 3
-    test_ds = read_datasets([test_tsv_file], max_lines=2, fields=fields)
-    assert len(test_ds) == 2
-    test_ds = read_datasets([test_tsv_file], max_sent_length=2, fields=fields)
-    assert len(test_ds) == 2
-    test_ds = read_datasets(
-        [test_tsv_file], max_lines=2, max_sent_length=2, fields=fields
-    )
-    assert len(test_ds) == 2
 
 
 def test_create_mappers_c_w_emb_only(ds):
@@ -169,7 +164,9 @@ def test_load_dicts(ds):
 
 
 def test_load_dicts_read_datasets(test_tsv_file):
-    train_ds = read_datasets([test_tsv_file], max_sent_length=128,)
+    train_ds = read_datasets(
+        [test_tsv_file],
+    )
     _, dicts = load_dicts(train_ds)
 
 
@@ -220,3 +217,31 @@ def test_collate_fn(ds_lemma):
             3,
             2,
         ]  # These sentences are 1, 3, 2 tokens long
+
+
+def test_tokenizer_preprocessing_and_postprocessing(ds_lemma, electra_model):
+    assert len(ds_lemma.fields) == len(ds_lemma.data)  # sanity check
+    assert len(ds_lemma) == 3
+    # be sure that there are too long sentences
+    assert any(
+        len(field) > 2 for sentence_fields in ds_lemma for field in sentence_fields
+    )
+    max_sequence_length = 2
+    chunked_ds = chunk_dataset(
+        ds_lemma, load_tokenizer(electra_model), max_sequence_length=max_sequence_length
+    )
+    assert len(chunked_ds) == 4
+    for sentence_fields in chunked_ds:
+        # All should be of acceptable length
+        assert all(len(field) <= max_sequence_length for field in sentence_fields)
+    dechunked_ds = dechunk_dataset(ds_lemma, chunked_ds)
+    assert all(
+        tuple(
+            len(original_field) == len(dechunked_field)
+            for original_fields, dechunked_fields in zip(ds_lemma, dechunked_ds)
+            for original_field, dechunked_field in zip(
+                original_fields, dechunked_fields
+            )
+        )
+    )
+    assert len(dechunked_ds) == 3

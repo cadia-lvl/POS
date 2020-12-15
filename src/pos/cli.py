@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 """The main entrypoint to training and running a POS-tagger."""
-from dataclasses import Field
 import pickle
 from pprint import pprint, pformat
 import random
@@ -18,7 +17,7 @@ from torch.cuda import manual_seed
 from torch.backends import cudnn
 from torch import save, device as t_device, set_num_threads
 
-from .data import (
+from pos.data import (
     load_dicts,
     read_datasets,
     emb_pairs_to_dict,
@@ -27,15 +26,18 @@ from .data import (
     read_pretrained_word_embeddings,
     wemb_str_to_emb_pair,
     collate_fn,
+    chunk_dataset,
+    dechunk_dataset,
+    load_tokenizer,
 )
-from . import core
-from .core import (
+from pos import core
+from pos.core import (
     Vocab,
     FieldedDataset,
     Dicts,
     Fields,
 )
-from .model import (
+from pos.model import (
     Decoder,
     Encoder,
     Tagger,
@@ -47,7 +49,7 @@ from .model import (
     GRUDecoder,
     Modules,
 )
-from .train import (
+from pos.train import (
     MODULE_TO_FIELD,
     print_tagger,
     get_criterion,
@@ -57,9 +59,9 @@ from .train import (
     get_scheduler,
     run_epochs,
 )
-from .api import Tagger as api_tagger
-from .evaluate import Experiment
-from .utils import write_tsv
+from pos.api import Tagger as api_tagger
+from pos.evaluate import Experiment
+from pos.utils import write_tsv
 from pos import evaluate
 
 DEBUG = False
@@ -175,6 +177,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--word_embedding_dim", default=0, help="The word/token embedding dimension. Set to 0 to disable word embeddings.")
 @click.option("--word_embedding_lr", default=0.2, help="The word/token embedding learning rate.")
 @click.option("--bert_encoder_dim", default=256, help="The dimension the BERT encoder outputs.")
+@click.option("--bert_encoder_length", default=128, help="The maximum sequence length for model.")
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
 @click.option("--bert_to_bilstm/--no_bert_to_bilstm", default=True, help="Send the BERT embeddings to BiLSTM")
 @click.option("--main_lstm_layers", default=0, help="The number of bilstm layers to use in the encoder. Set to 0 to disable.")
@@ -200,14 +203,26 @@ def train_and_tag(**kwargs):
 
     # Read train and test data
 
-    train_ds = read_datasets(
+    unchunked_train_ds = read_datasets(
         kwargs["training_files"],
-        max_sent_length=128,
     )
-    test_ds = read_datasets(
+    unchunked_test_ds = read_datasets(
         [kwargs["test_file"]],
-        max_sent_length=128,
     )
+    if kwargs["bert_encoder"] is not None:
+        train_ds = chunk_dataset(
+            unchunked_train_ds,
+            load_tokenizer(kwargs["bert_encoder"]),
+            kwargs["bert_encoder_length"],
+        )
+        test_ds = chunk_dataset(
+            unchunked_test_ds,
+            load_tokenizer(kwargs["bert_encoder"]),
+            kwargs["bert_encoder_length"],
+        )
+    else:
+        train_ds = unchunked_train_ds
+        test_ds = unchunked_test_ds
 
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
@@ -296,7 +311,6 @@ def train_and_tag(**kwargs):
     )
     optimizer = get_optimizer(parameter_groups, **kwargs)
     scheduler = get_scheduler(optimizer, **kwargs)
-    # TODO: Add evaluator for Lemmas
     evaluators = {}
     if Modules.Tagger in decoders:
         evaluators[Modules.Tagger] = Experiment.tag_accuracy_closure(
@@ -337,6 +351,10 @@ def train_and_tag(**kwargs):
     log.info("Writing predictions, dictionaries and model")
     for module_name, value in values.items():
         test_ds = test_ds.add_field(value, MODULE_TO_FIELD[module_name])
+    # Dechunk - if we chunked
+    if len(test_ds) != len(unchunked_test_ds):
+        test_ds = dechunk_dataset(unchunked_test_ds, test_ds)
+
     test_ds.to_tsv_file(str(output_dir / "predictions.tsv"))
 
     with (output_dir / "known_toks.txt").open("w+") as f:
@@ -420,8 +438,16 @@ def tag(model_file, data_in, output, device, contains_tags):
     if contains_tags:
         fields = fields + (Fields.GoldTags,)
     ds = FieldedDataset.from_file(data_in, fields)
-    predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=16)
-    ds = ds.add_field(predicted_tags, Fields.Tags)
+    chunked_ds = chunk_dataset(
+        ds,
+        tokenizer=tagger.model.encoders[Modules.BERT].emb.tokenizer,
+        max_sequence_length=tagger.model.encoders[
+            Modules.BERT
+        ].emb.tokenizer.model_max_length,
+    )
+    predicted_tags = tagger.tag_bulk(dataset=chunked_ds, batch_size=16)
+    chunked_ds = chunked_ds.add_field(predicted_tags, Fields.Tags)
+    dechunk_ds = dechunk_dataset(ds, chunked_ds)
     log.info("Writing results")
     ds.to_tsv_file(output)
     log.info("Done!")
