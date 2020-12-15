@@ -34,7 +34,6 @@ train-and-tag \
 --bert_encoder roberta \
 --bert_encoder_dim 768 \
 --bert_encoder_length 514 \
---bert_to_bilstm \
 --main_lstm_dim 384 \
 --main_lstm_layers 1 \
 --label_smoothing 0.1 \
