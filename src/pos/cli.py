@@ -304,13 +304,17 @@ def train_and_tag(**kwargs):
     # Train a model
     print_tagger(abl_tagger)
 
-    criterion = get_criterion(decoders=decoders)
-    parameter_groups = get_parameter_groups(abl_tagger, **kwargs)
+    criterion = get_criterion(
+        decoders=decoders, label_smoothing=kwargs["label_smoothing"]
+    )
+    parameter_groups = get_parameter_groups(abl_tagger)
     log.info(
         f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}"
     )
-    optimizer = get_optimizer(parameter_groups, **kwargs)
-    scheduler = get_scheduler(optimizer, **kwargs)
+    optimizer = get_optimizer(
+        parameter_groups, kwargs["optimizer"], kwargs["learning_rate"]
+    )
+    scheduler = get_scheduler(optimizer, kwargs["scheduler"])
     evaluators = {}
     if Modules.Tagger in decoders:
         evaluators[Modules.Tagger] = Experiment.tag_accuracy_closure(

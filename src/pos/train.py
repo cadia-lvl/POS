@@ -41,7 +41,7 @@ MODULE_TO_FIELD = {
 }
 
 
-def get_parameter_groups(abl_tagger: ABLTagger, **kwargs) -> List[Dict]:
+def get_parameter_groups(abl_tagger: ABLTagger) -> List[Dict]:
     """Return the parameters groups with differing learning rates."""
     sparse_name = "sparse_embedding"
     params = [
@@ -94,10 +94,8 @@ class CombinedAdamOptimzer(Optimizer):
         return result
 
 
-def get_optimizer(parameters, **kwargs):
+def get_optimizer(parameters, optimizer, lr):
     """Return the optimizer to use based on options."""
-    optimizer = kwargs.get("optimizer", "sgd")
-    lr = kwargs["learning_rate"]
     log.info(f"Setting optmizer={optimizer}")
     if optimizer == "sgd":
         return SGD(parameters, lr=lr)
@@ -137,9 +135,8 @@ def get_criterion(
     return weight_loss
 
 
-def get_scheduler(torch_optimizer, **kwargs):
+def get_scheduler(torch_optimizer, scheduler):
     """Return the training scheduler to use based on options."""
-    scheduler = kwargs.get("scheduler", "multiply")
     if scheduler == "multiply":
         return LambdaLR(torch_optimizer, lr_lambda=lambda epoch: 0.95 ** epoch)
     elif scheduler == "plateau":
