@@ -116,7 +116,18 @@ class FieldedDataset(Dataset):
         self.data: Tuple[Sentences, ...] = data
         self.fields: Tuple[str, ...] = fields
         # the data is columnar
-        assert len(data) == len(fields)
+        assert len(data) == len(
+            fields
+        ), "The data and fields do not contain the same number of elements"
+        # All sequences are of the same length
+        lengths = -1
+        for field in fields:
+            if lengths == -1:
+                lengths = self._get_field_length(field)
+            else:
+                assert lengths == self._get_field_length(
+                    field
+                ), "All fields should be of the same size"
 
     def __getitem__(self, idx) -> Tuple[Sentence, ...]:
         """Support itemgetter."""
@@ -133,6 +144,53 @@ class FieldedDataset(Dataset):
     def __add__(self, other):
         """Support addition."""
         return self.__class__(self.data + other.data, self.fields)
+
+    def _get_field_length(self, field: str) -> Tuple[int]:
+        """Return the field length."""
+        return tuple(len(sentence) for sentence in self.data[self.fields.index(field)])
+
+    def get_lengths(self) -> Tuple[int]:
+        """Return the sentence lengths."""
+        return self._get_field_length(self.fields[0])
+
+    def _adjust_field_length(self, field, lengths: Tuple[int]) -> Sentences:
+        """Adjust the lengths of a field."""
+        elements = self.get_field(field)
+        adjusted_sentences = [tuple() for _ in range(len(lengths))]
+        index = 0
+        for element in elements:
+            length = lengths[index]
+            if len(adjusted_sentences[index]) < length:
+                # Just right
+                if len(element) == length:
+                    adjusted_sentences[index] = element
+                    index += 1
+                    continue
+                # the sentence is too short
+                if len(element) < length:
+                    if len(adjusted_sentences[index]) == 0:
+                        # set it
+                        adjusted_sentences[index] = element
+                    else:
+                        # splice it
+                        adjusted_sentences[index] = adjusted_sentences[index] + element
+                    if len(adjusted_sentences[index]) == length:
+                        index += 1
+                # the sentence is too long
+                while len(element) >= length:
+                    # shorten it according to the lengths until done
+                    part, element = element[:length], element[length:]
+                    adjusted_sentences[index] = part
+                    index += 1
+                    length = lengths[index]
+        return tuple(adjusted_sentences)
+
+    def adjust_lengths(self, lengths: Tuple[int]):
+        """Adjust the lengths of the dataset according to the given lengths."""
+        adjusted_data = []
+        for field in self.fields:
+            adjusted_data.append(self._adjust_field_length(field, lengths))
+        return FieldedDataset(tuple(adjusted_data), self.fields)
 
     def get_field(self, field=Fields.Tokens) -> Sentences:
         """Get the field."""

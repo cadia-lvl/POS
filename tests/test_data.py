@@ -219,29 +219,25 @@ def test_collate_fn(ds_lemma):
         ]  # These sentences are 1, 3, 2 tokens long
 
 
-def test_tokenizer_preprocessing_and_postprocessing(ds_lemma, electra_model):
+def test_tokenizer_preprocessing_and_postprocessing(
+    ds_lemma: FieldedDataset, electra_model
+):
     assert len(ds_lemma.fields) == len(ds_lemma.data)  # sanity check
     assert len(ds_lemma) == 3
+    assert ds_lemma.get_lengths() == (1, 3, 2)
     # be sure that there are too long sentences
     assert any(
         len(field) > 2 for sentence_fields in ds_lemma for field in sentence_fields
     )
-    max_sequence_length = 2
+    max_sequence_length = 4  # 2 for [SEP] and [CLS]
     chunked_ds = chunk_dataset(
         ds_lemma, load_tokenizer(electra_model), max_sequence_length=max_sequence_length
     )
     assert len(chunked_ds) == 4
-    for sentence_fields in chunked_ds:
-        # All should be of acceptable length
-        assert all(len(field) <= max_sequence_length for field in sentence_fields)
+    chunked_lengths = chunked_ds.get_lengths()
+    assert chunked_lengths == (1, 2, 1, 2)
+    # All should be of acceptable length
+    assert all(length <= max_sequence_length for length in chunked_lengths)
     dechunked_ds = dechunk_dataset(ds_lemma, chunked_ds)
-    assert all(
-        tuple(
-            len(original_field) == len(dechunked_field)
-            for original_fields, dechunked_fields in zip(ds_lemma, dechunked_ds)
-            for original_field, dechunked_field in zip(
-                original_fields, dechunked_fields
-            )
-        )
-    )
-    assert len(dechunked_ds) == 3
+    dechunked_lengths = dechunked_ds.get_lengths()
+    assert dechunked_lengths == ds_lemma.get_lengths()

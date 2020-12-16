@@ -10,10 +10,11 @@ import logging
 from transformers.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
+from torch import Tensor
+from torch.nn.utils.rnn import pad_sequence
 
 from pos.data.tokenizer import load_tokenizer
-
-from ..core import FieldedDataset, Fields, Sentence, Sentences
+from pos.core import FieldedDataset, Fields, Sentence, Sentences
 
 log = logging.getLogger(__name__)
 
@@ -37,38 +38,43 @@ def read_datasets(
     )
 
 
-def get_cut_index(
-    tokens: Tuple[str, ...], tokenizer: PreTrainedTokenizer, max_sequence_length
-) -> int:
+def get_adjusted_lengths(
+    sentences: Sentences,
+    tokenizer: PreTrainedTokenizer,
+    max_sequence_length,
+    account_for_specials=True,
+) -> Tuple[int]:
+    num_specials = 0
+    if account_for_specials:
+        num_specials = 2  # Just [SEP] and [CLS]
     token_ids = tokenizer(
-        list(tokens),
-        add_special_tokens=False,
-        is_split_into_words=True,
+        list(" ".join(sentence) for sentence in sentences), add_special_tokens=False
     )["input_ids"]
-    token_ids = cast(List[int], token_ids)
-    if len(token_ids) > max_sequence_length:
-        log.debug(f"Subwords too long: {len(token_ids)}")
-        sub_tokens = [tokenizer._convert_id_to_token(idx) for idx in token_ids]
-        # Create the word masks. 1 means start of word, 0 means continuation.
-        word_masks = [
-            0 if sub_token.startswith("##") else 1 for sub_token in sub_tokens
-        ]
-        # We run backwards until we find a start of a word
-        index = max_sequence_length
-        word_mask = word_masks[index]
-        while not word_mask:
-            index -= 1
-            word_mask = word_masks[index]
-            if index < 0:
-                raise RuntimeError(
-                    f"Unable to split sentence based on subwords: {tokens}={sub_tokens}"
-                )
-        # We have found a start of word at "index"
-        cut_index = index
-        num_tokens = sum(word_masks[:cut_index])
-        return num_tokens
-    else:
-        return len(tokens)
+    sub_tokens = [tokenizer.convert_ids_to_tokens(sentence) for sentence in token_ids]  # type: ignore
+    # Create end-token masks: Hauk ur -> 0, 1
+    end_token_masks = [list() for _ in range(len(sub_tokens))]
+    for sentence, end_token_mask in zip(sub_tokens, end_token_masks):
+        s_iter = iter(sentence)
+        # Skip first token, we place them after reading next token.
+        next(s_iter)
+        for sub_token in s_iter:
+            is_partial = sub_token.startswith("##")
+            if is_partial:
+                end_token_mask.append(0)
+            else:
+                end_token_mask.append(1)
+        # All sentences end with a full word
+        end_token_mask.append(1)
+
+    padded_end_token_masks: Tensor = pad_sequence(
+        list(Tensor(end_token_mask) for end_token_mask in end_token_masks),
+        batch_first=True,
+    )
+    sequence_adjusted_end_token_masks = padded_end_token_masks.reshape(
+        (-1, max_sequence_length - num_specials)
+    )
+    lengths: List[int] = sequence_adjusted_end_token_masks.sum(dim=1).tolist()
+    return tuple(int(length) for length in lengths if int(length) != 0)
 
 
 def chunk_dataset(
@@ -76,23 +82,11 @@ def chunk_dataset(
 ) -> FieldedDataset:
     """Split up sentences which are too long."""
     log.info("Splitting sentences in order to fit BERT-like model")
-    chunks: List[List[Sentence]] = [list() for _ in range(len(ds.fields))]
-    for field_sentences in ds:
-        tokens = field_sentences[ds.fields.index(Fields.Tokens)]
-        start_index = 0
-        while tokens:
-            cut_index = get_cut_index(
-                tokens, tokenizer, max_sequence_length=max_sequence_length - 20
-            )
-            cut_fields = tuple(
-                field_sentence[start_index : cut_index + start_index]
-                for field_sentence in field_sentences
-            )
-            for a_list, field in zip(chunks, cut_fields):
-                a_list.append(field)
-            tokens = tokens[cut_index:]
-            start_index = cut_index
-    return FieldedDataset(tuple(tuple(a_list) for a_list in chunks), ds.fields)
+    tokens = ds.get_field()
+    lengths = get_adjusted_lengths(
+        tokens, tokenizer, max_sequence_length=max_sequence_length
+    )
+    return ds.adjust_lengths(lengths)
 
 
 def dechunk_dataset(
@@ -100,22 +94,5 @@ def dechunk_dataset(
 ) -> FieldedDataset:
     """Reverse the chunking from the original dataset."""
     log.info("Reversing the splitting of sentences in order to fit BERT-like model")
-    dechunks: List[List[Sentence]] = [list() for _ in range(len(chunked_ds.fields))]
-    index = 0
-    append = True
-    for field_sentences in chunked_ds:
-        if append:
-            for a_list, field in zip(dechunks, field_sentences):
-                a_list.append(field)
-        else:
-            for a_list, field in zip(dechunks, field_sentences):
-                a_list[index] = tuple(a_list[index] + field)
-        # The indexing is different in FieldedDataset
-        if len(dechunks[0][index]) == len(original_ds[index][0]):
-            index += 1
-            append = True
-        else:
-            append = False
-    return FieldedDataset(
-        tuple(tuple(a_list) for a_list in dechunks), chunked_ds.fields
-    )
+    original_lengths = original_ds.get_lengths()
+    return chunked_ds.adjust_lengths(original_lengths)
