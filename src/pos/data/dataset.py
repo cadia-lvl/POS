@@ -82,7 +82,7 @@ def chunk_dataset(
         start_index = 0
         while tokens:
             cut_index = get_cut_index(
-                tokens, tokenizer, max_sequence_length=max_sequence_length - 4
+                tokens, tokenizer, max_sequence_length=max_sequence_length - 20
             )
             cut_fields = tuple(
                 field_sentence[start_index : cut_index + start_index]
