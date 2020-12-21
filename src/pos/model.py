@@ -445,39 +445,6 @@ class GRUDecoder(Decoder):
     def decode(
         self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
     ) -> Tensor:
-        """Run the decoder on the batch. Make the batches smaller."""
-        num_splits = 2
-        predictions = None
-        for i in range(num_splits):
-            prediction = self._decode(
-                {
-                    key: value[
-                        i
-                        * int(value.shape[0] / num_splits) : (i + 1)
-                        * int(value.shape[0] / num_splits),
-                        :,
-                        :,
-                    ]
-                    for key, value in encoded.items()
-                },
-                {
-                    key: value[
-                        i
-                        * int(len(value) / num_splits) : (i + 1)
-                        * int(len(value) / num_splits)
-                    ]
-                    for key, value in batch.items()
-                },
-            )
-            if predictions is None:
-                predictions = prediction
-            else:
-                predictions = torch.cat((predictions, prediction), dim=0)
-        return predictions  # type: ignore
-
-    def _decode(
-        self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
-    ) -> Tensor:
         """Run the decoder on the batch."""
         context = torch.cat(
             tuple(emb for key, emb in encoded.items() if key in {Modules.BiLSTM}),
