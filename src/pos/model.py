@@ -210,7 +210,7 @@ class FlairTransformerEmbedding(Embedding):
         f_sentences = [f_sentence(" ".join(sentence)) for sentence in batch]
         try:
             self.emb.embed(f_sentences)
-        except RuntimeError e:
+        except RuntimeError as e:
             log.error(f"Unable to embed sentences in BERT: {batch}")
             raise e
         return pad_sequence(
