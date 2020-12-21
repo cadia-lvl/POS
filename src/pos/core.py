@@ -179,12 +179,9 @@ class FieldedDataset(Dataset):
                     length = lengths[index]
             else:
                 log.error(
-                    f"Shortening but element too long {element}, {len(element)}, {length}"
+                    f"Shortening but element too short {element}, {len(element)}, {length}"
                 )
-                log.error(
-                    f"previous {adjusted_sentences[index-1]}, {len(adjusted_sentences[index-1])}, {lengths[index-1]}"
-                )
-                raise ValueError("Fuck you")
+                raise ValueError("Bad lengths")
         return tuple(adjusted_sentences)
 
     def _lengthen_field_length(self, field, lengths: Tuple[int]) -> Sentences:
@@ -221,45 +218,6 @@ class FieldedDataset(Dataset):
             return self._shorten_field_length(field, lengths)
         else:
             return self._lengthen_field_length(field, lengths)
-
-    def _adjust_field_length_combined(self, field, lengths: Tuple[int]) -> Sentences:
-        """Adjust the lengths of a field."""
-        elements = self.get_field(field)
-        # lengths, x
-        adjusted_sentences = [tuple() for _ in range(len(lengths))]
-        index = 0
-        elements_it = iter(elements)
-        for element in elements_it:
-            length = lengths[index]
-            # Just right
-            if len(element) == length:
-                adjusted_sentences[index] = element
-                index += 1
-            # the sentence is too long
-            elif len(element) > length:
-                partial_element = element
-                while len(partial_element) >= length:
-                    # shorten it according to the lengths until done
-                    part, partial_element = (
-                        partial_element[:length],
-                        partial_element[length:],
-                    )
-                    adjusted_sentences[index] = part
-                    index += 1
-                    length = lengths[index]
-            # the sentence is too short
-            else:
-                while len(adjusted_sentences[index]) != length:
-                    if len(adjusted_sentences[index]) == 0:
-                        # set it
-                        adjusted_sentences[index] = element
-                    else:
-                        # splice it
-                        adjusted_sentences[index] = adjusted_sentences[index] + element
-                    if len(adjusted_sentences[index]) != length:
-                        element = next(elements_it)
-                index += 1
-        return tuple(adjusted_sentences)
 
     def adjust_lengths(self, lengths: Tuple[int], shorten):
         """Adjust the lengths of the dataset according to the given lengths."""

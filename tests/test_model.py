@@ -2,6 +2,10 @@
 import pytest
 from torch import zeros
 import torch
+from torch.utils.data import dataloader
+from pos.data.batch import collate_fn
+from pos.data.dataset import chunk_dataset
+from pos.data.tokenizer import load_tokenizer
 
 from pos.model import (
     ClassingWordEmbedding,
@@ -14,8 +18,8 @@ from pos.model import (
     ABLTagger,
     GRUDecoder,
 )
-from pos.core import Dicts
-from pos.data import BATCH_KEYS
+from pos.core import Dicts, FieldedDataset, Fields
+from pos.data import BATCH_KEYS, collate_fn
 
 
 def test_classic_wemb(vocab_maps, data_loader):
