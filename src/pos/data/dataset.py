@@ -47,7 +47,7 @@ def get_adjusted_lengths(
 ) -> Tuple[int]:
     num_specials = 0
     if account_for_specials:
-        num_specials = 4  # Just [SEP] and [CLS] + 2 more for safety
+        num_specials = 20  # Just [SEP] and [CLS] + 2 more for safety
         max_sequence_length = max_sequence_length - num_specials
     token_ids = tokenizer(
         list(" ".join(sentence) for sentence in sentences), add_special_tokens=False

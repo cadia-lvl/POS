@@ -17,7 +17,7 @@ def load_tokenizer(directory: str) -> PreTrainedTokenizer:
 
 def is_partial(sub_token: str, special_str: str, denotes_partial: bool) -> bool:
     """Return True if subtoken is partial."""
-    found = special_str in sub_token
+    found = sub_token.startswith(special_str)
     if found and denotes_partial:
         return True
     elif found and not denotes_partial:
