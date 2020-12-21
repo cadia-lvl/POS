@@ -208,7 +208,10 @@ class FlairTransformerEmbedding(Embedding):
     def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
         f_sentences = [f_sentence(" ".join(sentence)) for sentence in batch]
-        self.emb.embed(f_sentences)
+        try:
+            self.emb.embed(f_sentences)
+        except RuntimeError:
+            log.error(f"Unable to embed sentences in BERT: {batch}")
         return pad_sequence(
             [
                 stack(tuple(token.embedding for token in sentence))
