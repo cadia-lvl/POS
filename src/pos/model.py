@@ -463,8 +463,8 @@ class GRUDecoder(Decoder):
                 {
                     key: value[
                         i
-                        * int(value.shape[0] / num_splits) : (i + 1)
-                        * int(value.shape[0] / num_splits)
+                        * int(len(value) / num_splits) : (i + 1)
+                        * int(len(value) / num_splits)
                     ]
                     for key, value in batch.items()
                 },
