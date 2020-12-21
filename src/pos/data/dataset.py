@@ -2,6 +2,7 @@
 
 
 from functools import reduce
+from itertools import chain
 from operator import add
 from re import sub
 from typing import List, Tuple, cast
@@ -13,7 +14,7 @@ from transformers.tokenization_utils_base import BatchEncoding
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
 
-from pos.data.tokenizer import load_tokenizer
+from pos.data.tokenizer import get_partial, load_tokenizer
 from pos.core import FieldedDataset, Fields, Sentence, Sentences
 
 log = logging.getLogger(__name__)
@@ -47,18 +48,20 @@ def get_adjusted_lengths(
     num_specials = 0
     if account_for_specials:
         num_specials = 2  # Just [SEP] and [CLS]
+        max_sequence_length = max_sequence_length - num_specials
     token_ids = tokenizer(
         list(" ".join(sentence) for sentence in sentences), add_special_tokens=False
     )["input_ids"]
     sub_tokens = [tokenizer.convert_ids_to_tokens(sentence) for sentence in token_ids]  # type: ignore
     # Create end-token masks: Hauk ur -> 0, 1
+    is_partial_func = get_partial(tokenizer)
     end_token_masks = [list() for _ in range(len(sub_tokens))]
     for sentence, end_token_mask in zip(sub_tokens, end_token_masks):
         s_iter = iter(sentence)
         # Skip first token, we place them after reading next token.
         next(s_iter)
         for sub_token in s_iter:
-            is_partial = sub_token.startswith("##")
+            is_partial = is_partial_func(sub_token)
             if is_partial:
                 end_token_mask.append(0)
             else:
@@ -66,15 +69,17 @@ def get_adjusted_lengths(
         # All sentences end with a full word
         end_token_mask.append(1)
 
-    padded_end_token_masks: Tensor = pad_sequence(
-        list(Tensor(end_token_mask) for end_token_mask in end_token_masks),
-        batch_first=True,
-    )
-    sequence_adjusted_end_token_masks = padded_end_token_masks.reshape(
-        (-1, max_sequence_length - num_specials)
-    )
-    lengths: List[int] = sequence_adjusted_end_token_masks.sum(dim=1).tolist()
-    return tuple(int(length) for length in lengths if int(length) != 0)
+    lengths = []
+    for idx, end_token_mask in enumerate(end_token_masks):
+        while len(end_token_mask) != 0:
+            prefix, end_token_mask = (
+                end_token_mask[:max_sequence_length],
+                end_token_mask[max_sequence_length:],
+            )
+            length = sum(prefix)
+            lengths.append(length)
+
+    return tuple(int(length) for length in lengths)
 
 
 def chunk_dataset(
@@ -86,7 +91,7 @@ def chunk_dataset(
     lengths = get_adjusted_lengths(
         tokens, tokenizer, max_sequence_length=max_sequence_length
     )
-    return ds.adjust_lengths(lengths)
+    return ds.adjust_lengths(lengths, shorten=True)
 
 
 def dechunk_dataset(
@@ -95,4 +100,4 @@ def dechunk_dataset(
     """Reverse the chunking from the original dataset."""
     log.info("Reversing the splitting of sentences in order to fit BERT-like model")
     original_lengths = original_ds.get_lengths()
-    return chunked_ds.adjust_lengths(original_lengths)
+    return chunked_ds.adjust_lengths(original_lengths, shorten=False)

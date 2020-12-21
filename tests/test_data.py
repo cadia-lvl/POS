@@ -1,7 +1,8 @@
+from conftest import electra_model
 import torch
 from torch import Tensor
 from torch.utils.data.dataloader import DataLoader
-from pos.data.dataset import dechunk_dataset
+from pos.data.dataset import dechunk_dataset, get_adjusted_lengths
 
 from pos.utils import read_tsv, tokens_to_sentences
 from pos.data import (
@@ -241,3 +242,13 @@ def test_tokenizer_preprocessing_and_postprocessing(
     dechunked_ds = dechunk_dataset(ds_lemma, chunked_ds)
     dechunked_lengths = dechunked_ds.get_lengths()
     assert dechunked_lengths == ds_lemma.get_lengths()
+
+
+def test_more_tokenization(electra_model):
+    # fmt: off
+    test = [('Báðar', 'segjast', 'þær', 'hafa', 'verið', 'látnar', 'matast', 'í', 'eldhúsinu', ',', 'eins', 'og', 'hjúum', 'var', 'gjarnan', 'skipað', 'erlendis', ',', 'og', 'ekki', 'líkað', 'það', 'par', 'vel', 'enda', 'vanar', 'meiri', 'virðingu', 'að', 'heiman', '.')]
+    # fmt: on
+    lengts = get_adjusted_lengths(
+        tuple(test), load_tokenizer(electra_model), max_sequence_length=999
+    )
+    assert lengts == (31,)
