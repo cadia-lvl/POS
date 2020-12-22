@@ -3,7 +3,13 @@ import pathlib
 from torch.utils.data import dataloader
 from pos.core import Dicts
 from pos.evaluate import Experiment
-from pos.model import ABLTagger, CharacterAsWordEmbedding, Encoder, GRUDecoder, Modules
+from pos.model import (
+    ABLTagger,
+    CharacterAsWordEmbedding,
+    Encoder,
+    CharacterDecoder,
+    Modules,
+)
 from pos.train import (
     get_criterion,
     get_optimizer,
@@ -65,7 +71,7 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
         lstm_dropouts=0.0,
         input_dropouts=0.0,
     )
-    decoders[Modules.Lemmatizer] = GRUDecoder(
+    decoders[Modules.Lemmatizer] = CharacterDecoder(
         vocab_map=dicts[Dicts.Chars],
         hidden_dim=encoder.output_dim,
         emb_dim=64,

@@ -16,7 +16,7 @@ from pos.model import (
     Tagger,
     Encoder,
     ABLTagger,
-    GRUDecoder,
+    CharacterDecoder,
 )
 from pos.core import Dicts, FieldedDataset, Fields
 from pos.data import BATCH_KEYS, collate_fn
@@ -78,14 +78,14 @@ def test_tagger(encoder, data_loader, tagger_module):
 def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
     hidden_dim = encoder.output_dim
     emb_dim = 5
-    gru = GRUDecoder(
+    char_decoder = CharacterDecoder(
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=hidden_dim,
         emb_dim=emb_dim,
     )
     for batch in data_loader:
         embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
-        tok_embs = gru(embs, batch)
+        tok_embs = char_decoder(embs, batch)
         assert tok_embs.shape == (
             9,
             8,

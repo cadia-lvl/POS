@@ -8,7 +8,8 @@ import random
 from flair.embeddings import TransformerWordEmbeddings
 from flair.data import Sentence as f_sentence
 import torch
-from torch import Tensor, stack, softmax, diagonal, cat
+from torch import Tensor, stack, softmax, diagonal, cat, zeros_like
+from torch.nn.init import zeros_
 from torch.nn.modules.activation import MultiheadAttention
 from torch.nn.modules.module import Module
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
@@ -311,8 +312,8 @@ class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
         return self.decode(encoded=encoded, batch=batch)
 
 
-class GRUDecoder(Decoder):
-    """Cho et al., 2014 GRU RNN decoder which uses the context vector for each timestep.
+class CharacterDecoder(Decoder):
+    """Cho et al., 2014 GRU RNN decoder which uses the context vector for each timestep. LSTM instead of GRU due to errors.
 
     Code adjusted from: https://github.com/bentrevett/pytorch-seq2seq/
     """
@@ -323,7 +324,6 @@ class GRUDecoder(Decoder):
         hidden_dim,
         emb_dim,
         char_attention=False,
-        use_multihead_attention=False,
         teacher_forcing=0.0,
         dropout=0.0,
         weight=1,
@@ -345,26 +345,22 @@ class GRUDecoder(Decoder):
             len(vocab_map), emb_dim, sparse=True
         )  # We map the input idx to vectors.
         # last character + sentence context + character attention
-        gru_in_dim = emb_dim + hidden_dim + (hidden_dim if self.char_attention else 0)
-        self.rnn = nn.GRU(
-            gru_in_dim,
+        rnn_in_dim = emb_dim + hidden_dim + (hidden_dim if self.char_attention else 0)
+        self.rnn = nn.LSTM(
+            rnn_in_dim,
             hidden_dim,
             batch_first=True,
         )
 
         # We use the same input + the new hidden
-        self.fc_out = nn.Linear(gru_in_dim + hidden_dim, len(vocab_map))
+        self.fc_out = nn.Linear(rnn_in_dim + hidden_dim, len(vocab_map))
         self.illegal_chars_output = {
             self.vocab_map.SOS_ID,
             self.vocab_map.PAD_ID,
             self.vocab_map.UNK_ID,
         }
-        self.use_multiheaded_attention = use_multihead_attention
         if self.char_attention:
-            if self.use_multiheaded_attention:
-                self.multi_attention = MultiheadAttention(hidden_dim, num_heads=1)
-            else:
-                self.attention = DotAttention()
+            self.attention = MultiheadAttention(hidden_dim, num_heads=1)
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
 
     @property
@@ -457,6 +453,7 @@ class GRUDecoder(Decoder):
         predictions: Optional[Tensor] = None
 
         hidden = context.reshape((1, context.shape[0], context.shape[1]))
+        cell = zeros_like(hidden)
         # return torch.zeros(size=(1, batch_size, self.hidden_dim)).to(core.device)
         # self.initial_hidden(context.shape[0])
         # We are training
@@ -474,27 +471,18 @@ class GRUDecoder(Decoder):
                 ).to(core.device)
                 # (b, f)
                 emb_chars = self.dropout(self.sparse_embedding(next_char_input))
-                gru_in = torch.cat((emb_chars, context), dim=1)
+                rnn_in = torch.cat((emb_chars, context), dim=1)
                 if self.char_attention:
-                    if self.use_multiheaded_attention:
-                        char_attention, _ = self.multi_attention(
-                            hidden,
-                            encoded[Modules.CharactersToTokens].permute(1, 0, 2),
-                            encoded[Modules.CharactersToTokens].permute(1, 0, 2),
-                        )
-                        char_attention = char_attention.squeeze()
-                    else:
-                        # (b, f)
-                        char_attention = self.attention(
-                            # (b, f)
-                            hidden.squeeze(),
-                            # (b, t, f)
-                            encoded[Modules.CharactersToTokens],
-                        )
-                    gru_in = cat((gru_in, char_attention), dim=1)
-                gru_in = gru_in.unsqueeze(1)  # Add the time-step
-                output, hidden = self.rnn(gru_in, hidden)
-                prediction = self.fc_out(torch.cat((gru_in, output), dim=2))
+                    char_attention, _ = self.attention(
+                        hidden,
+                        encoded[Modules.CharactersToTokens].permute(1, 0, 2),
+                        encoded[Modules.CharactersToTokens].permute(1, 0, 2),
+                    )
+                    char_attention = char_attention.squeeze()
+                    rnn_in = cat((rnn_in, char_attention), dim=1)
+                rnn_in = rnn_in.unsqueeze(1)  # Add the time-step
+                output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
+                prediction = self.fc_out(torch.cat((rnn_in, output), dim=2))
                 if predictions is None:
                     predictions = prediction
                 else:

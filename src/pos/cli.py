@@ -46,7 +46,7 @@ from pos.model import (
     PretrainedEmbedding,
     ClassingWordEmbedding,
     CharacterAsWordEmbedding,
-    GRUDecoder,
+    CharacterDecoder,
     Modules,
 )
 from pos.train import (
@@ -166,7 +166,6 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--lemmatizer_weight", default=1, help="Value to multiply lemmatizer loss")
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
 @click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
-@click.option("--lemmatizer_char_multi_attention/--no_lemmatizer_char_multi_attention", default=True, help="Attend over characters using Multiheaded attention?")
 @click.option("--lemmatizer_teacher_forcing", default=0.0, help="Teacher forcing in Lemmatizer.")
 @click.option("--known_chars_file", default=None, help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
 @click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
@@ -284,13 +283,12 @@ def train_and_tag(**kwargs):
         )
     if kwargs["lemmatizer"]:
         log.info("Training Lemmatizer")
-        decoders[Modules.Lemmatizer] = GRUDecoder(
+        decoders[Modules.Lemmatizer] = CharacterDecoder(
             vocab_map=dicts[Dicts.Chars],
             hidden_dim=encoder.output_dim,
             emb_dim=kwargs["lemmatizer_char_dim"],
             char_attention=Modules.CharactersToTokens in embs
             and kwargs["lemmatizer_char_attention"],
-            use_multihead_attention=kwargs["lemmatizer_char_multi_attention"],
             teacher_forcing=kwargs["lemmatizer_teacher_forcing"],
             dropout=0.0,
         )
