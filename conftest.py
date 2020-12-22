@@ -13,7 +13,7 @@ from pos.model import (
     ABLTagger,
     Encoder,
     ClassingWordEmbedding,
-    GRUDecoder,
+    CharacterDecoder,
     Tagger,
     Modules,
 )
@@ -105,9 +105,9 @@ def tagger_module(vocab_maps, encoder) -> Tagger:
 
 
 @fixture
-def lemmatizer_module(vocab_maps, encoder) -> GRUDecoder:
+def lemmatizer_module(vocab_maps, encoder) -> CharacterDecoder:
     """Return a Tagger."""
-    return GRUDecoder(
+    return CharacterDecoder(
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=encoder.output_dim,
         emb_dim=20,
