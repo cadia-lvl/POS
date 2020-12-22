@@ -17,6 +17,7 @@ echo $*
 #    --main_lstm_layers 2 \
 #    --word_embedding_dim 128 \
 #    --pretrained_model_folder bull \
+CUDA_LAUNCH_BLOCKING=1 \
 pos \
 train-and-tag \
 "$TRAIN" \

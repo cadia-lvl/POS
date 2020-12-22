@@ -45,6 +45,7 @@ def get_adjusted_lengths(
     max_sequence_length,
     account_for_specials=True,
 ) -> Tuple[int]:
+    """Return adjusted lengths based on a tokenizer and model max length."""
     num_specials = 0
     if account_for_specials:
         num_specials = 20  # Just [SEP] and [CLS] + 2 more for safety
