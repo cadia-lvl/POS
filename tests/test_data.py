@@ -1,4 +1,3 @@
-from conftest import electra_model
 import torch
 from torch import Tensor
 from torch.utils.data.dataloader import DataLoader
@@ -165,9 +164,7 @@ def test_load_dicts(ds):
 
 
 def test_load_dicts_read_datasets(test_tsv_file):
-    train_ds = read_datasets(
-        [test_tsv_file],
-    )
+    train_ds = read_datasets([test_tsv_file],)
     _, dicts = load_dicts(train_ds)
 
 
