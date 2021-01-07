@@ -8,6 +8,8 @@ mkdir -p $OUT_DIR
 # Pop the model.sh, out_dir, train and test
 shift; shift; shift; shift
 echo $*
+echo $MODEL
+echo $OUT_DIR
 sbatch \
 --output="$OUT_DIR/slurm-%j.out" \
 --gres=gpu \
