@@ -11,5 +11,5 @@ TEST=$RAW_DIR/mim/10PM.plain
 for i in $(seq $COUNT)
 do
     OUT_DIR=./out/"$NAME"/$i
-    ./bin/wrap_sbatch.sh $MODEL $OUT_DIR $TRAIN $TEST $*
+    ./bin/wrap_sbatch.sh $MODEL $TRAIN $TEST $OUT_DIR $*
 done
