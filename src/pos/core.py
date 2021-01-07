@@ -25,7 +25,7 @@ device = None
 
 
 class Dicts(Enum):
-    """An enum to name all model parts."""
+    """An enum to name all mappings."""
 
     Chars = "c_map"
     Pretrained = "p_map"

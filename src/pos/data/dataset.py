@@ -27,7 +27,7 @@ def read_datasets(
     """Read tagged datasets from multiple files.
 
     Args:
-        max_sent_length: Sentences longer than "max_sent_length" are thrown away.
+        file_paths: The paths to the datasets.
         fields: The tagged fields in the dataset
     """
     return reduce(

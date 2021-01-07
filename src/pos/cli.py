@@ -187,10 +187,10 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--scheduler", default="multiply", type=click.Choice(["multiply", "plateau"], case_sensitive=False), help="The learning rate scheduler to use.")
 # fmt: on
 def train_and_tag(**kwargs):
-    """Train a POS tagger on intpus and write out the tagged the test files.
+    """Train a POS tagger and/or lemmatizer on intpus and write out the tagged test file.
 
     training_files: Files to use for training (supports multiple files = globbing).
-    All training files should be .tsv, with two columns, the token and tag.
+    All training files should be .tsv, with two/three columns, the token, tag, lemma.
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
