@@ -3,17 +3,13 @@
 DATA_DIR=./data
 RAW_DIR="$DATA_DIR"/raw
 
-NAME="$1"
-COUNT="$2"
+MODEL="$1"
+NAME="$2"
+COUNT="$3"
 TRAIN=$RAW_DIR/mim/10TM.plain
 TEST=$RAW_DIR/mim/10PM.plain
 for i in $(seq $COUNT)
 do
-    out_folder=./out/"$NAME"/$i
-    mkdir -p "$out_folder"
-    sbatch \
-    --output="$out_folder/slurm-%j.out" \
-    --gres=gpu \
-    --mem=10G \
-    --wrap="bin/run_model.sh $out_folder $TRAIN $TEST --gpu"
+    OUT_DIR=./out/"$NAME"/$i
+    ./bin/wrap_sbatch.sh $MODEL $OUT_DIR $TRAIN $TEST $*
 done
