@@ -14,4 +14,4 @@ sbatch \
 --output="$OUT_DIR/slurm-%j.out" \
 --gres=gpu \
 --mem=10G \
---wrap="$MODEL $TRAIN $TEST $OUT_DIR $* --gpu"
+--wrap="$MODEL $TRAIN $TEST $OUT_DIR --gpu $*"
