@@ -44,6 +44,7 @@ def get_adjusted_lengths(
     max_sequence_length,
 ) -> Tuple[int]:
     """Return adjusted lengths based on a tokenizer and model max length."""
+    original_sent_lens = [len(sentence) for sentence in sentences]
     token_ids = [
         tokenizer(sentence, is_split_into_words=True)["input_ids"]
         for sentence in sentences
@@ -59,13 +60,18 @@ def get_adjusted_lengths(
         for sub_tokens in sub_tokens_batch
     ]
     lengths = []
-    for end_token_mask in end_token_masks:
+    for original_sent_len, end_token_mask in zip(original_sent_lens, end_token_masks):
         while len(end_token_mask) != 0:
             prefix, end_token_mask = (
                 end_token_mask[:max_sequence_length],
                 end_token_mask[max_sequence_length:],
             )
             length = sum(prefix)
+            if length > original_sent_len:
+                log.warn(
+                    "The tokenizer has split up an abbreviation without marking it as partial. Ignoring."
+                )
+                length = original_sent_len
             lengths.append(length)
 
     return tuple(int(length) for length in lengths)
