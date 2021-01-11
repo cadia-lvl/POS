@@ -3,17 +3,6 @@ import torch
 from pos import model
 
 
-def test_copy_into_larger_tensor():
-    test = torch.arange(start=0, end=4).view(2, 2)
-    print(test)
-    bigger_tensor = torch.ones((3, 3))
-    assert torch.all(
-        model.copy_into_larger_tensor(test, bigger_tensor).eq(
-            torch.Tensor([[0, 1, 0], [2, 3, 0], [0, 0, 0]])
-        )
-    )
-
-
 def test_loss():
     criterion = torch.nn.CrossEntropyLoss()
 

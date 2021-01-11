@@ -42,6 +42,7 @@ train-and-tag \
 --char_emb_dim 64 \
 --main_lstm_dim 128 \
 --main_lstm_layers 1 \
+--emb_dropouts 0.20 \
 --label_smoothing 0.1 \
 --epochs 10 \
 --batch_size 8 \

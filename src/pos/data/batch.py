@@ -1,14 +1,10 @@
 """Batch processing."""
 
-from typing import List, Tuple, Set, Dict, Optional, Iterable, Sequence, Callable, Any
-from functools import reduce
-from operator import add
+from typing import Tuple, Dict, Sequence, Any
 
-from tqdm import tqdm
 from torch import (
     Tensor,
     zeros_like,
-    zeros,
 )
 from torch.nn.utils.rnn import pad_sequence
 

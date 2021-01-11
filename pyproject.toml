@@ -16,6 +16,7 @@ ignored-modules = "torch"
 testpaths = [
     "tests"
 ]
+# addopts = "--electra_model electra-small-pytorch"
 
 [tool.poetry]
 name = "pos"
@@ -32,11 +33,11 @@ packages = [
 pos = "pos.cli:cli"
 
 [tool.poetry.dependencies]
-python = ">=3.6.1"
-torch = "^1.6.0"
+python = "^3.8.0"
+torch = "^1.7.0"
 tqdm = "^4.48.2"
-flair = "^0.5.1"
 click = "^7.1.2"
+transformers = "^4.1.1"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.782"

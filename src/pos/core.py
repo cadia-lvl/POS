@@ -11,10 +11,16 @@ from typing import (
     Union,
 )
 import logging
+import random
 
 from torch.utils.data import Dataset
+from torch import device as t_device, set_num_threads
+from torch.cuda import is_available, device_count
+import numpy as np
+from torch.cuda import manual_seed
+from torch.backends import cudnn
 
-from .utils import read_tsv, tokens_to_sentences, write_tsv
+from pos.utils import read_tsv, tokens_to_sentences, write_tsv
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +28,35 @@ Sentence = Tuple[str, ...]
 Sentences = Tuple[Sentence, ...]
 
 device = None
+
+
+def set_device(gpu_flag=False, DEBUG=False):
+    """Set the torch device."""
+    if DEBUG:
+        # We do not use GPU when debugging
+        gpu_flag = False
+    if is_available() and gpu_flag:
+        device_set = t_device("cuda")  # type: ignore
+        # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
+        # --gres=gpu:titanx:2
+        log.info(f"Using {device_count()} GPUs")
+    else:
+        device_set = t_device("cpu")  # type: ignore
+        threads = 1
+        # Set the number of threads to use for CPU
+        set_num_threads(threads)
+        log.info(f"Using {threads} CPU threads")
+    global device
+    device = device_set
+
+
+def set_seed(seed=42):
+    """Set the seed on all platforms. 0 for no specific seeding."""
+    if seed:
+        random.seed(seed)
+        np.random.seed(seed)
+        manual_seed(seed)
+        cudnn.deterministic = True
 
 
 class Dicts(Enum):

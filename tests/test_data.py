@@ -164,7 +164,9 @@ def test_load_dicts(ds):
 
 
 def test_load_dicts_read_datasets(test_tsv_file):
-    train_ds = read_datasets([test_tsv_file],)
+    train_ds = read_datasets(
+        [test_tsv_file],
+    )
     _, dicts = load_dicts(train_ds)
 
 
@@ -227,7 +229,7 @@ def test_tokenizer_preprocessing_and_postprocessing(
     assert any(
         len(field) > 2 for sentence_fields in ds_lemma for field in sentence_fields
     )
-    max_sequence_length = 22  # 2 for [SEP] and [CLS]
+    max_sequence_length = 4  # 2 extra for [SEP] and [CLS]
     chunked_ds = chunk_dataset(
         ds_lemma, load_tokenizer(electra_model), max_sequence_length=max_sequence_length
     )

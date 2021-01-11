@@ -4,13 +4,13 @@ from typing import Union, cast, Sequence
 import logging
 
 from torch.utils.data.dataloader import DataLoader
-from torch import device, load
+from torch import load
 
 from pos.model import Modules
 
-from .core import FieldedDataset, Fields, Sentence, Sentences
-from .train import tag_data_loader
-from .data import collate_fn
+from pos.core import FieldedDataset, Fields, Sentence, Sentences, set_device
+from pos.train import tag_data_loader
+from pos.data import collate_fn
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class Tagger:
     def __init__(self, model_file=None, device="cpu"):
         """Initialize a Tagger. Reads the given files."""
         log.info("Setting device.")
-        self.device = device(device)
+        self.device = set_device(gpu_flag="cpu" != device)
         log.info("Reading model file...")
         self.model = load(model_file, map_location=self.device)
 

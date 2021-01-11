@@ -8,13 +8,12 @@ from re import sub
 from typing import List, Tuple, cast
 import logging
 
-from transformers.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
 
-from pos.data.tokenizer import get_partial, load_tokenizer
+from pos.data.tokenizer import load_tokenizer, get_initial_token_mask
 from pos.core import FieldedDataset, Fields, Sentence, Sentences
 
 log = logging.getLogger(__name__)
@@ -43,35 +42,24 @@ def get_adjusted_lengths(
     sentences: Sentences,
     tokenizer: PreTrainedTokenizer,
     max_sequence_length,
-    account_for_specials=True,
 ) -> Tuple[int]:
     """Return adjusted lengths based on a tokenizer and model max length."""
-    num_specials = 0
-    if account_for_specials:
-        num_specials = 20  # Just [SEP] and [CLS] + 2 more for safety
-        max_sequence_length = max_sequence_length - num_specials
-    token_ids = tokenizer(
-        list(" ".join(sentence) for sentence in sentences), add_special_tokens=False
-    )["input_ids"]
-    sub_tokens = [tokenizer.convert_ids_to_tokens(sentence) for sentence in token_ids]  # type: ignore
-    # Create end-token masks: Hauk ur -> 0, 1
-    is_partial_func = get_partial(tokenizer)
-    end_token_masks = [list() for _ in range(len(sub_tokens))]
-    for sentence, end_token_mask in zip(sub_tokens, end_token_masks):
-        s_iter = iter(sentence)
-        # Skip first token, we place them after reading next token.
-        next(s_iter)
-        for sub_token in s_iter:
-            is_partial = is_partial_func(sub_token)
-            if is_partial:
-                end_token_mask.append(0)
-            else:
-                end_token_mask.append(1)
-        # All sentences end with a full word
-        end_token_mask.append(1)
-
+    token_ids = [
+        tokenizer(sentence, is_split_into_words=True)["input_ids"]
+        for sentence in sentences
+    ]
+    sub_tokens_batch = [tokenizer.convert_ids_to_tokens(sentence) for sentence in token_ids]  # type: ignore
+    # Create end-token masks: [CLS] Hauk ur er [SEP] -> [0, 0, 1, 1, 0]
+    # By getting  initial token masks and shifting them:
+    # [CLS] Hauk ur er [SEP] -> [0, 1, 0, 1, 0] ->
+    # -> [0] + [mid shifted to left] + [1, 0]
+    # -> [0, 0, 1, 1, 0]
+    end_token_masks = [
+        [0] + get_initial_token_mask(tokenizer, sub_tokens)[2:-1] + [1, 0]
+        for sub_tokens in sub_tokens_batch
+    ]
     lengths = []
-    for idx, end_token_mask in enumerate(end_token_masks):
+    for end_token_mask in end_token_masks:
         while len(end_token_mask) != 0:
             prefix, end_token_mask = (
                 end_token_mask[:max_sequence_length],

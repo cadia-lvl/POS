@@ -1,24 +1,19 @@
 """To test parts of the model."""
-import pytest
 from torch import zeros
 import torch
-from torch.utils.data import dataloader
-from pos.data.batch import collate_fn
-from pos.data.dataset import chunk_dataset
-from pos.data.tokenizer import load_tokenizer
 
 from pos.model import (
     ClassingWordEmbedding,
     DotAttention,
     Modules,
     PretrainedEmbedding,
-    FlairTransformerEmbedding,
+    TransformerEmbedding,
     Tagger,
     Encoder,
     ABLTagger,
     CharacterDecoder,
 )
-from pos.core import Dicts, FieldedDataset, Fields
+from pos.core import Dicts
 from pos.data import BATCH_KEYS, collate_fn
 
 
@@ -52,7 +47,7 @@ def test_chars_as_words():
 
 
 def test_transformer_embedding_electra_small(electra_model, data_loader):
-    wemb = FlairTransformerEmbedding(electra_model)
+    wemb = TransformerEmbedding(electra_model)
     # The TransformerEmbedding expects the input to be a Sentence, not vectors.
     for batch in data_loader:
         embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
@@ -95,7 +90,7 @@ def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
 
 
 def test_full_run(data_loader, vocab_maps, electra_model):
-    emb = FlairTransformerEmbedding(electra_model)
+    emb = TransformerEmbedding(electra_model)
     encoder = Encoder(embeddings={Modules.BERT: emb})
     tagger = Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)
     abl_tagger = ABLTagger(encoder=encoder, decoders={Modules.Tagger: tagger})

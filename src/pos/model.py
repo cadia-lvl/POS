@@ -5,24 +5,21 @@ from typing import List, Mapping, Sequence, Tuple, Any, Dict, Optional, cast
 import abc
 import random
 
-from flair.embeddings import TransformerWordEmbeddings
-from flair.data import Sentence as f_sentence
 import torch
 from torch import Tensor, stack, softmax, diagonal, cat, zeros_like
-from torch.nn.init import zeros_
 from torch.nn.modules.activation import MultiheadAttention
-from torch.nn.modules.module import Module
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
+from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizer, AutoConfig
 
 from . import core
 from .core import Sentence, Sentences, VocabMap
 from .data import (
-    copy_into_larger_tensor,
     map_to_index,
     map_to_chars_batch,
     BATCH_KEYS,
     map_to_index_batch,
+    get_initial_token_mask,
 )
 
 
@@ -83,10 +80,7 @@ class ClassingWordEmbedding(Embedding):
     """Classic word embeddings."""
 
     def __init__(
-        self,
-        vocab_map: VocabMap,
-        embedding_dim: int,
-        padding_idx=0,
+        self, vocab_map: VocabMap, embedding_dim: int, padding_idx=0, dropout=0.0
     ):
         """Create one."""
         super().__init__()
@@ -96,6 +90,7 @@ class ClassingWordEmbedding(Embedding):
         )
         # Skip the first index, should be zero
         nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
+        self.dropout = nn.Dropout(p=dropout)
 
     def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
         """Preprocess the sentence batch."""
@@ -106,7 +101,7 @@ class ClassingWordEmbedding(Embedding):
 
     def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
-        return self.sparse_embedding(batch)
+        return self.dropout(self.sparse_embedding(batch))
 
     @property
     def output_dim(self):
@@ -123,12 +118,14 @@ class PretrainedEmbedding(ClassingWordEmbedding):
         embeddings: Tensor,
         freeze=False,
         padding_idx=0,
+        dropout=0.0,
     ):
         """Create one."""
         super().__init__(
             vocab_map=vocab_map,
             embedding_dim=1,
             padding_idx=padding_idx,
+            dropout=dropout,
         )  # we overwrite the embedding
         self.sparse_embedding = nn.Embedding.from_pretrained(
             embeddings, freeze=freeze, padding_idx=padding_idx, sparse=True
@@ -145,6 +142,7 @@ class CharacterAsWordEmbedding(Embedding):
         char_lstm_dim=64,
         char_lstm_layers=1,
         padding_idx=0,
+        dropout=0.0,
     ):
         """Create one."""
         super().__init__()
@@ -164,6 +162,8 @@ class CharacterAsWordEmbedding(Embedding):
             batch_first=True,
             bidirectional=True,
         )
+        self.emb_dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(p=dropout)
         for name, param in self.char_bilstm.named_parameters():
             if "bias" in name:
                 nn.init.constant_(param, 0.0)
@@ -178,11 +178,11 @@ class CharacterAsWordEmbedding(Embedding):
     def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
         # (b * seq, chars)
-        char_embs = self.sparse_embedding(batch)
+        char_embs = self.emb_dropout(self.sparse_embedding(batch))
         # (b * seq, chars, f)
         self.char_bilstm.flatten_parameters()
         out, _ = self.char_bilstm(char_embs)
-        return out
+        return self.dropout(out)
 
     @property
     def output_dim(self):
@@ -190,46 +190,75 @@ class CharacterAsWordEmbedding(Embedding):
         return self._output_dim
 
 
-class FlairTransformerEmbedding(Embedding):
-    """A wrapper for the TransformerEmbedding from Flair. It's here to fit into the preprocessing setup."""
+class TransformerEmbedding(Embedding):
+    """An embedding of a sentence after going through a Transformer."""
 
-    def __init__(self, file_path, **kwargs):
-        """Initialize the embeddings."""
+    def __init__(self, model_path: str, dropout=0.0):
+        """Initialize it be reading the config, model and tokenizer."""
         super().__init__()
-        self.emb = TransformerWordEmbeddings(
-            file_path,
-            layers=kwargs.get("transformer_layers", "-1"),
-            use_scalar_mix=kwargs.get("transformer_use_scalar_mix", False),
-            allow_long_sentences=False,
-            fine_tune=True,
-            batch_size=kwargs.get("batch_size", 1),
-        )
-        self._output_dim = kwargs.get("bert_encoder_dim", 256)
+        self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
+        self.model = AutoModel.from_pretrained(model_path, config=self.config)
+        self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_path)
+        # ELECTRA property
+        self.num_layers = self.config.num_hidden_layers
+        self.max_length = self.config.max_position_embeddings
+        self.dropout = nn.Dropout(p=dropout)
 
-    def preprocess(self, batch: Sequence[Sentence]) -> Tensor:
+    def preprocess(self, batch: Sequence[Sentence]) -> Dict[str, Tensor]:
         """Preprocess the sentence batch."""
-        f_sentences = [f_sentence(" ".join(sentence)) for sentence in batch]
-        try:
-            self.emb.embed(f_sentences)
-        except RuntimeError as e:
-            log.error(f"Unable to embed sentences in BERT: {batch}")
-            raise e
-        return pad_sequence(
-            [
-                stack(tuple(token.embedding for token in sentence))
-                for sentence in f_sentences
-            ],
-            batch_first=True,
-        )
+        preprocessed = {
+            "input_ids": [],
+            "attention_mask": [],
+            "initial_token_masks": [],
+        }
+        for sentence in batch:
+            encoded = self.tokenizer(
+                text=sentence,
+                is_split_into_words=True,
+                padding="max_length",
+                max_length=self.max_length,
+                return_tensors="pt",
+            )
+            preprocessed["input_ids"].append(encoded["input_ids"][0])
+            preprocessed["attention_mask"].append(encoded["attention_mask"][0])
+            preprocessed["initial_token_masks"].append(
+                Tensor(
+                    get_initial_token_mask(
+                        self.tokenizer,
+                        self.tokenizer.convert_ids_to_tokens(
+                            encoded["input_ids"][0].tolist()
+                        ),
+                    ),
+                ).bool()
+            )
+        # Stack as batches
+        return {
+            key: stack(value).to(core.device) for key, value in preprocessed.items()
+        }
 
-    def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
+    def embed(self, batch: Dict[str, Tensor], lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
-        return batch
+        outputs = self.model(
+            input_ids=batch["input_ids"],
+            attention_mask=batch["attention_mask"],
+            return_dict=True,
+        )
+        # (b, s, f)
+        output = outputs["last_hidden_state"]
+        # Now we map the subtokens to tokens.
+        tokens_emb = []
+        for b in range(output.shape[0]):
+            initial_token_mask = batch["initial_token_masks"][b]
+            output_sent = output[b, :, :]
+            tokens_emb.append(output_sent[initial_token_mask, :])
+        padded = pad_sequence(tokens_emb, batch_first=True)
+        return self.dropout(padded)
 
     @property
     def output_dim(self):
         """Return the output dimension."""
-        return self._output_dim
+        # ELECTRA property
+        return self.config.hidden_size
 
 
 class DotAttention(nn.Module):

@@ -34,7 +34,7 @@ train-and-tag \
 --main_lstm_dim 128 \
 --label_smoothing 0.1 \
 --epochs 10 \
---batch_size 4 \
+--batch_size 6 \
 --save_vocab \
 --save_model \
 --optimizer sgd \

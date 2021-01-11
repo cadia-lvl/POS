@@ -2,20 +2,14 @@
 """The main entrypoint to training and running a POS-tagger."""
 import pickle
 from pprint import pprint, pformat
-import random
 import logging
 import json
 import pathlib
 from typing import Dict
 
 import click
-import flair
-import numpy as np
 from torch.utils.data.dataloader import DataLoader
-from torch.cuda import is_available, device_count
-from torch.cuda import manual_seed
-from torch.backends import cudnn
-from torch import save, device as t_device, set_num_threads
+from torch import save
 
 from pos.data import (
     load_dicts,
@@ -31,18 +25,13 @@ from pos.data import (
     load_tokenizer,
 )
 from pos import core
-from pos.core import (
-    Vocab,
-    FieldedDataset,
-    Dicts,
-    Fields,
-)
+from pos.core import Vocab, FieldedDataset, Dicts, Fields, set_device, set_seed
 from pos.model import (
     Decoder,
     Encoder,
     Tagger,
     ABLTagger,
-    FlairTransformerEmbedding,
+    TransformerEmbedding,
     PretrainedEmbedding,
     ClassingWordEmbedding,
     CharacterAsWordEmbedding,
@@ -179,6 +168,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
 @click.option("--main_lstm_layers", default=1, help="The number of bilstm layers to use in the encoder.")
 @click.option("--main_lstm_dim", default=512, help="The dimension of the lstm to use in the encoder.")
+@click.option("--emb_dropouts", default=0.0, help="The dropout to use for Embeddings.")
 @click.option("--label_smoothing", default=0.0)
 @click.option("--learning_rate", default=0.20)
 @click.option("--epochs", default=20)
@@ -243,22 +233,28 @@ def train_and_tag(**kwargs):
     )
     embs = {}
     if kwargs["bert_encoder"]:
-        embs[Modules.BERT] = FlairTransformerEmbedding(kwargs["bert_encoder"], **kwargs)
+        embs[Modules.BERT] = TransformerEmbedding(
+            kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"], **kwargs
+        )
     if kwargs["morphlex_embeddings_file"]:
         embs[Modules.MorphLex] = PretrainedEmbedding(
             vocab_map=dicts[Dicts.MorphLex],
             embeddings=embeddings[Dicts.MorphLex],
             freeze=True,
+            dropout=kwargs["emb_dropouts"],
         )
     if kwargs["pretrained_word_embeddings_file"]:
         embs[Modules.Pretrained] = PretrainedEmbedding(
             vocab_map=dicts[Dicts.Pretrained],
             embeddings=embeddings[Dicts.Pretrained],
             freeze=True,
+            dropout=kwargs["emb_dropouts"],
         )
     if kwargs["word_embedding_dim"]:
         embs[Modules.Trained] = ClassingWordEmbedding(
-            dicts[Dicts.Tokens], kwargs["word_embedding_dim"]
+            dicts[Dicts.Tokens],
+            kwargs["word_embedding_dim"],
+            dropout=kwargs["emb_dropouts"],
         )
     if kwargs["char_lstm_layers"]:
         embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(
@@ -266,6 +262,7 @@ def train_and_tag(**kwargs):
             character_embedding_dim=kwargs["char_emb_dim"],
             char_lstm_layers=kwargs["char_lstm_layers"],
             char_lstm_dim=kwargs["main_lstm_dim"],  # we use the same dimension
+            dropout=kwargs["emb_dropouts"],
         )
     encoder = Encoder(
         embeddings=embs,
@@ -371,40 +368,10 @@ def train_and_tag(**kwargs):
     log.info("Done!")
 
 
-def set_seed(seed=42):
-    """Set the seed on all platforms. 0 for no specific seeding."""
-    if seed:
-        random.seed(seed)
-        np.random.seed(seed)
-        manual_seed(seed)
-        cudnn.deterministic = True
-
-
 def write_hyperparameters(path, hyperparameters):
     """Write hyperparameters to disk."""
     with path.open(mode="w") as f:
         json.dump(hyperparameters, f, indent=4)
-
-
-def set_device(gpu_flag=False):
-    """Set the torch device."""
-    if DEBUG:
-        # We do not use GPU when debugging
-        gpu_flag = False
-    if is_available() and gpu_flag:
-        device = t_device("cuda")  # type: ignore
-        # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
-        # --gres=gpu:titanx:2
-        flair.device = device
-        log.info(f"Using {device_count()} GPUs")
-    else:
-        device = t_device("cpu")  # type: ignore
-        threads = 1
-        # Set the number of threads to use for CPU
-        set_num_threads(threads)
-        flair.device = device
-        log.info(f"Using {threads} CPU threads")
-    core.device = device
 
 
 @cli.command()
@@ -437,16 +404,16 @@ def tag(model_file, data_in, output, device, contains_tags):
     ds = FieldedDataset.from_file(data_in, fields)
     chunked_ds = chunk_dataset(
         ds,
-        tokenizer=tagger.model.encoders[Modules.BERT].emb.tokenizer,
-        max_sequence_length=tagger.model.encoders[
-            Modules.BERT
+        tokenizer=tagger.model.encoder.embeddings[Modules.BERT.value].emb.tokenizer,
+        max_sequence_length=tagger.model.encoder.embeddings[
+            Modules.BERT.value
         ].emb.tokenizer.model_max_length,
     )
     predicted_tags = tagger.tag_bulk(dataset=chunked_ds, batch_size=16)
     chunked_ds = chunked_ds.add_field(predicted_tags, Fields.Tags)
     dechunk_ds = dechunk_dataset(ds, chunked_ds)
     log.info("Writing results")
-    ds.to_tsv_file(output)
+    dechunk_ds.to_tsv_file(output)
     log.info("Done!")
 
 
