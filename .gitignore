@@ -9,7 +9,7 @@ out/*
 slurm-*
 dmii.*
 igc*
-electra*
+electra*/
 *.egg-info
 dist/
 debug/

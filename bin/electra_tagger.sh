@@ -31,10 +31,10 @@ train-and-tag \
 "$TEST" \
 "$OUT_DIR" \
 --tagger \
---bert_encoder roberta \
---bert_encoder_dim 768 \
---bert_encoder_length 514 \
---main_lstm_dim 384 \
+--bert_encoder electra-small-pytorch \
+--bert_encoder_dim 256 \
+--bert_encoder_length 512 \
+--main_lstm_dim 256 \
 --main_lstm_layers 1 \
 --label_smoothing 0.1 \
 --epochs 10 \
