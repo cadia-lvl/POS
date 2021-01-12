@@ -203,7 +203,8 @@ class TransformerEmbedding(Embedding):
         )
         # ELECTRA property
         self.num_layers = self.config.num_hidden_layers
-        self.max_length = self.config.max_position_embeddings
+        self.hidden_dim = self.config.hidden_size
+        self.max_length = self.tokenizer.max_len_single_sentence
         self.dropout = nn.Dropout(p=dropout)
 
     def preprocess(self, batch: Sequence[Sentence]) -> Dict[str, Tensor]:
@@ -259,8 +260,7 @@ class TransformerEmbedding(Embedding):
     @property
     def output_dim(self):
         """Return the output dimension."""
-        # ELECTRA property
-        return self.config.hidden_size
+        return self.hidden_dim
 
 
 class DotAttention(nn.Module):

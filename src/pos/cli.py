@@ -196,46 +196,33 @@ def train_and_tag(**kwargs):
     unchunked_test_ds = read_datasets(
         [kwargs["test_file"]],
     )
-    if kwargs["bert_encoder"] is not None:
-        train_ds = chunk_dataset(
-            unchunked_train_ds,
-            load_tokenizer(kwargs["bert_encoder"]),
-            kwargs["bert_encoder_length"],
-        )
-        test_ds = chunk_dataset(
-            unchunked_test_ds,
-            load_tokenizer(kwargs["bert_encoder"]),
-            kwargs["bert_encoder_length"],
-        )
-    else:
-        train_ds = unchunked_train_ds
-        test_ds = unchunked_test_ds
-
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
-        train_ds=train_ds,
+        train_ds=unchunked_train_ds,
         pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
         morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
         known_chars_file=kwargs["known_chars_file"],
     )
 
-    train_dl = DataLoader(
-        train_ds,
-        collate_fn=collate_fn,  # type: ignore
-        shuffle=True,
-        batch_size=kwargs["batch_size"],
-    )
-    test_dl = DataLoader(
-        test_ds,
-        collate_fn=collate_fn,  # type: ignore
-        shuffle=False,
-        batch_size=kwargs["batch_size"] * 10,
-    )
     embs = {}
     if kwargs["bert_encoder"]:
         embs[Modules.BERT] = TransformerEmbedding(
             kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"]
         )
+        train_ds = chunk_dataset(
+            unchunked_train_ds,
+            embs[Modules.BERT].tokenizer,
+            embs[Modules.BERT].max_length,
+        )
+        test_ds = chunk_dataset(
+            unchunked_test_ds,
+            embs[Modules.BERT].tokenizer,
+            embs[Modules.BERT].max_length,
+        )
+    else:
+        train_ds = unchunked_train_ds
+        test_ds = unchunked_test_ds
+
     if kwargs["morphlex_embeddings_file"]:
         embs[Modules.MorphLex] = PretrainedEmbedding(
             vocab_map=dicts[Dicts.MorphLex],
@@ -269,7 +256,7 @@ def train_and_tag(**kwargs):
         main_lstm_dim=kwargs["main_lstm_dim"],
         main_lstm_layers=kwargs["main_lstm_layers"],
         lstm_dropouts=0.0,
-        input_dropouts=0.0,
+        input_dropouts=kwargs["emb_dropouts"],
     )
     decoders: Dict[Modules, Decoder] = {}
     if kwargs["tagger"]:
@@ -287,13 +274,25 @@ def train_and_tag(**kwargs):
             char_attention=Modules.CharactersToTokens in embs
             and kwargs["lemmatizer_char_attention"],
             teacher_forcing=kwargs["lemmatizer_teacher_forcing"],
-            dropout=0.0,
+            dropout=kwargs["emb_dropouts"],
         )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(core.device)
 
     # Train a model
     print_tagger(abl_tagger)
 
+    train_dl = DataLoader(
+        train_ds,
+        collate_fn=collate_fn,  # type: ignore
+        shuffle=True,
+        batch_size=kwargs["batch_size"],
+    )
+    test_dl = DataLoader(
+        test_ds,
+        collate_fn=collate_fn,  # type: ignore
+        shuffle=False,
+        batch_size=kwargs["batch_size"] * 10,
+    )
     criterion = get_criterion(
         decoders=decoders, label_smoothing=kwargs["label_smoothing"]
     )
