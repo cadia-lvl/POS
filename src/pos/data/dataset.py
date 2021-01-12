@@ -44,34 +44,29 @@ def get_adjusted_lengths(
     max_sequence_length,
 ) -> Tuple[int]:
     """Return adjusted lengths based on a tokenizer and model max length."""
-    original_sent_lens = [len(sentence) for sentence in sentences]
-    token_ids = [
-        tokenizer(sentence, is_split_into_words=True)["input_ids"]
+    encodings = [
+        tokenizer.encode_plus(
+            sentence, is_split_into_words=True, return_offsets_mapping=True
+        )
         for sentence in sentences
     ]
-    sub_tokens_batch = [tokenizer.convert_ids_to_tokens(sentence) for sentence in token_ids]  # type: ignore
     # Create end-token masks: [CLS] Hauk ur er [SEP] -> [0, 0, 1, 1, 0]
     # By getting  initial token masks and shifting them:
     # [CLS] Hauk ur er [SEP] -> [0, 1, 0, 1, 0] ->
     # -> [0] + [mid shifted to left] + [1, 0]
     # -> [0, 0, 1, 1, 0]
     end_token_masks = [
-        [0] + get_initial_token_mask(tokenizer, sub_tokens)[2:-1] + [1, 0]
-        for sub_tokens in sub_tokens_batch
+        [0] + get_initial_token_mask(encoded["offset_mapping"])[2:-1] + [1, 0]
+        for encoded in encodings
     ]
     lengths = []
-    for original_sent_len, end_token_mask in zip(original_sent_lens, end_token_masks):
+    for end_token_mask in end_token_masks:
         while len(end_token_mask) != 0:
             prefix, end_token_mask = (
                 end_token_mask[:max_sequence_length],
                 end_token_mask[max_sequence_length:],
             )
             length = sum(prefix)
-            if length > original_sent_len:
-                log.warn(
-                    "The tokenizer has split up an abbreviation without marking it as partial. Ignoring."
-                )
-                length = original_sent_len
             lengths.append(length)
 
     return tuple(int(length) for length in lengths)

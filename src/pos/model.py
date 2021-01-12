@@ -10,7 +10,7 @@ from torch import Tensor, stack, softmax, diagonal, cat, zeros_like
 from torch.nn.modules.activation import MultiheadAttention
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizer, AutoConfig
+from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerFast, AutoConfig
 
 from . import core
 from .core import Sentence, Sentences, VocabMap
@@ -198,7 +198,9 @@ class TransformerEmbedding(Embedding):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
         self.model = AutoModel.from_pretrained(model_path, config=self.config)
-        self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(
+            model_path
+        )
         # ELECTRA property
         self.num_layers = self.config.num_hidden_layers
         self.max_length = self.config.max_position_embeddings
@@ -212,23 +214,19 @@ class TransformerEmbedding(Embedding):
             "initial_token_masks": [],
         }
         for sentence in batch:
-            encoded = self.tokenizer(
+            encoded = self.tokenizer.encode_plus(
                 text=sentence,
                 is_split_into_words=True,
                 padding="max_length",
                 max_length=self.max_length,
                 return_tensors="pt",
+                return_offsets_mapping=True,
             )
             preprocessed["input_ids"].append(encoded["input_ids"][0])
             preprocessed["attention_mask"].append(encoded["attention_mask"][0])
             preprocessed["initial_token_masks"].append(
                 Tensor(
-                    get_initial_token_mask(
-                        self.tokenizer,
-                        self.tokenizer.convert_ids_to_tokens(
-                            encoded["input_ids"][0].tolist()
-                        ),
-                    ),
+                    get_initial_token_mask(encoded["offset_mapping"][0].tolist())
                 ).bool()
             )
         # Stack as batches
@@ -282,7 +280,7 @@ class DotAttention(nn.Module):
         return diagonal(hidden_decoder.matmul(hidden_encoder.T))
 
     def forward(self, hidden_decoder: Tensor, hiddens_encoder: Tensor):
-        """Forward pass.
+        """Forward pass of the model.
 
         Args:
             hidden_decoder: (b, f), b is the batch_size, f the features

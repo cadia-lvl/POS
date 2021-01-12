@@ -203,15 +203,15 @@ class FieldedDataset(Dataset):
             # the sentence is too long
             elif len(element) > length:
                 partial_element = element
-                while len(partial_element) >= length:
+                while len(partial_element) > 0:
                     # shorten it according to the lengths until done
+                    length = lengths[index]
                     part, partial_element = (
                         partial_element[:length],
                         partial_element[length:],
                     )
                     adjusted_sentences[index] = part
                     index += 1
-                    length = lengths[index]
             else:
                 log.error(
                     f"Shortening but element too short {element}, {len(element)}, {length}"
