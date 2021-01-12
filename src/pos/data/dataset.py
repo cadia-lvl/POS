@@ -50,15 +50,17 @@ def get_adjusted_lengths(
         )
         for sentence in sentences
     ]
-    # Create end-token masks: [CLS] Hauk ur er [SEP] -> [0, 0, 1, 1, 0]
+    # Create end-token masks: [CLS] Hauk ur er [SEP] -> [dropped, 0, 1, 1, dropped]
     # By getting  initial token masks and shifting them:
     # [CLS] Hauk ur er [SEP] -> [0, 1, 0, 1, 0] ->
-    # -> [0] + [mid shifted to left] + [1, 0]
-    # -> [0, 0, 1, 1, 0]
+    # -> drop [mid shifted to left] + [1] drop
+    # -> [_, 0, 1, 1, _]
     end_token_masks = [
-        [0] + get_initial_token_mask(encoded["offset_mapping"])[2:-1] + [1, 0]
+        get_initial_token_mask(encoded["offset_mapping"])[2:-1] + [1]
         for encoded in encodings
     ]
+    # We need to account for SEP and CLS when finding the cuts
+    max_sequence_length = max_sequence_length - 2
     lengths = []
     for end_token_mask in end_token_masks:
         while len(end_token_mask) != 0:
