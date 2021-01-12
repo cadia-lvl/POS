@@ -229,7 +229,9 @@ def test_tokenizer_preprocessing_and_postprocessing(
     assert any(
         len(field) > 2 for sentence_fields in ds_lemma for field in sentence_fields
     )
-    max_sequence_length = 4  # 2 extra for [SEP] and [CLS]
+    max_sequence_length = (
+        2 + 2 + 4
+    )  # 2 extra for [SEP] and [CLS] and 4 defined in function
     chunked_ds = chunk_dataset(
         ds_lemma, load_tokenizer(electra_model), max_sequence_length=max_sequence_length
     )

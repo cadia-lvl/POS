@@ -60,7 +60,9 @@ def get_adjusted_lengths(
         for encoded in encodings
     ]
     # We need to account for SEP and CLS when finding the cuts
-    max_sequence_length = max_sequence_length - 2
+    max_sequence_length -= 2
+    # And some extra, because of errors
+    max_sequence_length -= 4
     lengths = []
     for end_token_mask in end_token_masks:
         while len(end_token_mask) != 0:
