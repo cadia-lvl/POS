@@ -234,7 +234,7 @@ def train_and_tag(**kwargs):
     embs = {}
     if kwargs["bert_encoder"]:
         embs[Modules.BERT] = TransformerEmbedding(
-            kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"], **kwargs
+            kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"]
         )
     if kwargs["morphlex_embeddings_file"]:
         embs[Modules.MorphLex] = PretrainedEmbedding(
