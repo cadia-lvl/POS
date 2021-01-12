@@ -31,9 +31,9 @@ train-and-tag \
 "$TEST" \
 "$OUT_DIR" \
 --tagger \
---bert_encoder roberta \
---bert_encoder_dim 768 \
---bert_encoder_length 514 \
+--bert_encoder electra-small-pytorch \
+--bert_encoder_dim 256 \
+--bert_encoder_length 128 \
 --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
 --morphlex_freeze \
 --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
@@ -42,9 +42,8 @@ train-and-tag \
 --char_emb_dim 64 \
 --main_lstm_dim 128 \
 --main_lstm_layers 1 \
---emb_dropouts 0.20 \
 --label_smoothing 0.1 \
---epochs 10 \
+--epochs 20 \
 --batch_size 8 \
 --save_vocab \
 --save_model \
