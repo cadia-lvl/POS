@@ -230,9 +230,13 @@ class TransformerEmbedding(Embedding):
                 ).bool()
             )
         # Stack as batches
-        return {
-            key: stack(value).to(core.device) for key, value in preprocessed.items()
-        }
+        try:
+            return {
+                key: stack(value).to(core.device) for key, value in preprocessed.items()
+            }
+        except RuntimeError as e:
+            log.error(f"Unable to stack: {batch}")
+            raise e
 
     def embed(self, batch: Dict[str, Tensor], lengths: Sequence[int]) -> Tensor:
         """Apply the embedding."""
