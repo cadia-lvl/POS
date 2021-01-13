@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 """The main entrypoint to training and running a POS-tagger."""
+from functools import reduce
+from operator import add
 import pickle
 from pprint import pprint, pformat
 import logging
@@ -150,9 +152,9 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--save_model/--no_save_model", default=False)
 @click.option("--save_vocab/--no_save_vocab", default=False)
 @click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
-@click.option("--tagger_weight", default=1, help="Value to multiply tagging loss")
+@click.option("--tagger_weight", default=1.0, help="Value to multiply tagging loss")
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
-@click.option("--lemmatizer_weight", default=1, help="Value to multiply lemmatizer loss")
+@click.option("--lemmatizer_weight", default=1.0, help="Value to multiply lemmatizer loss")
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
 @click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
 @click.option("--lemmatizer_teacher_forcing", default=0.0, help="Teacher forcing in Lemmatizer.")
@@ -264,6 +266,7 @@ def train_and_tag(**kwargs):
         decoders[Modules.Tagger] = Tagger(
             vocab_map=dicts[Dicts.FullTag],
             input_dim=encoder.output_dim,
+            weight=kwargs["tagger_weight"],
         )
     if kwargs["lemmatizer"]:
         log.info("Training Lemmatizer")
@@ -275,6 +278,7 @@ def train_and_tag(**kwargs):
             and kwargs["lemmatizer_char_attention"],
             teacher_forcing=kwargs["lemmatizer_teacher_forcing"],
             dropout=kwargs["emb_dropouts"],
+            weight=kwargs["lemmatizer_weight"],
         )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(core.device)
 
@@ -428,9 +432,26 @@ def tag(model_file, data_in, output, device, contains_tags):
     help="The location of the morphlex vocabulary.",
     default=MORPHLEX_VOCAB_PATH,
 )
-def evaluate_predictions(directory, pretrained_vocab, morphlex_vocab):
+@click.option(
+    "--method",
+    type=click.Choice(["tags", "lemmas", "profile"], case_sensitive=False),
+    help="The location of the morphlex vocabulary.",
+    default="tags",
+)
+def evaluate_predictions(directory, pretrained_vocab, morphlex_vocab, method):
     """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
     experiments = evaluate.collect_experiments(
         directory, morphlex_vocab, pretrained_vocab
     )
-    click.echo(evaluate.format_results(evaluate.all_accuracy_average(experiments)))
+    if method == "tags" or method == "lemmas":
+        click.echo(
+            evaluate.format_results(
+                evaluate.all_accuracy_average(experiments, type=method)
+            )
+        )
+    elif method == "profile":
+        # TODO: we need to divide by the number of experiments to get the average.
+        error_profile = reduce(
+            add, [experiment.error_profile() for experiment in experiments]
+        )
+        click.echo(evaluate.format_profile(error_profile, up_to=60))

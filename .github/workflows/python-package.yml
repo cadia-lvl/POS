@@ -20,11 +20,6 @@ jobs:
         pip install -U pip
         pip install poetry
         poetry install
-    - name: Install dependencies
-      run: poetry install
-    - name: Run Pylint
-      run: |
-        poetry run pylint -E pos
     - name: Check documentation with pydocstyle
       run: |
         poetry run pydocstyle --match-dir src
