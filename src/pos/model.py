@@ -6,7 +6,7 @@ import abc
 import random
 
 import torch
-from torch import Tensor, stack, softmax, diagonal, cat, zeros_like, randn
+from torch import Tensor, stack, softmax, cat, zeros_like, randn
 from torch.nn.modules.activation import MultiheadAttention
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
@@ -286,7 +286,7 @@ class DotAttention(nn.Module):
             score: (b)
         """
         # both are (b, f)
-        return diagonal(hidden_decoder.matmul(hidden_encoder.T))
+        return hidden_decoder.matmul(hidden_encoder.T).diagonal()
 
     def forward(self, hidden_decoder: Tensor, hiddens_encoder: Tensor):
         """Forward pass of the model.
