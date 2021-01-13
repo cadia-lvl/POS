@@ -307,10 +307,8 @@ class DotAttention(nn.Module):
         )
         # The attention weights; (b, t)
         a = softmax(scores, dim=1)
-        context = stack(
-            [a.mul(hiddens_encoder[:, :, f]) for f in range(hiddens_encoder.shape[-1])],
-            dim=2,
-        )
+        a_repeat = a.unsqueeze(dim=2).repeat(1, 1, hiddens_encoder.shape[2])
+        context = a_repeat.mul(hiddens_encoder)
         return context.sum(dim=1)
 
 
