@@ -3,6 +3,14 @@ import torch
 from pos import model
 
 
+def test_soft_stack():
+    a = torch.randn(1, 2, 3)
+    b = torch.randn(1, 2)
+    c = b.mul(a[:, :, 0])
+    for l in range(1, a.shape[-1]):
+        c += b.mul(a[:, :, l])
+
+
 def test_loss():
     criterion = torch.nn.CrossEntropyLoss()
 

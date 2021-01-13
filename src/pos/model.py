@@ -307,12 +307,10 @@ class DotAttention(nn.Module):
         )
         # The attention weights; (b, t)
         a = softmax(scores, dim=1)
-        # (b, t, f)
-        a_stack: Tensor = stack(tuple(a for _ in range(hidden_decoder.shape[1])), dim=2)
-        weighted_hiddens = a_stack.mul(hiddens_encoder)
-        # (b, f)
-        context = weighted_hiddens.sum(dim=1)
-        return context
+        weighted_hiddens = a.mul(hiddens_encoder[:, :, 0])
+        for f in range(1, hiddens_encoder.shape[-1]):
+            weighted_hiddens += a.mul(hiddens_encoder[:, :, f])
+        return weighted_hiddens
 
 
 class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
@@ -507,7 +505,7 @@ class CharacterDecoder(Decoder):
                 ).to(core.device)
                 # (b, f)
                 emb_chars = self.dropout(self.sparse_embedding(next_char_input))
-                rnn_in = torch.cat((emb_chars, context), dim=1)
+                rnn_in = cat((emb_chars, context), dim=1)
                 if self.char_attention:
                     char_attention = self.attention(
                         hidden.squeeze(),
@@ -520,7 +518,7 @@ class CharacterDecoder(Decoder):
                 if predictions is None:
                     predictions = prediction
                 else:
-                    predictions = torch.cat((predictions, prediction), dim=1)
+                    predictions = cat((predictions, prediction), dim=1)
 
         # We decode
         # TODO: support decoding until EOS/PAD for all
