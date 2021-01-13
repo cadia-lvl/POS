@@ -6,7 +6,7 @@ import abc
 import random
 
 import torch
-from torch import Tensor, stack, softmax, diagonal, cat, zeros_like
+from torch import Tensor, stack, softmax, diagonal, cat, zeros_like, randn
 from torch.nn.modules.activation import MultiheadAttention
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
@@ -206,6 +206,7 @@ class TransformerEmbedding(Embedding):
         self.hidden_dim = self.config.hidden_size
         self.max_length = self.tokenizer.max_len_single_sentence
         self.dropout = nn.Dropout(p=dropout)
+        self.layer_weights = nn.parameter.Parameter(randn(self.num_layers))
 
     def preprocess(self, batch: Sequence[Sentence]) -> Dict[str, Tensor]:
         """Preprocess the sentence batch."""
@@ -246,13 +247,17 @@ class TransformerEmbedding(Embedding):
             attention_mask=batch["attention_mask"],
             return_dict=True,
         )
-        # (b, s, f)
-        output = outputs["last_hidden_state"]
+        # Tuple[(b, s, f), ...]
+        output = outputs["hidden_states"][-self.num_layers :]
+        weights = nn.functional.softmax(self.layer_weights)
+        weighted_layers = output[0] * weights[0]
+        for l in range(1, self.num_layers):
+            weighted_layers += output[l] * weights[l]
         # Now we map the subtokens to tokens.
         tokens_emb = []
-        for b in range(output.shape[0]):
+        for b in range(weighted_layers.shape[0]):
             initial_token_mask = batch["initial_token_masks"][b]
-            output_sent = output[b, :, :]
+            output_sent = weighted_layers[b, :, :]
             tokens_emb.append(output_sent[initial_token_mask, :])
         padded = pad_sequence(tokens_emb, batch_first=True)
         return self.dropout(padded)
