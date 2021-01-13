@@ -297,7 +297,7 @@ class DotAttention(nn.Module):
         Returns:
             context: (b, f)
         """
-
+        # (b, t)
         scores = stack(
             tuple(
                 self.score(hidden_decoder, hiddens_encoder[:, i, :])
@@ -396,7 +396,7 @@ class CharacterDecoder(Decoder):
             self.vocab_map.UNK_ID,
         }
         if self.char_attention:
-            self.attention = MultiheadAttention(hidden_dim, num_heads=1)
+            self.attention = DotAttention()
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
 
     @property
@@ -482,16 +482,16 @@ class CharacterDecoder(Decoder):
             tuple(emb for key, emb in encoded.items() if key in {Modules.BiLSTM}),
             dim=2,
         )
-        # [batch_size * max_seq_len, emb_size] aka (b, f)
+        # [batch_size * max_seq_len, emb_size] aka (b*s, f)
         context = context.reshape(shape=(-1, context.shape[2]))
 
         # [batch_size * max_seq_len, max_token_len, emb_size] aka (b, t, f)
         predictions: Optional[Tensor] = None
 
-        hidden = context.reshape((1, context.shape[0], context.shape[1]))
+        # (1, b*s, f)
+        hidden = context.unsqueeze(dim=0)
+        # (1, b*s, f)
         cell = zeros_like(hidden)
-        # return torch.zeros(size=(1, batch_size, self.hidden_dim)).to(core.device)
-        # self.initial_hidden(context.shape[0])
         # We are training
         if BATCH_KEYS.TARGET_LEMMAS in batch:
             for _ in range(
@@ -510,9 +510,8 @@ class CharacterDecoder(Decoder):
                 rnn_in = torch.cat((emb_chars, context), dim=1)
                 if self.char_attention:
                     char_attention, _ = self.attention(
-                        hidden,
-                        encoded[Modules.CharactersToTokens].permute(1, 0, 2),
-                        encoded[Modules.CharactersToTokens].permute(1, 0, 2),
+                        hidden.squeeze(),
+                        encoded[Modules.CharactersToTokens],
                     )
                     char_attention = char_attention.squeeze()
                     rnn_in = cat((rnn_in, char_attention), dim=1)
