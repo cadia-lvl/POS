@@ -516,7 +516,7 @@ class CharacterDecoder(Decoder):
                     rnn_in = cat((rnn_in, char_attention), dim=1)
                 rnn_in = rnn_in.unsqueeze(1)  # Add the time-step
                 output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
-                prediction = self.fc_out(output, dim=2))
+                prediction = self.fc_out(output, dim=2)
                 if predictions is None:
                     predictions = prediction
                 else:
