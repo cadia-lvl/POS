@@ -63,7 +63,7 @@ class Embedding(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
 
     def forward(self, batch: Sequence[Sentence], lengths: Sequence[int]) -> Tensor:
         """Run a generic forward pass for the Embeddings."""
-        return self.embed(self.preprocess(batch), lengths).to(core.device)
+        return self.embed(self.preprocess(batch), lengths)
 
     @abc.abstractmethod
     def embed(self, batch: Tensor, lengths: Sequence[int]) -> Tensor:
@@ -156,7 +156,7 @@ class CharacterAsWordEmbedding(Embedding):
         )
         nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
         # The character BiLSTM
-        self.char_bilstm = nn.LSTM(
+        self.rnn = nn.GRU(
             input_size=character_embedding_dim,
             hidden_size=char_lstm_dim,
             num_layers=char_lstm_layers,
@@ -165,7 +165,7 @@ class CharacterAsWordEmbedding(Embedding):
         )
         self.emb_dropout = nn.Dropout(p=dropout)
         self.dropout = nn.Dropout(p=dropout)
-        for name, param in self.char_bilstm.named_parameters():
+        for name, param in self.rnn.named_parameters():
             if "bias" in name:
                 nn.init.constant_(param, 0.0)
             else:
@@ -181,9 +181,11 @@ class CharacterAsWordEmbedding(Embedding):
         # (b * seq, chars)
         char_embs = self.emb_dropout(self.sparse_embedding(batch))
         # (b * seq, chars, f)
-        self.char_bilstm.flatten_parameters()
-        out, _ = self.char_bilstm(char_embs)
-        return self.dropout(out)
+        self.rnn.flatten_parameters()
+        out, hidden = self.rnn(char_embs)
+        # Warning! We return a tuple here, the last hidden state and the sequence.
+        # also map (layers, batch, f/2) -> (batch, f)
+        return (self.dropout(out), self.dropout(hidden.reshape(-1, out.shape[-1])))
 
     @property
     def output_dim(self):
@@ -494,7 +496,8 @@ class CharacterDecoder(Decoder):
                 if self.char_attention:
                     char_attention = self.attention(
                         hidden.squeeze(),
-                        encoded[Modules.CharactersToTokens],
+                        # [0] is the sequence
+                        encoded[Modules.CharactersToTokens][0],
                     )
                     rnn_in = cat((rnn_in, char_attention), dim=1)
                 rnn_in = rnn_in.unsqueeze(1)  # Add the time-step
@@ -623,11 +626,10 @@ class Encoder(nn.Module):
 
         to_bilstm = {key: embedded[key] for key in self.embeddings.keys()}
         if Modules.CharactersToTokens.value in to_bilstm:
-            last_timestep = to_bilstm[Modules.CharactersToTokens.value][
-                :, -1, :
-            ]  # Only the last timestep
-            to_bilstm[Modules.CharactersToTokens.value] = last_timestep.reshape(
-                len(lengths), -1, last_timestep.shape[-1]
+            last_hidden = to_bilstm[Modules.CharactersToTokens.value][1]
+            # Reshape from (b*s, f) -> (b, s, f)
+            to_bilstm[Modules.CharactersToTokens.value] = last_hidden.reshape(
+                len(lengths), -1, last_hidden.shape[-1]
             )
         embs_to_linear = torch.cat(list(to_bilstm.values()), dim=2)
         embs_to_bilstm = self.linear(embs_to_linear)
