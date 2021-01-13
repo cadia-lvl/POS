@@ -5,6 +5,7 @@ from typing import List, Mapping, Sequence, Tuple, Any, Dict, Optional, cast
 import abc
 import random
 
+import numpy as np
 import torch
 from torch import Tensor, stack, softmax, cat, zeros_like, randn
 from torch.nn.modules.activation import MultiheadAttention
@@ -268,48 +269,33 @@ class TransformerEmbedding(Embedding):
         return self.hidden_dim
 
 
-class DotAttention(nn.Module):
-    """Dot attention module as described in Luong et al. 2015."""
+class MultiplicativeAttention(nn.Module):
+    """Multiplicative attention module as described in Luong et al. 2015."""
 
-    def __init__(self):
+    def __init__(self, encoder_dim: int, decoder_dim: int):
         """Initialize it."""
         super().__init__()
+        self.decoder_dim = decoder_dim
+        self.W = nn.Linear(decoder_dim, encoder_dim, bias=False)
 
-    @staticmethod
-    def score(hidden_decoder: Tensor, hidden_encoder: Tensor):
-        """Compute the dot product as a score.
-
-        Args:
-            hidden_decoder: (b, f)
-            hidden_encoder: (b, f)
-        Returns:
-            score: (b)
-        """
-        # both are (b, f)
-        return hidden_decoder.matmul(hidden_encoder.T).diagonal()
-
-    def forward(self, hidden_decoder: Tensor, hiddens_encoder: Tensor):
+    def forward(self, query: Tensor, values: Tensor):
         """Forward pass of the model.
 
         Args:
-            hidden_decoder: (b, f), b is the batch_size, f the features
-            hiddens_encoder: (b, t, f) where t is timeseries to attend to.
+            query: (b, f_d), b is the batch_size, f the features
+            values: (b, t, f_e) where t is timeseries to attend to.
         Returns:
             context: (b, f)
         """
+        # (b, t) = (b, f_d) @ (f_d, f_e) bmm (b, t, f_e).permute(0,2,1)
+        # (b, 1, f_e) bmm (b, f_e, t)
+        # (b, 1, t).squeeze()
+        weights = self.W(query).unsqueeze(dim=1).bmm(values.permute(0, 2, 1)).squeeze()
         # (b, t)
-        scores = stack(
-            tuple(
-                self.score(hidden_decoder, hiddens_encoder[:, i, :])
-                for i in range(hiddens_encoder.shape[1])
-            ),
-            dim=1,
-        )
-        # The attention weights; (b, t)
-        a = softmax(scores, dim=1)
-        a_repeat = a.unsqueeze(dim=2).repeat(1, 1, hiddens_encoder.shape[2])
-        context = a_repeat.mul(hiddens_encoder)
-        return context.sum(dim=1)
+        weights = weights / np.sqrt(self.decoder_dim)
+        weights = softmax(weights, dim=1)
+        # (b, 1, t) bmm (b, t, f_e).squeeze()
+        return weights.unsqueeze(dim=1).bmm(values).squeeze()
 
 
 class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
@@ -393,7 +379,7 @@ class CharacterDecoder(Decoder):
             self.vocab_map.UNK_ID,
         }
         if self.char_attention:
-            self.attention = DotAttention()
+            self.attention = MultiplicativeAttention(hidden_dim, hidden_dim)
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
 
     @property

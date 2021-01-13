@@ -4,7 +4,7 @@ import torch
 
 from pos.model import (
     ClassingWordEmbedding,
-    DotAttention,
+    MultiplicativeAttention,
     Modules,
     PretrainedEmbedding,
     TransformerEmbedding,
@@ -101,5 +101,5 @@ def test_full_run(data_loader, vocab_maps, electra_model):
 def test_attention():
     hidden_decoder = torch.rand(size=(4, 2))
     hiddens_encoder = torch.rand(size=(4, 3, 2))
-    attention = DotAttention()
+    attention = MultiplicativeAttention(encoder_dim=2, decoder_dim=2)
     result = attention(hidden_decoder, hiddens_encoder)
