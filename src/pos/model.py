@@ -388,8 +388,8 @@ class CharacterDecoder(Decoder):
             batch_first=True,
         )
 
-        # We use the same input + the new hidden
-        self.fc_out = nn.Linear(rnn_in_dim + hidden_dim, len(vocab_map))
+        # Map directly to characters
+        self.fc_out = nn.Linear(hidden_dim, len(vocab_map))
         self.illegal_chars_output = {
             self.vocab_map.SOS_ID,
             self.vocab_map.PAD_ID,
@@ -516,7 +516,7 @@ class CharacterDecoder(Decoder):
                     rnn_in = cat((rnn_in, char_attention), dim=1)
                 rnn_in = rnn_in.unsqueeze(1)  # Add the time-step
                 output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
-                prediction = self.fc_out(torch.cat((rnn_in, output), dim=2))
+                prediction = self.fc_out(output, dim=2))
                 if predictions is None:
                     predictions = prediction
                 else:
