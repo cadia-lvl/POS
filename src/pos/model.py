@@ -509,11 +509,10 @@ class CharacterDecoder(Decoder):
                 emb_chars = self.dropout(self.sparse_embedding(next_char_input))
                 rnn_in = torch.cat((emb_chars, context), dim=1)
                 if self.char_attention:
-                    char_attention, _ = self.attention(
+                    char_attention = self.attention(
                         hidden.squeeze(),
                         encoded[Modules.CharactersToTokens],
                     )
-                    char_attention = char_attention.squeeze()
                     rnn_in = cat((rnn_in, char_attention), dim=1)
                 rnn_in = rnn_in.unsqueeze(1)  # Add the time-step
                 output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
