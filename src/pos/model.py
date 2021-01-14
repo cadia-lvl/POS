@@ -7,7 +7,8 @@ import random
 
 import numpy as np
 import torch
-from torch import Tensor, stack, softmax, cat, zeros_like, randn
+from torch import Tensor, stack, softmax, cat, zeros_like, randn, zeros
+from torch.cuda import device
 from torch.nn.modules.activation import MultiheadAttention
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
@@ -463,25 +464,25 @@ class CharacterDecoder(Decoder):
         self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
     ) -> Tensor:
         """Run the decoder on the batch."""
-        context = torch.cat(
-            tuple(emb for key, emb in encoded.items() if key in {Modules.BiLSTM}),
-            dim=2,
-        )
-        # [batch_size * max_seq_len, emb_size] aka (b*s, f)
-        context = context.reshape(shape=(-1, context.shape[2]))
-
-        # [batch_size * max_seq_len, max_token_len, emb_size] aka (b, t, f)
-        predictions: Optional[Tensor] = None
-
+        context = encoded[Modules.BiLSTM]
+        b, s, f, c = *context.shape, batch[BATCH_KEYS.TARGET_LEMMAS].shape[1]
+        # (b*s, f) = (num_tokens, features)
+        context = context.reshape(b * s, f)
+        hidden = context
+        if self.char_attention:
+            # (b*s, c, f)
+            characters_rnn = encoded[Modules.CharactersToTokens][0]
+            # (b*s, f)
+            last_hidden_rnn = encoded[Modules.CharactersToTokens][1]
+            hidden = last_hidden_rnn
         # (1, b*s, f)
-        hidden = context.unsqueeze(dim=0)
-        # (1, b*s, f)
+        hidden = hidden.unsqueeze(dim=0)
         cell = zeros_like(hidden)
+        # (b*s, t, f_out)
+        predictions = zeros(size=(b * s, c, self.output_dim), device=context.device)
         # We are training
         if BATCH_KEYS.TARGET_LEMMAS in batch:
-            for _ in range(
-                batch[BATCH_KEYS.TARGET_LEMMAS].shape[1]
-            ):  # Iterate over characters
+            for char_idx in range(c):  # Iterate over num_characters
                 # (b)
                 next_char_input = self._get_char_input_next_timestep(
                     self.vocab_map,
@@ -494,20 +495,12 @@ class CharacterDecoder(Decoder):
                 emb_chars = self.dropout(self.sparse_embedding(next_char_input))
                 rnn_in = cat((emb_chars, context), dim=1)
                 if self.char_attention:
-                    char_attention = self.attention(
-                        hidden.squeeze(),
-                        # [0] is the sequence
-                        encoded[Modules.CharactersToTokens][0],
-                    )
+                    char_attention = self.attention(hidden.squeeze(), characters_rnn)
                     rnn_in = cat((rnn_in, char_attention), dim=1)
-                rnn_in = rnn_in.unsqueeze(1)  # Add the time-step
+                # (b, 1, f), a single timestep
+                rnn_in = rnn_in.unsqueeze(1)
                 output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
-                prediction = self.fc_out(output)
-                if predictions is None:
-                    predictions = prediction
-                else:
-                    predictions = cat((predictions, prediction), dim=1)
-
+                predictions[:, char_idx : char_idx + 1, :] = self.fc_out(output)
         # We decode
         # TODO: support decoding until EOS/PAD for all
         else:
