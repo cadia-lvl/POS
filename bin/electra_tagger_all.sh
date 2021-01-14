@@ -32,15 +32,13 @@ train-and-tag \
 "$OUT_DIR" \
 --tagger \
 --bert_encoder electra-small-pytorch \
---bert_encoder_dim 256 \
---bert_encoder_length 128 \
 --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
 --morphlex_freeze \
 --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
 --known_chars_file data/extra/characters_training.txt \
 --char_lstm_layers 1 \
---char_emb_dim 64 \
---main_lstm_dim 128 \
+--char_emb_dim 128 \
+--main_lstm_dim 256 \
 --main_lstm_layers 1 \
 --label_smoothing 0.1 \
 --epochs 20 \

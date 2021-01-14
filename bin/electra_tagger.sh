@@ -32,8 +32,6 @@ train-and-tag \
 "$OUT_DIR" \
 --tagger \
 --bert_encoder electra-small-pytorch \
---bert_encoder_dim 256 \
---bert_encoder_length 128 \
 --main_lstm_dim 256 \
 --main_lstm_layers 1 \
 --label_smoothing 0.1 \

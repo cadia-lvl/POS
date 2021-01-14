@@ -165,8 +165,6 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--morphlex_freeze", is_flag=True, default=True)
 @click.option("--pretrained_word_embeddings_file", default=None, help="A file which contains pretrained word embeddings. See implementation for supported formats.")
 @click.option("--word_embedding_dim", default=0, help="The word/token embedding dimension. Set to 0 to disable word embeddings.")
-@click.option("--bert_encoder_dim", default=256, help="The dimension the BERT encoder outputs.")
-@click.option("--bert_encoder_length", default=128, help="The maximum sequence length for model.")
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
 @click.option("--main_lstm_layers", default=1, help="The number of bilstm layers to use in the encoder.")
 @click.option("--main_lstm_dim", default=512, help="The dimension of the lstm to use in the encoder.")

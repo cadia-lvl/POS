@@ -17,24 +17,25 @@ echo $*
 #    --main_lstm_layers 2 \
 #    --word_embedding_dim 128 \
 #    --pretrained_model_folder bull \
-CUDA_LAUNCH_BLOCKING=1 \
 pos \
 train-and-tag \
 "$TRAIN" \
 "$TEST" \
 "$OUT_DIR" \
 --lemmatizer \
---bert_encoder roberta \
---bert_encoder_dim 768 \
---bert_encoder_length 514 \
+--tagger \
+--bert_encoder electra-small-pytorch \
+--morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+--morphlex_freeze \
+--pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
 --known_chars_file data/extra/characters_training.txt \
 --char_lstm_layers 1 \
---char_emb_dim 64 \
+--char_emb_dim 128 \
+--main_lstm_dim 256 \
 --main_lstm_layers 1 \
---main_lstm_dim 128 \
 --label_smoothing 0.1 \
---epochs 10 \
---batch_size 6 \
+--epochs 20 \
+--batch_size 8 \
 --save_vocab \
 --save_model \
 --optimizer sgd \
