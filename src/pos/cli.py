@@ -439,25 +439,31 @@ def tag(model_file, data_in, output, device, contains_tags):
     default=MORPHLEX_VOCAB_PATH,
 )
 @click.option(
-    "--method",
-    type=click.Choice(["tags", "lemmas", "profile"], case_sensitive=False),
-    help="The location of the morphlex vocabulary.",
+    "--criteria",
+    type=click.Choice(["tags", "lemmas"], case_sensitive=False),
+    help="Which criteria to evaluate.",
     default="tags",
 )
-def evaluate_predictions(directory, pretrained_vocab, morphlex_vocab, method):
+@click.option(
+    "--profile/--no_profile",
+    is_flag=True,
+    help="Output error profiles as well?",
+    default=False,
+)
+def evaluate_predictions(
+    directory, pretrained_vocab, morphlex_vocab, criteria, profile
+):
     """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
     experiments = evaluate.collect_experiments(
         directory, morphlex_vocab, pretrained_vocab
     )
-    if method == "tags" or method == "lemmas":
-        click.echo(
-            evaluate.format_results(
-                evaluate.all_accuracy_average(experiments, type=method)
-            )
+    click.echo(
+        evaluate.format_results(
+            evaluate.all_accuracy_average(experiments, type=criteria)
         )
-    elif method == "profile":
-        # TODO: we need to divide by the number of experiments to get the average.
+    )
+    if profile:
         error_profile = reduce(
-            add, [experiment.error_profile() for experiment in experiments]
+            add, [experiment.error_profile(type=criteria) for experiment in experiments]
         )
         click.echo(evaluate.format_profile(error_profile, up_to=60))

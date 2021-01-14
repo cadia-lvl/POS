@@ -1,12 +1,12 @@
 """A collection of types and function used to evaluate the performance of a tagger."""
+import json
 from typing import Callable, Iterable, Tuple, List, Dict, Set, Any, Union
 import logging
 from collections import Counter
 from pathlib import Path
-import pickle
 from statistics import stdev
 
-from .core import Sentences, Vocab, VocabMap, FieldedDataset, Dicts, Fields
+from .core import Sentences, Vocab, FieldedDataset, Fields
 
 log = logging.getLogger(__name__)
 
@@ -27,11 +27,12 @@ class Experiment:
         # Get the tokens and retrive the vocab.
         self.test_tokens = Vocab.from_symbols(self.predictions.get_field(Fields.Tokens))
         self.known_tokens = train_tokens.intersection(self.test_tokens)
-        if Fields.Lemmas in self.predictions.fields:
+        if train_lemmas is not None:
             self.test_lemmas = Vocab.from_symbols(
                 self.predictions.get_field(Fields.GoldLemmas)
             )
             self.known_lemmas = train_lemmas.intersection(self.test_lemmas)
+            self.unknown_lemmas = self.test_lemmas.difference(self.known_lemmas)
         log.debug("Creating vocabs")
         morphlex_tokens = morphlex_tokens.intersection(self.test_tokens)  # type: ignore
         pretrained_tokens = pretrained_vocab.intersection(self.test_tokens)  # type: ignore
@@ -51,10 +52,28 @@ class Experiment:
     def from_file(path: Path, morphlex_path: Path, pretrained_path: Path):
         """Create an Experiment from a given directory of an experimental results."""
         log.debug(f"Reading experiment={path}")
+        # Start by reading what type of model it is
+        with open(str(path / "hyperparamters.json")) as f:
+            hyperparams = json.load(f)
+        fields = (Fields.Tokens,)
+        if hyperparams["tagger"] and hyperparams["lemmatizer"]:
+            fields = fields + (
+                Fields.GoldTags,
+                Fields.GoldLemmas,
+                Fields.Tags,
+                Fields.Lemmas,
+            )
+        elif hyperparams["tagger"] and not hyperparams["lemmatizer"]:
+            fields = fields + (Fields.GoldTags, Fields.Tags)
+        elif not hyperparams["tagger"] and hyperparams["lemmatizer"]:
+            fields = fields + (Fields.GoldLemmas, Fields.Lemmas)
+        else:
+            raise ValueError("Bad hyperparameters, no tagger nor lemmatizer")
+        train_lemmas = None
+        if Fields.Lemmas in fields:
+            train_lemmas = Vocab.from_file(str(path / "known_lemmas.txt"))
         log.debug("Reading predictions")
-        predictions = FieldedDataset.from_file(
-            str(path / "predictions.tsv"), (Fields.Tokens, Fields.GoldTags, Fields.Tags)
-        )
+        predictions = FieldedDataset.from_file(str(path / "predictions.tsv"), fields)
         log.debug("Reading vocabs")
         morphlex_vocab = Vocab.from_file(str(morphlex_path))
         pretrained_vocab = Vocab.from_file(str(pretrained_path))
@@ -66,6 +85,7 @@ class Experiment:
             train_tokens=train_vocab,
             morphlex_tokens=morphlex_vocab,
             pretrained_vocab=pretrained_vocab,
+            train_lemmas=train_lemmas,
         )
 
     @staticmethod
@@ -138,7 +158,11 @@ class Experiment:
         return calculate_accuracy
 
     def accuracy(
-        self, vocab: Set[str] = None, gold_field=Fields.GoldTags, pred_field=Fields.Tags
+        self,
+        vocab: Set[str] = None,
+        comparison_field=Fields.Tokens,
+        gold_field=Fields.GoldTags,
+        pred_field=Fields.Tags,
     ) -> Tuple[float, int]:
         """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter."""
 
@@ -153,7 +177,7 @@ class Experiment:
         total = sum(
             (
                 1
-                for tokens in self.predictions.get_field(Fields.Tokens)
+                for tokens in self.predictions.get_field(comparison_field)
                 for token in tokens
                 if in_vocabulary(token, vocab)
             )
@@ -164,7 +188,7 @@ class Experiment:
             (
                 predicted == gold
                 for tokens, golds, predicted in zip(
-                    self.predictions.get_field(Fields.Tokens),
+                    self.predictions.get_field(comparison_field),
                     self.predictions.get_field(gold_field),
                     self.predictions.get_field(pred_field),
                 )
@@ -203,7 +227,7 @@ class Experiment:
     def lemma_accuracy(self) -> Tuple[Dict[str, float], Dict[str, int]]:
         """Return all lemma accuracies."""
 
-        def _tagging_accuracy(index):
+        def _lemma_accuracy(index):
             return {
                 "Total": self.accuracy(
                     gold_field=Fields.GoldLemmas, pred_field=Fields.Lemmas
@@ -218,18 +242,39 @@ class Experiment:
                     gold_field=Fields.GoldLemmas,
                     pred_field=Fields.Lemmas,
                 )[index],
+                "Unknown-Lemmas": self.accuracy(
+                    self.unknown_lemmas,
+                    comparison_field=Fields.GoldLemmas,
+                    gold_field=Fields.GoldLemmas,
+                    pred_field=Fields.Lemmas,
+                )[index],
+                "Known-Lemmas": self.accuracy(
+                    self.known_lemmas,
+                    comparison_field=Fields.GoldLemmas,
+                    gold_field=Fields.GoldLemmas,
+                    pred_field=Fields.Lemmas,
+                )[index],
             }
 
-        accuracy = _tagging_accuracy(0)
-        total = _tagging_accuracy(1)
+        accuracy = _lemma_accuracy(0)
+        total = _lemma_accuracy(1)
         return accuracy, total  # type: ignore
 
-    def error_profile(self):
+    def error_profile(self, type="tags"):
         """Return an error profile with counts of errors (tagger > gold)."""
+        if type == "tags":
+            gold_field = Fields.GoldTags
+            pred_field = Fields.Tags
+        else:
+            gold_field = Fields.GoldLemmas
+            pred_field = Fields.Lemmas
         return Counter(
             f"{predicted} > {gold}"
-            for tokens, gold_tags, predicted_tags in self.predictions
-            for token, gold, predicted in zip(tokens, gold_tags, predicted_tags)
+            for gold_tags, predicted_tags in zip(
+                self.predictions.get_field(gold_field),
+                self.predictions.get_field(pred_field),
+            )
+            for gold, predicted in zip(gold_tags, predicted_tags)
             if gold != predicted
         )
 
@@ -238,7 +283,6 @@ def get_average(
     accuracies: List[Dict[str, Union[float, int]]]
 ) -> Dict[str, Tuple[float, float]]:
     """Get the average (accuracy, std_dev) and (total, std_dev) of a list of accuracies."""
-    length = len(accuracies)
     keys = list(accuracies[0].keys())
     totals: Dict[str, Tuple[float, float]] = {}
     for key in keys:
@@ -256,18 +300,28 @@ def average(values: List[Union[int, float]]) -> float:
     return sum(values) / len(values)
 
 
+# accuracy, std_dev
+Statistics = Tuple[float, float]
+# "known-wemb" -> statistic
+Measures = Dict[str, Statistics]
+
+
 def all_accuracy_average(
     experiments: List[Experiment],
-) -> Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]:
+    type: str = "tags",
+) -> Tuple[Measures, Measures]:
     """Return the average of all accuracies."""
-    all_accuracies = []
+    all_tag_accuracies = []
     all_totals = []
     for experiment in experiments:
-        accuracies, totals = experiment.tagging_accuracy()
-        all_accuracies.append(accuracies)
+        if type == "tags":
+            accuracies, totals = experiment.tagging_accuracy()
+        else:
+            accuracies, totals = experiment.lemma_accuracy()
+        all_tag_accuracies.append(accuracies)
         all_totals.append(totals)
     return (
-        get_average(all_accuracies),
+        get_average(all_tag_accuracies),
         get_average(
             all_totals,
         ),
@@ -301,17 +355,27 @@ def collect_experiments(
         ]
 
 
-def format_results(
-    results: Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]
-) -> str:
+def format_results(results: Tuple[Measures, Measures]) -> str:
     """Format the Accuracy results for pretty printing."""
 
-    def rows(
-        results: Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]
-    ) -> Iterable[str]:
+    def rows(results: Tuple[Measures, Measures]) -> Iterable[str]:
         accuracies, totals = results
         keys = accuracies.keys()
         for key in keys:
             yield f"{key:<20}: {accuracies[key][0]*100:>02.2f} ±{accuracies[key][1]*100:>02.2f}, {totals[key][0]:>} ±{totals[key][1]:>}"
 
     return "\n".join(rows(results))
+
+
+ErrorProfile = Counter
+
+
+def format_profile(errors: ErrorProfile, up_to=60) -> str:
+    """Format the tag error profile for pretty printing."""
+    total_errors = sum(errors.values())
+    formatted = "Rank\tPred > Correct\tfreq\t%\n"
+    formatted += "\n".join(
+        f"{index + 1}\t{key}\t{value}\t{value/total_errors*100:.2f}"
+        for index, (key, value) in enumerate(errors.most_common(up_to))
+    )
+    return formatted
