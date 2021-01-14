@@ -1,4 +1,5 @@
 import pathlib
+from re import M
 
 from torch.utils.data import dataloader
 from pos.core import Dicts
@@ -61,7 +62,7 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
         dicts[Dicts.Chars],
         character_embedding_dim=kwargs["char_emb_dim"],
         char_lstm_layers=kwargs["char_lstm_layers"],
-        char_lstm_dim=kwargs["main_lstm_dim"],  # we use the same dimension
+        char_lstm_dim=10,
     )
     decoders = {}
     encoder = Encoder(
@@ -74,7 +75,10 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
     decoders[Modules.Lemmatizer] = CharacterDecoder(
         vocab_map=dicts[Dicts.Chars],
         hidden_dim=encoder.output_dim,
+        context_dim=encoder.output_dim,
         emb_dim=64,
+        attention_dim=embs[Modules.CharactersToTokens].output_dim,
+        char_rnn_inital=True,
         char_attention=True,
     )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders)

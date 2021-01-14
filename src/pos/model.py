@@ -344,8 +344,11 @@ class CharacterDecoder(Decoder):
         self,
         vocab_map: VocabMap,
         hidden_dim,
+        context_dim,
         emb_dim,
+        attention_dim=0,
         char_attention=False,
+        char_rnn_inital=False,
         teacher_forcing=0.0,
         dropout=0.0,
         weight=1,
@@ -356,7 +359,13 @@ class CharacterDecoder(Decoder):
         self.teacher_forcing = (
             teacher_forcing  # if rand < teacher_forcing we will use teacher forcing.
         )
+        self.context_dim = context_dim
         self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
+        self.char_rnn_initial = char_rnn_inital
+        if self.char_rnn_initial:  # If we initialize with the last state of CharRNN
+            log.warn("Overwriting GRUDecoder hidden dim. We initialize with CharRNN")
+            self.hidden_dim = attention_dim
+        self.attention_dim = attention_dim
         self._output_dim = len(
             vocab_map
         )  # The number of characters, these will be interpreted as logits.
@@ -367,22 +376,28 @@ class CharacterDecoder(Decoder):
             len(vocab_map), emb_dim, sparse=True
         )  # We map the input idx to vectors.
         # last character + sentence context + character attention
-        rnn_in_dim = emb_dim + hidden_dim + (hidden_dim if self.char_attention else 0)
+        rnn_in_dim = (
+            emb_dim
+            + self.context_dim
+            + (self.attention_dim if self.char_attention else 0)
+        )
         self.rnn = nn.LSTM(
             rnn_in_dim,
-            hidden_dim,
+            self.hidden_dim,
             batch_first=True,
         )
 
         # Map directly to characters
-        self.fc_out = nn.Linear(hidden_dim, len(vocab_map))
+        self.fc_out = nn.Linear(self.hidden_dim, len(vocab_map))
         self.illegal_chars_output = {
             self.vocab_map.SOS_ID,
             self.vocab_map.PAD_ID,
             self.vocab_map.UNK_ID,
         }
         if self.char_attention:
-            self.attention = MultiplicativeAttention(hidden_dim, hidden_dim)
+            self.attention = MultiplicativeAttention(
+                encoder_dim=self.hidden_dim, decoder_dim=self.attention_dim
+            )
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
 
     @property
@@ -468,16 +483,23 @@ class CharacterDecoder(Decoder):
         b, s, f, c = *context.shape, batch[BATCH_KEYS.TARGET_LEMMAS].shape[1]
         # (b*s, f) = (num_tokens, features)
         context = context.reshape(b * s, f)
-        hidden = context
         if self.char_attention:
             # (b*s, c, f)
             characters_rnn = encoded[Modules.CharactersToTokens][0]
             # (b*s, f)
             last_hidden_rnn = encoded[Modules.CharactersToTokens][1]
-            hidden = last_hidden_rnn
+            if self.char_rnn_initial:
+                hidden = last_hidden_rnn.detach().clone()
+                cell = last_hidden_rnn.detach().clone()
+            else:
+                hidden = context.detach().clone()
+                cell = context.detach().clone()
+        else:
+            hidden = context.detach().clone()
+            cell = context.detach().clone()
         # (1, b*s, f)
         hidden = hidden.unsqueeze(dim=0)
-        cell = zeros_like(hidden)
+        cell = cell.unsqueeze(dim=0)
         # (b*s, t, f_out)
         predictions = zeros(size=(b * s, c, self.output_dim), device=context.device)
         # We are training

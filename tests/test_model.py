@@ -76,6 +76,7 @@ def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
     char_decoder = CharacterDecoder(
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=hidden_dim,
+        context_dim=hidden_dim,
         emb_dim=emb_dim,
     )
     for batch in data_loader:
