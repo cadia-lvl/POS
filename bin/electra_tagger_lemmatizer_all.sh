@@ -31,6 +31,7 @@ train-and-tag \
 --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
 --known_chars_file data/extra/characters_training.txt \
 --char_lstm_layers 1 \
+--char_lstm_dim 256 \
 --char_emb_dim 128 \
 --main_lstm_dim 256 \
 --main_lstm_layers 1 \
