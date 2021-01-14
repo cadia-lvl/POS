@@ -23,6 +23,7 @@ train-and-tag \
 "$TEST" \
 "$OUT_DIR" \
 --lemmatizer \
+--lemmatizer_weight 0.1 \
 --tagger \
 --bert_encoder electra-small-pytorch \
 --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
