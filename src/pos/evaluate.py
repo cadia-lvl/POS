@@ -278,6 +278,32 @@ class Experiment:
             if gold != predicted
         )
 
+    def lemma_tag_confusion_matrix(self):
+        """Count the number of errors made when tag is right and lemma is wrong..."""
+        def error_name(gold_tag, tag, gold_lemma, lemma):
+            if gold_tag == tag and gold_lemma == lemma:
+                return "Both right"
+            elif gold_tag != tag and gold_lemma == lemma:
+                return "Tag wrong, lemma right"
+            elif gold_tag == tag and gold_lemma != lemma:
+                return "Tag right, lemma wrong"
+            else:  # Both wrong
+                return "Both wrong"
+
+        confusion = Counter(
+            error_name(gold_tag, tag, gold_lemma, lemma)
+            for gold_tags, tags, gold_lemmas, lemmas in zip(
+                self.predictions.get_field(Fields.GoldTags),
+                self.predictions.get_field(Fields.Tags),
+                self.predictions.get_field(Fields.GoldLemmas),
+                self.predictions.get_field(Fields.Lemmas),
+            )
+            for gold_tag, tag, gold_lemma, lemma in zip(
+                gold_tags, tags, gold_lemmas, lemmas
+            )
+        )
+        return confusion
+
 
 def get_average(
     accuracies: List[Dict[str, Union[float, int]]]
