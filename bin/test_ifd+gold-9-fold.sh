@@ -13,6 +13,7 @@ do
     TRAIN="$DATA_DIR/mim/${fold}TM.plain $DATA_DIR/otb/${fold}TM.plain $DATA_DIR/otb/${fold}PM.plain"
     TEST=$DATA_DIR/mim/${fold}PM.plain
     OUT_DIR=./out/"$NAME"/$fold
+    mkdir -p $OUT_DIR
     sbatch \
     --output="$OUT_DIR/slurm-%j.out" \
     --gres=gpu \
