@@ -13,5 +13,9 @@ do
     TRAIN="$DATA_DIR/mim/${fold}TM.plain $DATA_DIR/otb/${fold}TM.plain $DATA_DIR/otb/${fold}PM.plain"
     TEST=$DATA_DIR/mim/${fold}PM.plain
     OUT_DIR=./out/"$NAME"/$fold
-    ./bin/wrap_sbatch.sh "$MODEL" "$OUT_DIR" "$TRAIN" "$TEST" $*
+    sbatch \
+    --output="$OUT_DIR/slurm-%j.out" \
+    --gres=gpu \
+    --mem=10G \
+    --wrap="$MODEL $OUT_DIR $TRAIN $TEST --gpu $*"
 done
