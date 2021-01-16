@@ -492,8 +492,8 @@ class CharacterDecoder(Decoder):
                 hidden = last_hidden_rnn.detach().clone()
                 cell = last_hidden_rnn.detach().clone()
             else:
-                hidden = context.detach().clone()
-                cell = context.detach().clone()
+                hidden = zeros(size=(b * s, self.hidden_dim), device=context.device)
+                cell = zeros(size=(b * s, self.hidden_dim), device=context.device)
         else:
             hidden = context.detach().clone()
             cell = context.detach().clone()

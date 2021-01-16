@@ -280,8 +280,7 @@ def train_and_tag(**kwargs):
             else 0,
             char_attention=Modules.CharactersToTokens in embs
             and kwargs["lemmatizer_char_attention"],
-            char_rnn_inital=Modules.CharactersToTokens in embs
-            and kwargs["lemmatizer_char_attention"],
+            char_rnn_inital=False,
             teacher_forcing=kwargs["lemmatizer_teacher_forcing"],
             dropout=kwargs["emb_dropouts"],
             weight=kwargs["lemmatizer_weight"],
@@ -467,3 +466,10 @@ def evaluate_predictions(
             add, [experiment.error_profile(type=criteria) for experiment in experiments]
         )
         click.echo(evaluate.format_profile(error_profile, up_to=60))
+        # Only possible if predictions contain both lemmas and tags
+        if "Fix me" == "Fix me":
+            confusion_matrix = reduce(
+                add,
+                [experiment.lemma_tag_confusion_matrix() for experiment in experiments],
+            )
+            click.echo(evaluate.format_profile(confusion_matrix, up_to=60))
