@@ -178,7 +178,10 @@ class FieldedDataset(Dataset):
 
     def __add__(self, other):
         """Support addition."""
-        return self.__class__(self.data + other.data, self.fields)
+        new_data = tuple(
+            data + other_data for data, other_data in zip(self.data, other.data)
+        )
+        return self.__class__(new_data, self.fields)
 
     def _get_field_length(self, field: str) -> Tuple[int]:
         """Return the field length."""
