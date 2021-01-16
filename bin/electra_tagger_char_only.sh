@@ -32,8 +32,6 @@ train-and-tag \
 "$OUT_DIR" \
 --tagger \
 --bert_encoder electra-small-pytorch \
---morphlex_embeddings_file data/extra/dmii.vectors_filtered \
---morphlex_freeze \
 --known_chars_file data/extra/characters_training.txt \
 --char_lstm_layers 1 \
 --char_emb_dim 128 \
