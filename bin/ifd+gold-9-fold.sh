@@ -37,5 +37,6 @@ do
     --save_vocab \
     --save_model \
     --optimizer sgd \
-    --learning_rate 5e-2"
+    --learning_rate 5e-2 \
+    --gpu"
 done
