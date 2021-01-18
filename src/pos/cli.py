@@ -412,10 +412,10 @@ def tag(model_file, data_in, output, device, contains_tags):
     ds = FieldedDataset.from_file(data_in, fields)
     chunked_ds = chunk_dataset(
         ds,
-        tokenizer=tagger.model.encoder.embeddings[Modules.BERT.value].emb.tokenizer,
+        tokenizer=tagger.model.encoder.embeddings[Modules.BERT.value].tokenizer,
         max_sequence_length=tagger.model.encoder.embeddings[
             Modules.BERT.value
-        ].emb.tokenizer.model_max_length,
+        ].max_length,
     )
     predicted_tags = tagger.tag_bulk(dataset=chunked_ds, batch_size=16)
     chunked_ds = chunked_ds.add_field(predicted_tags, Fields.Tags)
