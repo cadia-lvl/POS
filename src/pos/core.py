@@ -153,7 +153,7 @@ class FieldedDataset(Dataset):
         # the data is columnar
         assert len(data) == len(
             fields
-        ), "The data and fields do not contain the same number of elements"
+        ), f"The data {len(data)} and fields {len(fields)} do not contain the same number of elements"
         # All sequences are of the same length
         lengths = -1
         for field in fields:
