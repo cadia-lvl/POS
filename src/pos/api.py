@@ -26,9 +26,9 @@ class Tagger:
     def __init__(self, model_file=None, device="cpu"):
         """Initialize a Tagger. Reads the given files."""
         log.info("Setting device.")
-        self.device = set_device(gpu_flag="cpu" != device)
+        set_device(gpu_flag="cpu" != device)
         log.info("Reading model file...")
-        self.model = load(model_file, map_location=self.device)
+        self.model = load(model_file, map_location=core.device)
 
     def tag_sent(self, sent: Sentence) -> Sentence:
         """Tag a (single) sentence. To tag multiple sentences at once (faster) use "tag_bulk".
