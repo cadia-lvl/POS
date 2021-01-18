@@ -1,13 +1,12 @@
 """The API for the tagging model."""
-import pickle
-from typing import Union, cast, Sequence
+from typing import Union, cast
 import logging
 
 from torch.utils.data.dataloader import DataLoader
 from torch import load
 
+import pos.core
 from pos.model import Modules
-
 from pos.core import FieldedDataset, Fields, Sentence, Sentences, set_device
 from pos.train import tag_data_loader
 from pos.data import collate_fn
