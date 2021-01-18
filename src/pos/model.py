@@ -253,7 +253,7 @@ class TransformerEmbedding(Embedding):
         )
         # Tuple[(b, s, f), ...]
         output = outputs["hidden_states"][-self.num_layers :]
-        weights = nn.functional.softmax(self.layer_weights)
+        weights = nn.functional.softmax(self.layer_weights, dim=0)
         weighted_layers = output[0] * weights[0]
         for l in range(1, self.num_layers):
             weighted_layers += output[l] * weights[l]

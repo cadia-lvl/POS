@@ -2,7 +2,7 @@
 FOLDS="10"
 DATA_DIR=./data/raw
 
-NAME="$1"
+NAME="m4_full"
 # Move the arguments forward
 
 # --begin=now+8hour \
@@ -32,7 +32,7 @@ do
     --main_lstm_dim 256 \
     --main_lstm_layers 1 \
     --label_smoothing 0.1 \
-    --epochs 20 \
+    --epochs 14 \
     --batch_size 8 \
     --save_vocab \
     --save_model \
