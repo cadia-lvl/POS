@@ -8,7 +8,7 @@ from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
 
 from pos.core import Fields, Vocab, VocabMap, Dicts, FieldedDataset
 from pos.data import collate_fn, load_dicts
-from pos.evaluate import Experiment
+from pos import evaluate
 from pos.model import (
     ABLTagger,
     Encoder,
@@ -135,24 +135,24 @@ def abl_tagger(encoder, tagger_module, lemmatizer_module) -> ABLTagger:
 @fixture
 def tagger_evaluator(ds_lemma):
     """Return a tagger evaluator."""
-    return Experiment.tag_accuracy_closure(
-        ds_lemma,
+    return evaluate.TaggingEvaluation(
+        test_dataset=ds_lemma,
         train_vocab=ds_lemma.get_vocab(),
-        morphlex_vocab=Vocab.from_file(MORPHLEX_VOCAB_PATH),
-        pretrained_vocab=Vocab.from_file(PRETRAINED_VOCAB_PATH),
-    )
+        external_vocabs=evaluate.ExternalVocabularies(
+            morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
+            pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+        ),
+    ).tagging_accuracy
 
 
 @fixture
 def lemma_evaluator(ds_lemma):
     """Return a lemma evaluator."""
-    return Experiment.lemma_accuracy_closure(
-        ds_lemma,
-        train_tokens=ds_lemma.get_vocab(),
-        morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
-        pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+    return evaluate.LemmatizationEvaluation(
+        test_dataset=ds_lemma,
+        train_vocab=ds_lemma.get_vocab(),
         train_lemmas=Vocab.from_symbols(ds_lemma.get_field(Fields.GoldLemmas)),
-    )
+    ).lemma_accuracy
 
 
 @fixture

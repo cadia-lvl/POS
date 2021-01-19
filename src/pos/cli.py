@@ -24,7 +24,6 @@ from pos.data import (
     collate_fn,
     chunk_dataset,
     dechunk_dataset,
-    load_tokenizer,
 )
 from pos import core
 from pos.core import Vocab, FieldedDataset, Dicts, Fields, set_device, set_seed
@@ -52,7 +51,6 @@ from pos.train import (
     run_epochs,
 )
 from pos.api import Tagger as api_tagger
-from pos.evaluate import Experiment
 from pos.utils import write_tsv
 from pos import evaluate
 
@@ -315,20 +313,20 @@ def train_and_tag(**kwargs):
     scheduler = get_scheduler(optimizer, kwargs["scheduler"])
     evaluators = {}
     if Modules.Tagger in decoders:
-        evaluators[Modules.Tagger] = Experiment.tag_accuracy_closure(
-            test_ds=test_ds,
+        evaluators[Modules.Tagger] = evaluate.TaggingEvaluation(
+            test_dataset=test_ds,
             train_vocab=train_ds.get_vocab(),
-            morphlex_vocab=Vocab.from_file(MORPHLEX_VOCAB_PATH),
-            pretrained_vocab=Vocab.from_file(PRETRAINED_VOCAB_PATH),
-        )
+            external_vocabs=evaluate.ExternalVocabularies(
+                morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
+                pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+            ),
+        ).tagging_accuracy
     if Modules.Lemmatizer in decoders:
-        evaluators[Modules.Lemmatizer] = Experiment.lemma_accuracy_closure(
-            test_ds=test_ds,
-            train_tokens=train_ds.get_vocab(),
-            morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
-            pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+        evaluators[Modules.Lemmatizer] = evaluate.LemmatizationEvaluation(
+            test_dataset=test_ds,
+            train_vocab=train_ds.get_vocab(),
             train_lemmas=Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)),
-        )
+        ).lemma_accuracy
 
     # Write all configuration to disk
     output_dir = pathlib.Path(kwargs["output_dir"])
@@ -425,51 +423,119 @@ def tag(model_file, data_in, output, device, contains_tags):
     log.info("Done!")
 
 
+# fmt: off
 @cli.command()
-@click.argument("directory")
-@click.option(
-    "--pretrained_vocab",
-    help="The location of the pretrained vocabulary.",
-    default=PRETRAINED_VOCAB_PATH,
-)
-@click.option(
-    "--morphlex_vocab",
-    help="The location of the morphlex vocabulary.",
-    default=MORPHLEX_VOCAB_PATH,
-)
-@click.option(
-    "--criteria",
-    type=click.Choice(["tags", "lemmas"], case_sensitive=False),
-    help="Which criteria to evaluate.",
-    default="tags",
-)
-@click.option(
-    "--profile/--no_profile",
-    is_flag=True,
-    help="Output error profiles as well?",
-    default=False,
-)
+@click.argument("predictions")
+@click.argument("fields")
+@click.option("--morphlex_vocab", help="The location of the morphlex vocabulary.", default=MORPHLEX_VOCAB_PATH)
+@click.option("--pretrained_vocab", help="The location of the pretrained vocabulary.", default=PRETRAINED_VOCAB_PATH)
+@click.option("--train_tokens", help="The location of the training tokens used to train the model.", default=None)
+@click.option("--train_lemmas", help="The location of the training lemmas used to train the model.", default=None)
+@click.option("--criteria", type=click.Choice(["accuracy", "profile"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
+@click.option("--feature", type=click.Choice(["tags", "lemmas", "confusion"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
+# fmt: on
 def evaluate_predictions(
-    directory, pretrained_vocab, morphlex_vocab, criteria, profile
+    predictions,
+    fields,
+    morphlex_vocab,
+    pretrained_vocab,
+    train_tokens,
+    train_lemmas,
+    criteria,
+    feature,
 ):
-    """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
-    experiments = evaluate.collect_experiments(
-        directory, morphlex_vocab, pretrained_vocab
-    )
-    click.echo(
-        evaluate.format_results(
-            evaluate.all_accuracy_average(experiments, type=criteria)
+    """Evaluate predictions.
+
+    Args:
+        predictions: The tagged test file.
+        fields: The fields present in the test file. Separated with ',', f.ex. 'tokens,gold_tags,tags'."""
+    ds = FieldedDataset.from_file(predictions, fields=tuple(fields.split(",")))
+    train_tokens = Vocab.from_file(train_tokens)
+    if feature == "tags":
+        morphlex_vocab = Vocab.from_file(morphlex_vocab)
+        pretrained_vocab = Vocab.from_file(pretrained_vocab)
+        evaluation = evaluate.TaggingEvaluation(
+            ds,
+            train_vocab=train_tokens,
+            external_vocabs=evaluate.ExternalVocabularies(
+                morphlex_vocab, pretrained_vocab
+            ),
         )
-    )
-    if profile:
-        error_profile = reduce(
-            add, [experiment.error_profile(type=criteria) for experiment in experiments]
+        if criteria == "accuracy":
+            click.echo(evaluate.format_result(evaluation._tagging_accuracy(ds)))
+        elif criteria == "profile":
+            click.echo(evaluate.format_profile(evaluation.tagging_profile(ds)))
+
+    elif feature == "lemmas":
+        train_lemmas = Vocab.from_file(train_lemmas)
+        evaluation = evaluate.LemmatizationEvaluation(
+            test_dataset=ds, train_vocab=train_tokens, train_lemmas=train_lemmas
         )
-        click.echo(evaluate.format_profile(error_profile, up_to=60))
-        # Only possible if predictions contain both lemmas and tags
-        if "Fix me" == "Fix me":
-            confusion_matrix = reduce(
-                add,
-                [experiment.lemma_tag_confusion_matrix() for experiment in experiments],
-            )
-            click.echo(evaluate.format_profile(confusion_matrix, up_to=60))
+        if criteria == "accuracy":
+            click.echo(evaluate.format_result(evaluation._lemma_accuracy(ds)))
+        elif criteria == "profile":
+            click.echo(evaluate.format_profile(evaluation.lemma_profile(ds)))
+    elif feature == "confusion":
+        train_lemmas = Vocab.from_file(train_lemmas)
+        morphlex_vocab = Vocab.from_file(morphlex_vocab)
+        pretrained_vocab = Vocab.from_file(pretrained_vocab)
+        evaluation = evaluate.TaggingLemmatizationEvaluation(
+            test_dataset=ds,
+            train_vocab=train_tokens,
+            external_vocabs=evaluate.ExternalVocabularies(
+                morphlex_vocab, pretrained_vocab
+            ),
+            train_lemmas=train_lemmas,
+        )
+        click.echo(evaluation.lemma_tag_confusion_matrix())
+
+
+# @cli.command()
+# @click.argument("directory")
+# @click.argument("fields")
+# @click.option(
+#     "--morphlex_vocab",
+#     help="The location of the morphlex vocabulary.",
+#     default=MORPHLEX_VOCAB_PATH,
+# )
+# @click.option(
+#     "--pretrained_vocab",
+#     help="The location of the pretrained vocabulary.",
+#     default=PRETRAINED_VOCAB_PATH,
+# )
+# @click.option(
+#     "--morphlex_vocab",
+#     help="The location of the morphlex vocabulary.",
+#     default=MORPHLEX_VOCAB_PATH,
+# )
+# @click.option(
+#     "--criteria",
+#     type=click.Choice(["accuracy", "profile"], case_sensitive=False),
+#     help="Which criteria to evaluate.",
+#     default="accuracy",
+# )
+# # fmt: on
+# def evaluate_experiments(
+#     directory, pretrained_vocab, morphlex_vocab, criteria, profile
+# ):
+#     """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
+#     experiments = evaluate.collect_experiments(
+#         directory, morphlex_vocab, pretrained_vocab
+#     )
+#     click.echo(
+#         evaluate.format_results(
+#             evaluate.all_accuracy_average(experiments, type=criteria)
+#         )
+#     )
+#     if profile:
+#         error_profile = reduce(
+#             add, [experiment.error_profile(type=criteria) for experiment in experiments]
+#         )
+#         click.echo(evaluate.format_profile(error_profile, up_to=60))
+#         # Only possible if predictions contain both lemmas and tags
+#         if "Fix me" == "Fix me":
+#             confusion_matrix = reduce(
+#                 add,
+#                 [experiment.lemma_tag_confusion_matrix() for experiment in experiments],
+#             )
+#             click.echo(evaluate.format_profile(confusion_matrix, up_to=60))

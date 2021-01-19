@@ -1,9 +1,7 @@
 import pathlib
 from re import M
 
-from torch.utils.data import dataloader
 from pos.core import Dicts
-from pos.evaluate import Experiment
 from pos.model import (
     ABLTagger,
     CharacterAsWordEmbedding,

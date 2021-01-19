@@ -1,6 +1,8 @@
 """A collection of types and function used to evaluate the performance of a tagger."""
+from dataclasses import Field
 import json
-from typing import Callable, Iterable, Tuple, List, Dict, Set, Any, Union
+from os import stat
+from typing import Callable, Iterable, Optional, Tuple, List, Dict, Set, Any, Union
 import logging
 from collections import Counter
 from pathlib import Path
@@ -10,161 +12,60 @@ from .core import Sentences, Vocab, FieldedDataset, Fields
 
 log = logging.getLogger(__name__)
 
+# accuracy, std_dev
+Measure = Union[int, float]
+Measure_std = Tuple[Measure, float]
+# "known-wemb" -> statistic
+Measures = Dict[str, Measure]
+Measures_std = Dict[str, Measure_std]
 
-class Experiment:
-    """An Experiment holds information about an experiment, i.e. predicted tags, lemmas and vocabularies."""
 
-    def __init__(
-        self,
-        predictions: FieldedDataset,
-        train_tokens: Vocab,
-        morphlex_tokens: Vocab,
-        pretrained_vocab: Vocab,
-        train_lemmas: Vocab = None,
-    ):
-        """Initialize an experiment given the predictions and vocabulary."""
-        self.predictions = predictions
-        # Get the tokens and retrive the vocab.
-        self.test_tokens = Vocab.from_symbols(self.predictions.get_field(Fields.Tokens))
-        self.known_tokens = train_tokens.intersection(self.test_tokens)
-        if train_lemmas is not None:
-            self.test_lemmas = Vocab.from_symbols(
-                self.predictions.get_field(Fields.GoldLemmas)
-            )
-            self.known_lemmas = train_lemmas.intersection(self.test_lemmas)
-            self.unknown_lemmas = self.test_lemmas.difference(self.known_lemmas)
-        log.debug("Creating vocabs")
-        morphlex_tokens = morphlex_tokens.intersection(self.test_tokens)  # type: ignore
-        pretrained_tokens = pretrained_vocab.intersection(self.test_tokens)  # type: ignore
-        # fmt: off
-        self.unknown_tokens = self.test_tokens.difference(self.known_tokens)  # pylint: disable=no-member
-        self.train_pretrained_tokens = self.known_tokens.intersection(pretrained_tokens).difference(morphlex_tokens)
-        self.train_pretrained_morphlex_tokens = self.known_tokens.intersection(pretrained_tokens).intersection(morphlex_tokens)
-        self.train_morphlex_tokens = self.known_tokens.intersection(morphlex_tokens).difference(pretrained_tokens)
-        self.train_tokens_only = self.known_tokens.difference(pretrained_tokens).difference(morphlex_tokens)
-        self.test_pretrained_tokens = self.unknown_tokens.intersection(pretrained_tokens).difference(morphlex_tokens)
-        self.test_pretrained_morphlex_tokens = self.unknown_tokens.intersection(pretrained_tokens).intersection(morphlex_tokens)
-        self.test_morphlex_tokens = self.unknown_tokens.intersection(morphlex_tokens).difference(pretrained_tokens)
-        self.test_tokens_only = self.unknown_tokens.difference(pretrained_tokens).difference(morphlex_tokens)
-        # fmt: on
+class ExternalVocabularies:
+    """External Vocabularies read external files which are static between different evaluations."""
+
+    def __init__(self, morphlex_tokens: Vocab, pretrained_tokens: Vocab):
+        """Initialize."""
+        self.morphlex_tokens = morphlex_tokens
+        self.pretrained_tokens = pretrained_tokens
 
     @staticmethod
-    def from_file(path: Path, morphlex_path: Path, pretrained_path: Path):
-        """Create an Experiment from a given directory of an experimental results."""
-        log.debug(f"Reading experiment={path}")
-        # Start by reading what type of model it is
-        with open(str(path / "hyperparamters.json")) as f:
-            hyperparams = json.load(f)
-        fields = (Fields.Tokens,)
-        if hyperparams["tagger"] and hyperparams["lemmatizer"]:
-            fields = fields + (
-                Fields.GoldTags,
-                Fields.GoldLemmas,
-                Fields.Tags,
-                Fields.Lemmas,
-            )
-        elif hyperparams["tagger"] and not hyperparams["lemmatizer"]:
-            fields = fields + (Fields.GoldTags, Fields.Tags)
-        elif not hyperparams["tagger"] and hyperparams["lemmatizer"]:
-            fields = fields + (Fields.GoldLemmas, Fields.Lemmas)
-        else:
-            raise ValueError("Bad hyperparameters, no tagger nor lemmatizer")
-        train_lemmas = None
-        if Fields.Lemmas in fields:
-            train_lemmas = Vocab.from_file(str(path / "known_lemmas.txt"))
-        log.debug("Reading predictions")
-        predictions = FieldedDataset.from_file(str(path / "predictions.tsv"), fields)
-        log.debug("Reading vocabs")
-        morphlex_vocab = Vocab.from_file(str(morphlex_path))
-        pretrained_vocab = Vocab.from_file(str(pretrained_path))
-        log.debug("Reading training vocab")
-        train_vocab = Vocab.from_file(str(path / "known_toks.txt"))
-        log.debug(f"Done reading experiment={path}")
-        return Experiment(
-            predictions=predictions,
-            train_tokens=train_vocab,
-            morphlex_tokens=morphlex_vocab,
-            pretrained_vocab=pretrained_vocab,
-            train_lemmas=train_lemmas,
-        )
+    def from_files(morphlex_path: Path, pretrained_path: Path):
+        """Read the files."""
+        morphlex_tokens = Vocab.from_file(str(morphlex_path))
+        pretrained_tokens = Vocab.from_file(str(pretrained_path))
+        return ExternalVocabularies(morphlex_tokens, pretrained_tokens)
+
+
+class Evaluation:
+    """Evaluation of a model on a test set."""
+
+    def __init__(self, train_vocab: Vocab, test_dataset: FieldedDataset):
+        """Initialize."""
+        self.train_tokens = train_vocab
+        self.test_tokens = Vocab.from_symbols(test_dataset.get_field(Fields.Tokens))
+        self.test_dataset = test_dataset
+        self.known_tokens = self.train_tokens.intersection(self.test_tokens)
+        self.unknown_tokens = self.test_tokens.difference(
+            self.known_tokens
+        )  # pylint: disable=no-member
 
     @staticmethod
-    def from_predictions(
-        test_ds: FieldedDataset,
-        predictions: Sentences,
-        train_tokens: Vocab,
-        morphlex_tokens: Vocab,
-        pretrained_tokens: Vocab,
-        train_lemmas: Vocab = None,
-        field=Fields.Tags,
-    ):
-        """Create an Experiment from predicted tags, test_dataset and dictionaries."""
-        test_ds = test_ds.add_field(predictions, field)
-        return Experiment(
-            test_ds,
-            train_tokens=train_tokens,
-            morphlex_tokens=morphlex_tokens,
-            pretrained_vocab=pretrained_tokens,
-            train_lemmas=train_lemmas,
-        )
-
-    @staticmethod
-    def tag_accuracy_closure(
-        test_ds: FieldedDataset,
-        train_vocab: Vocab,
-        morphlex_vocab: Vocab,
-        pretrained_vocab: Vocab,
-    ) -> Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]:
-        """Create an Experiment from predicted tags, test_dataset and dictionaries."""
-
-        def calculate_accuracy(
-            tags: Sentences,
-        ) -> Tuple[Dict[str, float], Dict[str, int]]:
-            """Closure."""
-            return Experiment.from_predictions(
-                test_ds,
-                tags,
-                train_tokens=train_vocab,
-                morphlex_tokens=morphlex_vocab,
-                pretrained_tokens=pretrained_vocab,
-            ).tagging_accuracy()
-
-        return calculate_accuracy
-
-    @staticmethod
-    def lemma_accuracy_closure(
-        test_ds: FieldedDataset,
-        train_tokens: Vocab,
-        morphlex_tokens: Vocab,
-        pretrained_tokens: Vocab,
-        train_lemmas: Vocab,
-    ) -> Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]:
-        """Create an Experiment from predicted tags, test_dataset and dictionaries."""
-
-        def calculate_accuracy(
-            lemmas: Sentences,
-        ) -> Tuple[Dict[str, float], Dict[str, int]]:
-            """Closure."""
-            return Experiment.from_predictions(
-                test_ds,
-                lemmas,
-                train_tokens=train_tokens,
-                morphlex_tokens=morphlex_tokens,
-                pretrained_tokens=pretrained_tokens,
-                train_lemmas=train_lemmas,
-                field=Fields.Lemmas,
-            ).lemma_accuracy()
-
-        return calculate_accuracy
-
     def accuracy(
-        self,
-        vocab: Set[str] = None,
-        comparison_field=Fields.Tokens,
-        gold_field=Fields.GoldTags,
-        pred_field=Fields.Tags,
+        predictions: FieldedDataset,
+        vocab: Optional[Set[str]],
+        comparison_field: Fields,
+        gold_field: Fields,
+        pred_field=Fields,
     ) -> Tuple[float, int]:
-        """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter."""
+        """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter.
+
+        Args:
+            predictions: The predictions along with the correct values.
+            vocab: A vocabulary to whitelist elements based on.
+            comparison_field: The field in the predictions to compare if it is contained in vocab.
+            gold_field: The field in the predictions to consider correct.
+            pred_field: The field in the predictions to consider predictions.
+        """
 
         def in_vocabulary(token, vocab):
             """Filter condition."""
@@ -177,7 +78,7 @@ class Experiment:
         total = sum(
             (
                 1
-                for tokens in self.predictions.get_field(comparison_field)
+                for tokens in predictions.get_field(comparison_field)
                 for token in tokens
                 if in_vocabulary(token, vocab)
             )
@@ -188,9 +89,9 @@ class Experiment:
             (
                 predicted == gold
                 for tokens, golds, predicted in zip(
-                    self.predictions.get_field(comparison_field),
-                    self.predictions.get_field(gold_field),
-                    self.predictions.get_field(pred_field),
+                    predictions.get_field(comparison_field),
+                    predictions.get_field(gold_field),
+                    predictions.get_field(pred_field),
                 )
                 for token, gold, predicted in zip(tokens, golds, predicted)
                 if in_vocabulary(token, vocab)
@@ -198,88 +99,251 @@ class Experiment:
         )
         return (correct / total, total)
 
-    def tagging_accuracy(self) -> Tuple[Dict[str, float], Dict[str, int]]:
-        """Return all accuracies."""
-
-        def _tagging_accuracy(index):
-            return {
-                "Total": self.accuracy()[index],
-                "Unknown": self.accuracy(self.unknown_tokens)[index],
-                "Known": self.accuracy(self.known_tokens)[index],
-                "Known-Wemb": self.accuracy(self.train_pretrained_tokens)[index],
-                "Known-Wemb+Morph": self.accuracy(
-                    self.train_pretrained_morphlex_tokens
-                )[index],
-                "Known-Morph": self.accuracy(self.train_morphlex_tokens)[index],
-                "Seen": self.accuracy(self.train_tokens_only)[index],
-                "Unknown-Wemb": self.accuracy(self.test_pretrained_tokens)[index],
-                "Unknown-Wemb+Morph": self.accuracy(
-                    self.test_pretrained_morphlex_tokens
-                )[index],
-                "Unknown-Morph": self.accuracy(self.test_morphlex_tokens)[index],
-                "Unseen": self.accuracy(self.test_tokens_only)[index],
-            }
-
-        accuracy = _tagging_accuracy(0)
-        total = _tagging_accuracy(1)
-        return accuracy, total  # type: ignore
-
-    def lemma_accuracy(self) -> Tuple[Dict[str, float], Dict[str, int]]:
-        """Return all lemma accuracies."""
-
-        def _lemma_accuracy(index):
-            return {
-                "Total": self.accuracy(
-                    gold_field=Fields.GoldLemmas, pred_field=Fields.Lemmas
-                )[index],
-                "Unknown": self.accuracy(
-                    self.unknown_tokens,
-                    gold_field=Fields.GoldLemmas,
-                    pred_field=Fields.Lemmas,
-                )[index],
-                "Known": self.accuracy(
-                    self.known_tokens,
-                    gold_field=Fields.GoldLemmas,
-                    pred_field=Fields.Lemmas,
-                )[index],
-                "Unknown-Lemmas": self.accuracy(
-                    self.unknown_lemmas,
-                    comparison_field=Fields.GoldLemmas,
-                    gold_field=Fields.GoldLemmas,
-                    pred_field=Fields.Lemmas,
-                )[index],
-                "Known-Lemmas": self.accuracy(
-                    self.known_lemmas,
-                    comparison_field=Fields.GoldLemmas,
-                    gold_field=Fields.GoldLemmas,
-                    pred_field=Fields.Lemmas,
-                )[index],
-            }
-
-        accuracy = _lemma_accuracy(0)
-        total = _lemma_accuracy(1)
-        return accuracy, total  # type: ignore
-
-    def error_profile(self, type="tags"):
-        """Return an error profile with counts of errors (tagger > gold)."""
-        if type == "tags":
-            gold_field = Fields.GoldTags
-            pred_field = Fields.Tags
-        else:
-            gold_field = Fields.GoldLemmas
-            pred_field = Fields.Lemmas
+    @staticmethod
+    def error_profile(
+        predictions: FieldedDataset, gold_field: Fields, pred_field: Field
+    ):
+        """Return an error profile with counts of errors (pred > correct/gold)."""
         return Counter(
             f"{predicted} > {gold}"
             for gold_tags, predicted_tags in zip(
-                self.predictions.get_field(gold_field),
-                self.predictions.get_field(pred_field),
+                predictions.get_field(gold_field),
+                predictions.get_field(pred_field),
             )
             for gold, predicted in zip(gold_tags, predicted_tags)
             if gold != predicted
         )
 
+
+class TaggingEvaluation(Evaluation):
+    """Tagging evaluation of a model."""
+
+    def __init__(
+        self,
+        external_vocabs: ExternalVocabularies,
+        **kw,
+    ):
+        """Initialize."""
+        super().__init__(**kw)
+        morphlex_tokens = external_vocabs.morphlex_tokens.intersection(self.test_tokens)  # type: ignore
+        pretrained_tokens = external_vocabs.pretrained_tokens.intersection(self.test_tokens)  # type: ignore
+        # fmt: off
+        self.train_pretrained_tokens = self.known_tokens.intersection(pretrained_tokens).difference(morphlex_tokens)
+        self.train_pretrained_morphlex_tokens = self.known_tokens.intersection(pretrained_tokens).intersection(morphlex_tokens)
+        self.train_morphlex_tokens = self.known_tokens.intersection(morphlex_tokens).difference(pretrained_tokens)
+        self.train_tokens_only = self.known_tokens.difference(pretrained_tokens).difference(morphlex_tokens)
+        self.test_pretrained_tokens = self.unknown_tokens.intersection(pretrained_tokens).difference(morphlex_tokens)
+        self.test_pretrained_morphlex_tokens = self.unknown_tokens.intersection(pretrained_tokens).intersection(morphlex_tokens)
+        self.test_morphlex_tokens = self.unknown_tokens.intersection(morphlex_tokens).difference(pretrained_tokens)
+        self.test_tokens_only = self.unknown_tokens.difference(pretrained_tokens).difference(morphlex_tokens)
+        # fmt: on
+
+    def _tagging_accuracy(
+        self, predictions: FieldedDataset
+    ) -> Tuple[Measures, Measures]:
+        """Return all tagging accuracies. Assumes that predicted tags have been set."""
+        accuracy_results = {
+            "Total": self.accuracy(
+                predictions,
+                None,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Unknown": self.accuracy(
+                predictions,
+                self.unknown_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Known": self.accuracy(
+                predictions,
+                self.known_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Known-Wemb": self.accuracy(
+                predictions,
+                self.train_pretrained_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Known-Wemb+Morph": self.accuracy(
+                predictions,
+                self.train_pretrained_morphlex_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Known-Morph": self.accuracy(
+                predictions,
+                self.train_morphlex_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Seen": self.accuracy(
+                predictions,
+                self.train_tokens_only,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Unknown-Wemb": self.accuracy(
+                predictions,
+                self.test_pretrained_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Unknown-Wemb+Morph": self.accuracy(
+                predictions,
+                self.test_pretrained_morphlex_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Unknown-Morph": self.accuracy(
+                predictions,
+                self.test_morphlex_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+            "Unseen": self.accuracy(
+                predictions,
+                self.test_tokens_only,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldTags,
+                pred_field=Fields.Tags,
+            ),
+        }
+
+        accuracy = {key: result[0] for key, result in accuracy_results.items()}
+        total = {key: result[1] for key, result in accuracy_results.items()}
+        return accuracy, total
+
+    def tagging_accuracy(self, tags):
+        """Calculate the tagging accuracy, given some tags."""
+        if Fields.Tags in self.test_dataset.fields:
+            raise RuntimeError(
+                "Unable to evaluate predictions. Predicted tags are already present."
+            )
+
+        test_ds = self.test_dataset.add_field(tags, Fields.Tags)
+        return self._tagging_accuracy(test_ds)
+
+    def tagging_profile(self, predictions: FieldedDataset):
+        """Error profile for tagging."""
+        return self.error_profile(
+            predictions, gold_field=Fields.GoldTags, pred_field=Fields.Tags
+        )
+
+
+class LemmatizationEvaluation(Evaluation):
+    """Lemmatization evaluation of a model."""
+
+    def __init__(
+        self,
+        train_lemmas: Vocab,
+        **kw,
+    ):
+        """Initialize."""
+        super().__init__(**kw)
+        self.train_lemmas = train_lemmas
+        self.test_lemmas = Vocab.from_symbols(
+            self.test_dataset.get_field(Fields.GoldLemmas)
+        )
+        self.known_lemmas = self.train_lemmas.intersection(self.test_lemmas)
+        self.unknown_lemmas = self.test_lemmas.difference(
+            self.known_lemmas
+        )  # pylint: disable=no-member
+
+    def _lemma_accuracy(self, predictions: FieldedDataset) -> Tuple[Measures, Measures]:
+        """Return all lemma accuracies."""
+        accuracy_results = {
+            "Total": self.accuracy(
+                predictions=predictions,
+                vocab=None,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldLemmas,
+                pred_field=Fields.Lemmas,
+            ),
+            "Unknown": self.accuracy(
+                predictions,
+                self.unknown_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldLemmas,
+                pred_field=Fields.Lemmas,
+            ),
+            "Known": self.accuracy(
+                predictions,
+                self.known_tokens,
+                comparison_field=Fields.Tokens,
+                gold_field=Fields.GoldLemmas,
+                pred_field=Fields.Lemmas,
+            ),
+            "Unknown-Lemmas": self.accuracy(
+                predictions,
+                self.unknown_lemmas,
+                comparison_field=Fields.GoldLemmas,
+                gold_field=Fields.GoldLemmas,
+                pred_field=Fields.Lemmas,
+            ),
+            "Known-Lemmas": self.accuracy(
+                predictions,
+                self.known_lemmas,
+                comparison_field=Fields.GoldLemmas,
+                gold_field=Fields.GoldLemmas,
+                pred_field=Fields.Lemmas,
+            ),
+        }
+
+        accuracy = {key: result[0] for key, result in accuracy_results.items()}
+        total = {key: result[1] for key, result in accuracy_results.items()}
+        return accuracy, total
+
+    def lemma_accuracy(self, lemmas: Sentences):
+        """Calculate the lemmatization accuracy, given some lemmas."""
+        if Fields.Lemmas in self.test_dataset.fields:
+            raise RuntimeError(
+                "Unable to evaluate predictions. Predicted lemmas are already present."
+            )
+
+        test_ds = self.test_dataset.add_field(lemmas, Fields.Lemmas)
+        return self._lemma_accuracy(test_ds)
+
+    def lemma_profile(self, predictions: FieldedDataset):
+        """Error profile for lemmatization."""
+        return self.error_profile(
+            predictions, gold_field=Fields.GoldLemmas, pred_field=Fields.Lemmas
+        )
+
+
+class TaggingLemmatizationEvaluation(TaggingEvaluation, LemmatizationEvaluation):
+    """Lemmatization and tagging evaluation of model."""
+
+    def __init__(
+        self,
+        test_dataset: FieldedDataset,
+        train_vocab: Vocab,
+        external_vocabs: ExternalVocabularies,
+        train_lemmas: Vocab,
+    ):
+        """Initialize it."""
+        super().__init__(
+            test_dataset=test_dataset,
+            train_vocab=train_vocab,
+            external_vocabs=external_vocabs,
+            train_lemmas=train_lemmas,
+        )
+
     def lemma_tag_confusion_matrix(self):
         """Count the number of errors made when tag is right and lemma is wrong..."""
+
         def error_name(gold_tag, tag, gold_lemma, lemma):
             if gold_tag == tag and gold_lemma == lemma:
                 return "Both right"
@@ -293,10 +357,10 @@ class Experiment:
         confusion = Counter(
             error_name(gold_tag, tag, gold_lemma, lemma)
             for gold_tags, tags, gold_lemmas, lemmas in zip(
-                self.predictions.get_field(Fields.GoldTags),
-                self.predictions.get_field(Fields.Tags),
-                self.predictions.get_field(Fields.GoldLemmas),
-                self.predictions.get_field(Fields.Lemmas),
+                self.test_dataset.get_field(Fields.GoldTags),
+                self.test_dataset.get_field(Fields.Tags),
+                self.test_dataset.get_field(Fields.GoldLemmas),
+                self.test_dataset.get_field(Fields.Lemmas),
             )
             for gold_tag, tag, gold_lemma, lemma in zip(
                 gold_tags, tags, gold_lemmas, lemmas
@@ -326,14 +390,12 @@ def average(values: List[Union[int, float]]) -> float:
     return sum(values) / len(values)
 
 
-# accuracy, std_dev
-Statistics = Tuple[float, float]
-# "known-wemb" -> statistic
-Measures = Dict[str, Statistics]
-
-
 def all_accuracy_average(
-    experiments: List[Experiment],
+    experiments: List[
+        Union[
+            TaggingEvaluation, LemmatizationEvaluation, TaggingLemmatizationEvaluation
+        ]
+    ],
     type: str = "tags",
 ) -> Tuple[Measures, Measures]:
     """Return the average of all accuracies."""
@@ -341,9 +403,9 @@ def all_accuracy_average(
     all_totals = []
     for experiment in experiments:
         if type == "tags":
-            accuracies, totals = experiment.tagging_accuracy()
+            accuracies, totals = experiment._tagging_accuracy()
         else:
-            accuracies, totals = experiment.lemma_accuracy()
+            accuracies, totals = experiment._lemma_accuracy()
         all_tag_accuracies.append(accuracies)
         all_totals.append(totals)
     return (
@@ -354,34 +416,54 @@ def all_accuracy_average(
     )
 
 
-def collect_experiments(
-    directory: str, morphlex_vocab: str, pretrained_vocab: str
-) -> List[Experiment]:
-    """Collect model predictions in the directory. If the directory contains other directories, it will recurse into it."""
-    experiments: List[Experiment] = []
-    root = Path(directory)
-    directories = [d for d in root.iterdir() if d.is_dir()]
-    if directories:
-        experiments.extend(
-            [
-                experiment
-                for d in directories
-                for experiment in collect_experiments(
-                    str(d),
-                    morphlex_vocab=morphlex_vocab,
-                    pretrained_vocab=pretrained_vocab,
-                )
-            ]
-        )
-        return experiments
-    # No directories found
-    else:
-        return [
-            Experiment.from_file(root, Path(morphlex_vocab), Path(pretrained_vocab))
-        ]
+def collect_evaluation(
+    predictions: Path,
+    fields: Tuple[Fields, ...],
+):
+    """Collect the necessary files for an evaluation."""
+    ds = FieldedDataset.from_file(str(predictions), fields=fields)
 
 
-def format_results(results: Tuple[Measures, Measures]) -> str:
+# def collect_experiments(
+#     directory: str, morphlex_vocab: str, pretrained_vocab: str
+# ) -> List[Experiment]:
+#     """Collect model predictions in the directory. If the directory contains other directories, it will recurse into it."""
+#     experiments: List[Experiment] = []
+#     root = Path(directory)
+#     directories = [d for d in root.iterdir() if d.is_dir()]
+#     if directories:
+#         experiments.extend(
+#             [
+#                 experiment
+#                 for d in directories
+#                 for experiment in collect_experiments(
+#                     str(d),
+#                     morphlex_vocab=morphlex_vocab,
+#                     pretrained_vocab=pretrained_vocab,
+#                 )
+#             ]
+#         )
+#         return experiments
+#     # No directories found
+#     else:
+#         return [
+#             Experiment.from_file(root, Path(morphlex_vocab), Path(pretrained_vocab))
+#         ]
+
+
+def format_result(results: Tuple[Measures, Measures]) -> str:
+    """Format the Accuracy results for pretty printing."""
+
+    def rows(results: Tuple[Measures, Measures]) -> Iterable[str]:
+        accuracies, totals = results
+        keys = accuracies.keys()
+        for key in keys:
+            yield f"{key:<20}: {accuracies[key]*100:>02.2f}, {totals[key]:>}"
+
+    return "\n".join(rows(results))
+
+
+def format_results(results: Tuple[Measures_std, Measures_std]) -> str:
     """Format the Accuracy results for pretty printing."""
 
     def rows(results: Tuple[Measures, Measures]) -> Iterable[str]:

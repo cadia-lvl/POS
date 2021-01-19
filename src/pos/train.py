@@ -5,21 +5,19 @@ During training this module handles:
 - Epochs (iterations) and evaluation.
 - Schedulers and optimizers. 
 """
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import logging
 from datetime import datetime
 from functools import partial
 from math import inf
 
 from torch.nn import CrossEntropyLoss, Module
-from torch.nn.modules.container import ModuleList
 from torch.optim import Optimizer, SGD, Adam, SparseAdam
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 from torch.nn.utils import clip_grad_norm_
 from torch import Tensor, no_grad, numel, cat, zeros_like, log_softmax, stack
 from torch.utils.data import DataLoader
 
-from pos.evaluate import Experiment
 
 from .data import (
     PAD_ID,
