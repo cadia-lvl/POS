@@ -32,6 +32,7 @@ def map_to_chars_and_index(
     """Map a sequence to characters then to indices."""
     SOS_l = [w2i[SOS]] if add_sos else []
     EOS_l = [w2i[EOS]] if add_eos else []
+    # (tokens, chars)
     return pad_sequence(
         [
             Tensor(
@@ -61,6 +62,7 @@ def map_to_chars_batch(
         copy_into_larger_tensor(t, t.new_zeros(size=(max_words, max_chars)))
         for t in sents_padded
     ]
+    # (b, tokens, chars)
     return (
         pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
         .reshape(shape=(-1, max_chars))

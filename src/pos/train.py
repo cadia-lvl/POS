@@ -124,11 +124,7 @@ def get_criterion(
         """Combine the losses with their corresponding weights."""
         return (
             loss(
-                # The CharDecoder might output longer sequences than the expected output.
-                # We need to make their lengths match.
-                pred[:, : batch[MODULE_TO_BATCHKEY[key]].shape[1], :].reshape(
-                    (-1, pred.shape[-1])
-                ),
+                pred.reshape((-1, pred.shape[-1])),
                 batch[MODULE_TO_BATCHKEY[key]].to(pred.device).view((-1)),
             )
             * decoders[key].weight
@@ -184,6 +180,13 @@ def run_batch(
         optimizer.zero_grad()
 
     preds: Dict[Modules, Tensor] = model(batch)
+    if criterion:
+        # The CharDecoder might output longer sequences than the targets.
+        # We need to make the lengths match the target.
+        preds = {
+            key: pred[:, : batch[MODULE_TO_BATCHKEY[key]].shape[1], :]
+            for key, pred in preds.items()
+        }
     # (b, seq, features)
     losses = {
         key: criterion(key, pred, batch) if criterion else Tensor([0.0])
