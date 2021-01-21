@@ -458,16 +458,18 @@ class CharacterDecoder(Decoder):
         """Get the next character (as an index for embedding) timestep to feed the model."""
         if timestep == max_timestep:
             return None
-        sos_sequence = Tensor(
-            [vocab_map.w2i[SOS]] * previous_predictions.shape[0],
-            device=previous_predictions.device,
-        ).long()
+        sos_sequence = (
+            Tensor([vocab_map.w2i[SOS]] * previous_predictions.shape[0])
+            .long()
+            .to(previous_predictions.device)
+        )
         if timestep == 0:  # First timestep
             return sos_sequence
-        pad_sequence = Tensor(
-            [vocab_map.w2i[PAD]] * previous_predictions.shape[0],
-            device=previous_predictions.device,
-        ).long()
+        pad_sequence = (
+            Tensor([vocab_map.w2i[PAD]] * previous_predictions.shape[0])
+            .long()
+            .to(previous_predictions.device)
+        )
         # Otherwise, we will feed previous predictions.
         last_timestep_idxs = previous_predictions[:, timestep - 1, :].argmax(dim=1)
         equal_sos = last_timestep_idxs == sos_sequence
