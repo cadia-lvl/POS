@@ -4,9 +4,6 @@ TRAIN=$2
 TEST=$3
 
 mkdir -p $OUT_DIR
-echo $OUT_DIR
-echo $TRAIN
-echo $TEST
 shift; shift; shift
 echo $*
 #    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
