@@ -152,6 +152,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--save_vocab/--no_save_vocab", default=False)
 @click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
 @click.option("--tagger_weight", default=1.0, help="Value to multiply tagging loss")
+@click.option("--tagger_embedding", default="bilstm", help="The embedding to feed to the Tagger, see pos.model.Modules.")
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option("--lemmatizer_weight", default=1.0, help="Value to multiply lemmatizer loss")
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
@@ -264,6 +265,7 @@ def train_and_tag(**kwargs):
         decoders[Modules.Tagger] = Tagger(
             vocab_map=dicts[Dicts.FullTag],
             input_dim=encoder.output_dim,
+            embedding=Modules(kwargs["tagger_embedding"]),
             weight=kwargs["tagger_weight"],
         )
     if kwargs["lemmatizer"]:

@@ -543,15 +543,18 @@ class CharacterDecoder(Decoder):
 class Tagger(Decoder):
     """A tagger; accept some tensor input and return logits over classes."""
 
-    def __init__(self, vocab_map: VocabMap, input_dim, weight=1):
+    def __init__(
+        self, vocab_map: VocabMap, input_dim, weight=1, embedding=Modules.BiLSTM
+    ):
         """Initialize."""
         super().__init__()
         self.vocab_map = vocab_map
-        output_dim = len(vocab_map)
-        self.tagger = nn.Linear(input_dim, output_dim)
-        nn.init.xavier_uniform_(self.tagger.weight)
-        self._output_dim = output_dim
+        self._output_dim = len(vocab_map)
         self._weight = weight
+        self.embedding = embedding
+
+        self.tagger = nn.Linear(input_dim, self.output_dim)
+        nn.init.xavier_uniform_(self.tagger.weight)
 
     @property
     def output_dim(self) -> int:
@@ -568,7 +571,7 @@ class Tagger(Decoder):
     ) -> Tensor:
         """Run the decoder on the batch."""
         context = torch.cat(
-            tuple(emb for key, emb in encoded.items() if key in {Modules.BiLSTM}),
+            tuple(emb for key, emb in encoded.items() if key in {self.embedding}),
             dim=2,
         )
         return self.tagger(context)

@@ -4,9 +4,6 @@ TRAIN=$2
 TEST=$3
 
 mkdir -p $OUT_DIR
-echo $OUT_DIR
-echo $TRAIN
-echo $TEST
 shift; shift; shift
 echo $*
 #    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
@@ -31,17 +28,15 @@ train-and-tag \
 "$TEST" \
 "$OUT_DIR" \
 --tagger \
+--tagger_embedding bert \
 --bert_encoder electra-small-pytorch \
---known_chars_file data/extra/characters_training.txt \
---char_lstm_layers 1 \
---char_emb_dim 128 \
---main_lstm_dim 256 \
+--main_lstm_dim 128 \
 --main_lstm_layers 1 \
 --label_smoothing 0.1 \
 --epochs 20 \
 --batch_size 8 \
 --save_vocab \
 --save_model \
---optimizer sgd \
---learning_rate 5e-2 \
+--optimizer adam \
+--learning_rate 5e-5 \
 $*

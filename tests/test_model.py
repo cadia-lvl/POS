@@ -62,7 +62,10 @@ def test_encoder(encoder: Encoder, data_loader):
         assert embs[Modules.BiLSTM].requires_grad == True
 
 
-def test_tagger(encoder, data_loader, tagger_module):
+def test_tagger(encoder, data_loader, vocab_maps):
+    tagger_module = Tagger(
+        vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim
+    )
     for batch in data_loader:
         embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         tag_embs = tagger_module(embs, batch)
