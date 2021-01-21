@@ -493,7 +493,7 @@ class CharacterDecoder(Decoder):
         )
         # (b*s, f) = (num_tokens, features)
         context = context.reshape(b * s, f)
-        # (1, b*s, f)
+        # (layers, b*s, f)
         hidden = zeros(
             size=(self.num_layers, b * s, self.hidden_dim), device=context.device
         )
@@ -521,7 +521,9 @@ class CharacterDecoder(Decoder):
             emb_chars = self.dropout(self.sparse_embedding(next_char_input))
             rnn_in = cat((emb_chars, context), dim=1)
             if self.char_attention:
-                char_attention = self.attention(hidden.squeeze(), characters_rnn)
+                char_attention = self.attention(
+                    hidden.view(hidden.shape[1], -1), characters_rnn
+                )
                 rnn_in = cat((rnn_in, char_attention), dim=1)
             # (b, 1, f), a single timestep
             rnn_in = rnn_in.unsqueeze(1)

@@ -75,6 +75,7 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
         hidden_dim=encoder.output_dim,
         context_dim=encoder.output_dim,
         emb_dim=64,
+        num_layers=2,
         attention_dim=embs[Modules.CharactersToTokens].output_dim,
         char_attention=True,
     )
