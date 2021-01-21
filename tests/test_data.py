@@ -217,6 +217,14 @@ def test_collate_fn(ds_lemma):
             3,
             2,
         ]  # These sentences are 1, 3, 2 tokens long
+        assert list(batch[BATCH_KEYS.TOKEN_CHARS_LENS]) == [
+            2,
+            5,
+            2,
+            4,
+            2,
+            7,
+        ]
 
 
 def test_tokenizer_preprocessing_and_postprocessing(

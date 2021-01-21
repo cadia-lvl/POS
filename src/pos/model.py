@@ -487,8 +487,8 @@ class CharacterDecoder(Decoder):
         b, s, f = (*context.shape,)
         # 1 for EOS
         c = (
-            max(batch[BATCH_KEYS.TOKEN_CHARS_LENS]) + 1
-            if self.training
+            batch[BATCH_KEYS.TARGET_LEMMAS].shape[1]
+            if BATCH_KEYS.TARGET_LEMMAS in batch
             else max(batch[BATCH_KEYS.TOKEN_CHARS_LENS]) + self.MAX_SEQUENCE_ADDITIONAL
         )
         # (b*s, f) = (num_tokens, features)
