@@ -13,7 +13,7 @@ do
     sbatch \
     --output="$OUT_DIR/slurm-%j.out" \
     --gres=gpu \
-    --mem=10G \
+    --mem=20G \
     --wrap="pos \
     train-and-tag \
     $DATA_DIR/otb/${fold}TM.plain \
