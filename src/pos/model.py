@@ -347,6 +347,7 @@ class CharacterDecoder(Decoder):
         hidden_dim,
         context_dim,
         emb_dim,
+        num_layers=1,
         attention_dim=0,
         char_attention=False,
         dropout=0.0,
@@ -355,6 +356,7 @@ class CharacterDecoder(Decoder):
         """Initialize the model."""
         super().__init__()
         self.vocab_map = vocab_map
+        self.num_layers = num_layers
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
         self.attention_dim = attention_dim
@@ -374,8 +376,9 @@ class CharacterDecoder(Decoder):
             + (self.attention_dim if self.char_attention else 0)
         )
         self.rnn = nn.LSTM(
-            rnn_in_dim,
-            self.hidden_dim,
+            input_size=rnn_in_dim,
+            hidden_size=self.hidden_dim,
+            num_layers=self.num_layers,
             batch_first=True,
         )
 
@@ -388,7 +391,8 @@ class CharacterDecoder(Decoder):
         }
         if self.char_attention:
             self.attention = MultiplicativeAttention(
-                encoder_dim=self.attention_dim, decoder_dim=self.hidden_dim
+                encoder_dim=self.attention_dim,
+                decoder_dim=self.hidden_dim * self.num_layers,
             )
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
 
@@ -488,8 +492,12 @@ class CharacterDecoder(Decoder):
         # (b*s, f) = (num_tokens, features)
         context = context.reshape(b * s, f)
         # (1, b*s, f)
-        hidden = zeros(size=(1, b * s, self.hidden_dim), device=context.device)
-        cell = zeros(size=(1, b * s, self.hidden_dim), device=context.device)
+        hidden = zeros(
+            size=(self.num_layers, b * s, self.hidden_dim), device=context.device
+        )
+        cell = zeros(
+            size=(self.num_layers, b * s, self.hidden_dim), device=context.device
+        )
         if self.char_attention:
             # (b*s, c, f)
             characters_rnn = encoded[Modules.CharactersToTokens][0]
