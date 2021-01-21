@@ -62,7 +62,7 @@ def map_to_chars_batch(
         copy_into_larger_tensor(t, t.new_zeros(size=(max_words, max_chars)))
         for t in sents_padded
     ]
-    # (b, tokens, chars)
+    # (b * tokens, chars)
     return (
         pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
         .reshape(shape=(-1, max_chars))

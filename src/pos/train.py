@@ -181,9 +181,15 @@ def run_batch(
 
     preds: Dict[Modules, Tensor] = model(batch)
     if criterion:
+        for key, pred in preds.items():
+            log.debug(
+                f"Running batch. Pred shape: {pred.shape}, target shape: {batch[MODULE_TO_BATCHKEY[key]].shape}"
+            )
         # The CharDecoder might output longer sequences than the targets.
         # We need to make the lengths match the target.
         preds = {
+            # (b*s, c, f)
+            # The target is (b*s, c)
             key: pred[:, : batch[MODULE_TO_BATCHKEY[key]].shape[1], :]
             for key, pred in preds.items()
         }
