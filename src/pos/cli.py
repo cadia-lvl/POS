@@ -278,8 +278,6 @@ def train_and_tag(**kwargs):
             else 0,
             char_attention=Modules.CharactersToTokens in embs
             and kwargs["lemmatizer_char_attention"],
-            char_rnn_inital=False,
-            teacher_forcing=kwargs["lemmatizer_teacher_forcing"],
             dropout=kwargs["emb_dropouts"],
             weight=kwargs["lemmatizer_weight"],
         )

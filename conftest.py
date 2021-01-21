@@ -112,7 +112,6 @@ def lemmatizer_module(vocab_maps, encoder) -> CharacterDecoder:
         hidden_dim=encoder.output_dim,
         context_dim=encoder.output_dim,
         emb_dim=20,
-        teacher_forcing=0.0,
         dropout=0.0,
     )
 

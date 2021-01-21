@@ -3,25 +3,24 @@ from enum import Enum
 import logging
 from typing import List, Mapping, Sequence, Tuple, Any, Dict, Optional, cast
 import abc
-import random
 
 import numpy as np
 import torch
-from torch import Tensor, stack, softmax, cat, zeros_like, randn, zeros
-from torch.cuda import device
-from torch.nn.modules.activation import MultiheadAttention
+from torch import Tensor, stack, softmax, cat, randn, zeros
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn as nn
 from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerFast, AutoConfig
 
-from . import core
-from .core import Sentence, Sentences, VocabMap
-from .data import (
+from pos import core
+from pos.core import Sentence, Sentences, VocabMap
+from pos.data import (
     map_to_index,
     map_to_chars_batch,
     BATCH_KEYS,
     map_to_index_batch,
     get_initial_token_mask,
+    SOS,
+    PAD,
 )
 
 
@@ -340,6 +339,8 @@ class CharacterDecoder(Decoder):
     Code adjusted from: https://github.com/bentrevett/pytorch-seq2seq/
     """
 
+    MAX_SEQUENCE_ADDITIONAL = 20
+
     def __init__(
         self,
         vocab_map: VocabMap,
@@ -348,23 +349,14 @@ class CharacterDecoder(Decoder):
         emb_dim,
         attention_dim=0,
         char_attention=False,
-        char_rnn_inital=False,
-        teacher_forcing=0.0,
         dropout=0.0,
         weight=1,
     ):
         """Initialize the model."""
         super().__init__()
         self.vocab_map = vocab_map
-        self.teacher_forcing = (
-            teacher_forcing  # if rand < teacher_forcing we will use teacher forcing.
-        )
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
-        self.char_rnn_initial = char_rnn_inital
-        if self.char_rnn_initial:  # If we initialize with the last state of CharRNN
-            log.warn("Overwriting GRUDecoder hidden dim. We initialize with CharRNN")
-            self.hidden_dim = attention_dim
         self.attention_dim = attention_dim
         self._output_dim = len(
             vocab_map
@@ -396,7 +388,7 @@ class CharacterDecoder(Decoder):
         }
         if self.char_attention:
             self.attention = MultiplicativeAttention(
-                encoder_dim=self.hidden_dim, decoder_dim=self.attention_dim
+                encoder_dim=self.attention_dim, decoder_dim=self.hidden_dim
             )
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
 
@@ -454,80 +446,85 @@ class CharacterDecoder(Decoder):
 
     @staticmethod
     def _get_char_input_next_timestep(
+        timestep: int,
         vocab_map: VocabMap,
-        batch: Dict[BATCH_KEYS, Any],
-        previous_predictions: Optional[Tensor] = None,
-        teacher_forcing=0.5,
-        training=True,
-    ):
-        """Get the next character timestep to feed the model."""
-        if previous_predictions is None:  # First timestep
-            # We assume that tokens and lemmas work equally well for the first timestep (PAD or SOS)
-            return map_to_chars_batch(batch[BATCH_KEYS.TOKENS], vocab_map.w2i)[:, 0]
-        previous_timestep = previous_predictions.shape[1] - 1  # -1 for 0 indexing
-        # We have the targets, are training and teacher forcing is set
-        if (
-            BATCH_KEYS.TARGET_LEMMAS in batch
-            and training
-            and random.random() < teacher_forcing
-        ):
-            return batch[BATCH_KEYS.TARGET_LEMMAS][:, previous_timestep]
+        previous_predictions: Tensor,
+        max_timestep: int,
+    ) -> Optional[Tensor]:
+        """Get the next character (as an index for embedding) timestep to feed the model."""
+        if timestep == max_timestep:
+            return None
+        sos_sequence = Tensor(
+            [vocab_map.w2i[SOS]] * previous_predictions.shape[0],
+            device=previous_predictions.device,
+        ).long()
+        if timestep == 0:  # First timestep
+            return sos_sequence
+        pad_sequence = Tensor(
+            [vocab_map.w2i[PAD]] * previous_predictions.shape[0],
+            device=previous_predictions.device,
+        ).long()
         # Otherwise, we will feed previous predictions.
-        return previous_predictions[:, previous_timestep, :].argmax(dim=1)
+        last_timestep_idxs = previous_predictions[:, timestep - 1, :].argmax(dim=1)
+        equal_sos = last_timestep_idxs == sos_sequence
+        equal_pad = last_timestep_idxs == pad_sequence
+        if (equal_pad + equal_sos).all():
+            return None
+        else:
+            return last_timestep_idxs
 
     def decode(
         self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
     ) -> Tensor:
         """Run the decoder on the batch."""
         context = encoded[Modules.BiLSTM]
-        b, s, f, c = *context.shape, batch[BATCH_KEYS.TARGET_LEMMAS].shape[1]
+        b, s, f = (*context.shape,)
+        # 1 for EOS
+        c = (
+            max(batch[BATCH_KEYS.TOKEN_CHARS_LENS]) + 1
+            if self.training
+            else max(batch[BATCH_KEYS.TOKEN_CHARS_LENS]) + self.MAX_SEQUENCE_ADDITIONAL
+        )
         # (b*s, f) = (num_tokens, features)
         context = context.reshape(b * s, f)
+        # (1, b*s, f)
+        hidden = zeros(size=(1, b * s, self.hidden_dim), device=context.device)
+        cell = zeros(size=(1, b * s, self.hidden_dim), device=context.device)
         if self.char_attention:
             # (b*s, c, f)
             characters_rnn = encoded[Modules.CharactersToTokens][0]
             # (b*s, f)
             last_hidden_rnn = encoded[Modules.CharactersToTokens][1]
-            if self.char_rnn_initial:
-                hidden = last_hidden_rnn.detach().clone()
-                cell = last_hidden_rnn.detach().clone()
-            else:
-                hidden = zeros(size=(b * s, self.hidden_dim), device=context.device)
-                cell = zeros(size=(b * s, self.hidden_dim), device=context.device)
-        else:
-            hidden = context.detach().clone()
-            cell = context.detach().clone()
-        # (1, b*s, f)
-        hidden = hidden.unsqueeze(dim=0)
-        cell = cell.unsqueeze(dim=0)
         # (b*s, t, f_out)
         predictions = zeros(size=(b * s, c, self.output_dim), device=context.device)
-        # We are training
-        if BATCH_KEYS.TARGET_LEMMAS in batch:
-            for char_idx in range(c):  # Iterate over num_characters
-                # (b)
-                next_char_input = self._get_char_input_next_timestep(
-                    self.vocab_map,
-                    batch,
-                    predictions,
-                    teacher_forcing=self.teacher_forcing,
-                    training=self.training,
-                ).to(core.device)
-                # (b, f)
-                emb_chars = self.dropout(self.sparse_embedding(next_char_input))
-                rnn_in = cat((emb_chars, context), dim=1)
-                if self.char_attention:
-                    char_attention = self.attention(hidden.squeeze(), characters_rnn)
-                    rnn_in = cat((rnn_in, char_attention), dim=1)
-                # (b, 1, f), a single timestep
-                rnn_in = rnn_in.unsqueeze(1)
-                output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
-                predictions[:, char_idx : char_idx + 1, :] = self.fc_out(output)
-        # We decode
-        # TODO: support decoding until EOS/PAD for all
-        else:
-            pass
-        predictions = cast(Tensor, predictions)
+
+        char_idx = 0
+        # (b)
+        next_char_input = self._get_char_input_next_timestep(
+            timestep=char_idx,
+            vocab_map=self.vocab_map,
+            previous_predictions=predictions,
+            max_timestep=c - 1,
+        )
+        while next_char_input is not None:
+            # (b, f)
+            emb_chars = self.dropout(self.sparse_embedding(next_char_input))
+            rnn_in = cat((emb_chars, context), dim=1)
+            if self.char_attention:
+                char_attention = self.attention(hidden.squeeze(), characters_rnn)
+                rnn_in = cat((rnn_in, char_attention), dim=1)
+            # (b, 1, f), a single timestep
+            rnn_in = rnn_in.unsqueeze(1)
+            output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
+            predictions[:, char_idx : char_idx + 1, :] = self.fc_out(output)
+            # For next iteration
+            char_idx += 1
+            next_char_input = self._get_char_input_next_timestep(
+                timestep=char_idx,
+                vocab_map=self.vocab_map,
+                previous_predictions=predictions,
+                max_timestep=c - 1,
+            )
         return predictions
 
 

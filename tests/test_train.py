@@ -76,7 +76,6 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
         context_dim=encoder.output_dim,
         emb_dim=64,
         attention_dim=embs[Modules.CharactersToTokens].output_dim,
-        char_rnn_inital=True,
         char_attention=True,
     )
     abl_tagger = ABLTagger(encoder=encoder, decoders=decoders)

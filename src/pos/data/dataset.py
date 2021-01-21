@@ -2,19 +2,14 @@
 
 
 from functools import reduce
-from itertools import chain
 from operator import add
-from re import sub
-from typing import List, Tuple, cast
+from typing import List, Tuple
 import logging
 
 from transformers.tokenization_utils import PreTrainedTokenizer
-from transformers.tokenization_utils_base import BatchEncoding
-from torch import Tensor
-from torch.nn.utils.rnn import pad_sequence
 
-from pos.data.tokenizer import load_tokenizer, get_initial_token_mask
-from pos.core import FieldedDataset, Fields, Sentence, Sentences
+from pos.data.tokenizer import get_initial_token_mask
+from pos.core import FieldedDataset, Sentences
 
 log = logging.getLogger(__name__)
 

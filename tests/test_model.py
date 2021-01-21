@@ -84,7 +84,7 @@ def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
         tok_embs = char_decoder(embs, batch)
         assert tok_embs.shape == (
             9,
-            8,
+            8,  # 8 + 20 - 1 if eval.
             len(vocab_maps[Dicts.Chars]),
         )  # 9 tokens, 8 chars at most, each char emb
         assert tok_embs.requires_grad == True

@@ -8,10 +8,13 @@ from torch import (
 )
 from torch.nn.utils.rnn import pad_sequence
 
-from .. import core
-from ..core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset
+from pos import core
+from pos.core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset
 from .constants import UNK, SOS, EOS, PAD, BATCH_KEYS
-from .pretrained import read_morphlex, read_pretrained_word_embeddings
+from .pretrained import (
+    read_morphlex,
+    read_pretrained_word_embeddings,
+)
 
 
 def map_to_index(sentence: Sentence, w2i: Dict[str, int]) -> Tensor:
@@ -91,6 +94,9 @@ def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[BATCH_KEYS, Any]:
         batch_dict[BATCH_KEYS.FULL_TAGS] = tuple(element[1] for element in batch)
     if len(batch[0]) >= 3:  # lastly, the lemmas. Usually only for training.
         batch_dict[BATCH_KEYS.LEMMAS] = tuple(element[2] for element in batch)
+    batch_dict[BATCH_KEYS.TOKEN_CHARS_LENS] = tuple(
+        len(token) for sent in batch_dict[BATCH_KEYS.TOKENS] for token in sent  # type: ignore
+    )
     batch_dict[BATCH_KEYS.LENGTHS] = tuple(
         len(x) for x in batch_dict[BATCH_KEYS.TOKENS]  # type: ignore
     )

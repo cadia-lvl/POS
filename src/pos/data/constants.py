@@ -24,3 +24,4 @@ class BATCH_KEYS(Enum):
     LEMMAS = "lemmas"
     TARGET_LEMMAS = "target_lemmas"
     LENGTHS = "lens"
+    TOKEN_CHARS_LENS = "token_char_lens"

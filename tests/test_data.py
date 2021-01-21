@@ -211,7 +211,7 @@ def test_collate_fn(ds_lemma):
     dl = DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)
     assert len(dl) == 1
     for batch in dl:
-        assert len(batch) == 4  # The keys
+        assert len(batch) == 5  # The keys
         assert list(batch[BATCH_KEYS.LENGTHS]) == [
             1,
             3,

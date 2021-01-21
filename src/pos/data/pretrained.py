@@ -5,7 +5,7 @@ import logging
 from torch import Tensor, zeros
 from tqdm import tqdm
 
-from ..core import Vocab, VocabMap
+from pos.core import Vocab, VocabMap
 from .constants import PAD, PAD_ID, UNK, UNK_ID
 
 log = logging.getLogger(__name__)
