@@ -556,7 +556,7 @@ class Tagger(Decoder):
     ) -> Tensor:
         """Run the decoder on the batch."""
         context = torch.cat(
-            tuple(emb for key, emb in encoded.items() if key in {Modules.BERT}),
+            tuple(emb for key, emb in encoded.items() if key in {Modules.BiLSTM}),
             dim=2,
         )
         return self.tagger(context)
