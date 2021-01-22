@@ -168,6 +168,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--pretrained_word_embeddings_file", default=None, help="A file which contains pretrained word embeddings. See implementation for supported formats.")
 @click.option("--word_embedding_dim", default=0, help="The word/token embedding dimension. Set to 0 to disable word embeddings.")
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
+@click.option("--bert_layers", default="weights", help="How to construct the embeddings from the BERT layers. 'weights' are learnt weights. Other values default to the last layer")
 @click.option("--main_lstm_layers", default=1, help="The number of bilstm layers to use in the encoder.")
 @click.option("--main_lstm_dim", default=512, help="The dimension of the lstm to use in the encoder.")
 @click.option("--emb_dropouts", default=0.0, help="The dropout to use for Embeddings.")
@@ -209,7 +210,9 @@ def train_and_tag(**kwargs):
     embs: Dict[Modules, Embedding] = {}
     if kwargs["bert_encoder"]:
         embs[Modules.BERT] = TransformerEmbedding(
-            kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"]
+            kwargs["bert_encoder"],
+            dropout=kwargs["emb_dropouts"],
+            layers=kwargs["bert_layers"],
         )
         train_ds = chunk_dataset(
             unchunked_train_ds,

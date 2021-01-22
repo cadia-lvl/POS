@@ -196,7 +196,7 @@ class CharacterAsWordEmbedding(Embedding):
 class TransformerEmbedding(Embedding):
     """An embedding of a sentence after going through a Transformer."""
 
-    def __init__(self, model_path: str, dropout=0.0):
+    def __init__(self, model_path: str, layers="weights", dropout=0.0):
         """Initialize it be reading the config, model and tokenizer."""
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
@@ -209,7 +209,9 @@ class TransformerEmbedding(Embedding):
         self.hidden_dim = self.config.hidden_size
         self.max_length = self.tokenizer.max_len_single_sentence
         self.dropout = nn.Dropout(p=dropout)
-        self.layer_weights = nn.parameter.Parameter(randn(self.num_layers))
+        self.layers = layers
+        if self.layers == "weights":
+            self.layer_weights = nn.parameter.Parameter(randn(self.num_layers))
 
     def preprocess(self, batch: Sequence[Sentence]) -> Dict[str, Tensor]:
         """Preprocess the sentence batch."""
@@ -252,15 +254,18 @@ class TransformerEmbedding(Embedding):
         )
         # Tuple[(b, s, f), ...]
         output = outputs["hidden_states"][-self.num_layers :]
-        weights = nn.functional.softmax(self.layer_weights, dim=0)
-        weighted_layers = output[0] * weights[0]
-        for l in range(1, self.num_layers):
-            weighted_layers += output[l] * weights[l]
+        emb = outputs["last_hidden_state"]
+        if self.layers == "weights":
+            weights = nn.functional.softmax(self.layer_weights, dim=0)
+            weighted_layers = output[0] * weights[0]
+            for l in range(1, self.num_layers):
+                weighted_layers += output[l] * weights[l]
+            emb = weighted_layers
         # Now we map the subtokens to tokens.
         tokens_emb = []
-        for b in range(weighted_layers.shape[0]):
+        for b in range(emb.shape[0]):
             initial_token_mask = batch["initial_token_masks"][b]
-            output_sent = weighted_layers[b, :, :]
+            output_sent = emb[b, :, :]
             tokens_emb.append(output_sent[initial_token_mask, :])
         padded = pad_sequence(tokens_emb, batch_first=True)
         return self.dropout(padded)

@@ -55,6 +55,15 @@ def test_transformer_embedding_electra_small(electra_model, data_loader):
         assert embs.requires_grad == True
 
 
+def test_transformer_embedding_electra_small_only_last(electra_model, data_loader):
+    wemb = TransformerEmbedding(electra_model, layers="last")
+    # The TransformerEmbedding expects the input to be a Sentence, not vectors.
+    for batch in data_loader:
+        embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
+        assert embs.shape == (3, 3, 256)
+        assert embs.requires_grad == True
+
+
 def test_encoder(encoder: Encoder, data_loader):
     for batch in data_loader:
         embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
