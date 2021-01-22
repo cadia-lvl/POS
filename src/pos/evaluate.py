@@ -369,9 +369,7 @@ class TaggingLemmatizationEvaluation(TaggingEvaluation, LemmatizationEvaluation)
         return confusion
 
 
-def get_average(
-    accuracies: List[Dict[str, Union[float, int]]]
-) -> Dict[str, Tuple[float, float]]:
+def get_average(accuracies: List[Measures]) -> Measures_std:
     """Get the average (accuracy, std_dev) and (total, std_dev) of a list of accuracies."""
     keys = list(accuracies[0].keys())
     totals: Dict[str, Tuple[float, float]] = {}
