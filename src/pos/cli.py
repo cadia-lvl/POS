@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """The main entrypoint to training and running a POS-tagger."""
+from collections import Counter
 from functools import reduce
 from operator import add
 import pickle
@@ -432,8 +433,8 @@ def tag(model_file, data_in, output, device, contains_tags):
 @click.option("--pretrained_vocab", help="The location of the pretrained vocabulary.", default=PRETRAINED_VOCAB_PATH)
 @click.option("--train_tokens", help="The location of the training tokens used to train the model.", default=None)
 @click.option("--train_lemmas", help="The location of the training lemmas used to train the model.", default=None)
-@click.option("--criteria", type=click.Choice(["accuracy", "profile"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
-@click.option("--feature", type=click.Choice(["tags", "lemmas", "confusion"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
+@click.option("--criteria", type=click.Choice(["accuracy", "profile", "confusion"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
+@click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
 # fmt: on
 def evaluate_predictions(
     predictions,
@@ -452,31 +453,27 @@ def evaluate_predictions(
         fields: The fields present in the test file. Separated with ',', f.ex. 'tokens,gold_tags,tags'."""
     ds = FieldedDataset.from_file(predictions, fields=tuple(fields.split(",")))
     train_tokens = Vocab.from_file(train_tokens)
-    if feature == "tags":
-        morphlex_vocab = Vocab.from_file(morphlex_vocab)
-        pretrained_vocab = Vocab.from_file(pretrained_vocab)
-        evaluation = evaluate.TaggingEvaluation(
+    if criteria == "accuracy":
+        result = evaluate.get_accuracy_from_files(
+            feature,
             ds,
-            train_vocab=train_tokens,
-            external_vocabs=evaluate.ExternalVocabularies(
-                morphlex_vocab, pretrained_vocab
-            ),
+            train_tokens=train_tokens,
+            train_lemmas=train_lemmas,
+            morphlex_vocab=morphlex_vocab,
+            pretrained_vocab=pretrained_vocab,
         )
-        if criteria == "accuracy":
-            click.echo(evaluate.format_result(evaluation._tagging_accuracy(ds)))
-        elif criteria == "profile":
-            click.echo(evaluate.format_profile(evaluation.tagging_profile(ds)))
-
-    elif feature == "lemmas":
-        train_lemmas = Vocab.from_file(train_lemmas)
-        evaluation = evaluate.LemmatizationEvaluation(
-            test_dataset=ds, train_vocab=train_tokens, train_lemmas=train_lemmas
+        click.echo(evaluate.format_result(result))
+    elif criteria == "profile":
+        result = evaluate.get_profile_from_files(
+            feature,
+            ds,
+            train_tokens=train_tokens,
+            train_lemmas=train_lemmas,
+            morphlex_vocab=morphlex_vocab,
+            pretrained_vocab=pretrained_vocab,
         )
-        if criteria == "accuracy":
-            click.echo(evaluate.format_result(evaluation._lemma_accuracy(ds)))
-        elif criteria == "profile":
-            click.echo(evaluate.format_profile(evaluation.lemma_profile(ds)))
-    elif feature == "confusion":
+        click.echo(evaluate.format_profile(result))
+    else:  # confusion
         train_lemmas = Vocab.from_file(train_lemmas)
         morphlex_vocab = Vocab.from_file(morphlex_vocab)
         pretrained_vocab = Vocab.from_file(pretrained_vocab)
@@ -491,52 +488,50 @@ def evaluate_predictions(
         click.echo(evaluation.lemma_tag_confusion_matrix())
 
 
-# @cli.command()
-# @click.argument("directory")
-# @click.argument("fields")
-# @click.option(
-#     "--morphlex_vocab",
-#     help="The location of the morphlex vocabulary.",
-#     default=MORPHLEX_VOCAB_PATH,
-# )
-# @click.option(
-#     "--pretrained_vocab",
-#     help="The location of the pretrained vocabulary.",
-#     default=PRETRAINED_VOCAB_PATH,
-# )
-# @click.option(
-#     "--morphlex_vocab",
-#     help="The location of the morphlex vocabulary.",
-#     default=MORPHLEX_VOCAB_PATH,
-# )
-# @click.option(
-#     "--criteria",
-#     type=click.Choice(["accuracy", "profile"], case_sensitive=False),
-#     help="Which criteria to evaluate.",
-#     default="accuracy",
-# )
-# # fmt: on
-# def evaluate_experiments(
-#     directory, pretrained_vocab, morphlex_vocab, criteria, profile
-# ):
-#     """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
-#     experiments = evaluate.collect_experiments(
-#         directory, morphlex_vocab, pretrained_vocab
-#     )
-#     click.echo(
-#         evaluate.format_results(
-#             evaluate.all_accuracy_average(experiments, type=criteria)
-#         )
-#     )
-#     if profile:
-#         error_profile = reduce(
-#             add, [experiment.error_profile(type=criteria) for experiment in experiments]
-#         )
-#         click.echo(evaluate.format_profile(error_profile, up_to=60))
-#         # Only possible if predictions contain both lemmas and tags
-#         if "Fix me" == "Fix me":
-#             confusion_matrix = reduce(
-#                 add,
-#                 [experiment.lemma_tag_confusion_matrix() for experiment in experiments],
-#             )
-#             click.echo(evaluate.format_profile(confusion_matrix, up_to=60))
+# fmt: off
+@cli.command()
+@click.argument("directories", nargs=-1)
+@click.argument("fields")
+@click.option("--morphlex_vocab", help="The location of the morphlex vocabulary.", default=MORPHLEX_VOCAB_PATH)
+@click.option("--pretrained_vocab", help="The location of the pretrained vocabulary.", default=PRETRAINED_VOCAB_PATH)
+@click.option("--criteria", type=click.Choice(["accuracy", "profile"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
+@click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
+# fmt: on
+def evaluate_experiments(
+    directories, fields, pretrained_vocab, morphlex_vocab, criteria, feature
+):
+    """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
+    directories = [pathlib.Path(directory) for directory in directories]
+    fields = fields.split(",")
+    accuracy_results = []
+    profile = Counter()
+    for directory in directories:
+        ds = FieldedDataset.from_file(str(directory / "predictions.tsv"), fields=fields)
+        train_tokens = str(directory / "known_toks.txt")
+        train_lemmas = str(directory / "known_lemmas.txt")
+        if criteria == "accuracy":
+            accuracy_results.append(
+                evaluate.get_accuracy_from_files(
+                    feature,
+                    ds,
+                    train_tokens=train_tokens,
+                    train_lemmas=train_lemmas,
+                    morphlex_vocab=morphlex_vocab,
+                    pretrained_vocab=pretrained_vocab,
+                )
+            )
+        elif criteria == "profile":
+            profile += evaluate.get_profile_from_files(
+                feature,
+                ds,
+                train_tokens=train_tokens,
+                train_lemmas=train_lemmas,
+                morphlex_vocab=morphlex_vocab,
+                pretrained_vocab=pretrained_vocab,
+            )
+    if criteria == "accuracy":
+        click.echo(
+            evaluate.format_results(evaluate.all_accuracy_average(accuracy_results))
+        )
+    elif criteria == "profile":
+        click.echo(evaluate.format_profile(profile, up_to=30))

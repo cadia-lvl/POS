@@ -391,64 +391,69 @@ def average(values: List[Union[int, float]]) -> float:
 
 
 def all_accuracy_average(
-    experiments: List[
-        Union[
-            TaggingEvaluation, LemmatizationEvaluation, TaggingLemmatizationEvaluation
-        ]
-    ],
-    type: str = "tags",
-) -> Tuple[Measures, Measures]:
+    accuracies: List[Tuple[Measures, Measures]]
+) -> Tuple[Measures_std, Measures_std]:
     """Return the average of all accuracies."""
-    all_tag_accuracies = []
-    all_totals = []
-    for experiment in experiments:
-        if type == "tags":
-            accuracies, totals = experiment._tagging_accuracy()
-        else:
-            accuracies, totals = experiment._lemma_accuracy()
-        all_tag_accuracies.append(accuracies)
-        all_totals.append(totals)
     return (
-        get_average(all_tag_accuracies),
-        get_average(
-            all_totals,
-        ),
+        get_average([accuracy for accuracy, _ in accuracies]),
+        get_average([total for _, total in accuracies]),
     )
 
 
-def collect_evaluation(
-    predictions: Path,
-    fields: Tuple[Fields, ...],
-):
-    """Collect the necessary files for an evaluation."""
-    ds = FieldedDataset.from_file(str(predictions), fields=fields)
+def get_accuracy_from_files(
+    feature: str,
+    ds: FieldedDataset,
+    train_tokens: str,
+    train_lemmas: str,
+    morphlex_vocab: str,
+    pretrained_vocab: str,
+) -> Tuple[Measures, Measures]:
+    """Get the accuracy results based on the feature and files."""
+    train_vocab = Vocab.from_file(train_tokens)
+    if feature == "tags":
+        morphlex_vocab = Vocab.from_file(morphlex_vocab)
+        pretrained_vocab = Vocab.from_file(pretrained_vocab)
+        evaluation = TaggingEvaluation(
+            test_dataset=ds,
+            train_vocab=train_vocab,
+            external_vocabs=ExternalVocabularies(morphlex_vocab, pretrained_vocab),
+        )
+        return evaluation._tagging_accuracy(ds)
+    else:  # lemmas
+        train_lemmas = Vocab.from_file(train_lemmas)
+        evaluation = LemmatizationEvaluation(
+            test_dataset=ds,
+            train_vocab=train_vocab,
+            train_lemmas=train_lemmas,
+        )
+        return evaluation._lemma_accuracy(ds)
 
 
-# def collect_experiments(
-#     directory: str, morphlex_vocab: str, pretrained_vocab: str
-# ) -> List[Experiment]:
-#     """Collect model predictions in the directory. If the directory contains other directories, it will recurse into it."""
-#     experiments: List[Experiment] = []
-#     root = Path(directory)
-#     directories = [d for d in root.iterdir() if d.is_dir()]
-#     if directories:
-#         experiments.extend(
-#             [
-#                 experiment
-#                 for d in directories
-#                 for experiment in collect_experiments(
-#                     str(d),
-#                     morphlex_vocab=morphlex_vocab,
-#                     pretrained_vocab=pretrained_vocab,
-#                 )
-#             ]
-#         )
-#         return experiments
-#     # No directories found
-#     else:
-#         return [
-#             Experiment.from_file(root, Path(morphlex_vocab), Path(pretrained_vocab))
-#         ]
+def get_profile_from_files(
+    feature: str,
+    ds: FieldedDataset,
+    train_tokens: str,
+    train_lemmas: str,
+    morphlex_vocab: str,
+    pretrained_vocab: str,
+) -> Counter:
+    """Get the error profiles based on the feature and files."""
+    train_vocab = Vocab.from_file(train_tokens)
+    if feature == "tags":
+        morphlex_vocab = Vocab.from_file(morphlex_vocab)
+        pretrained_vocab = Vocab.from_file(pretrained_vocab)
+        evaluation = TaggingEvaluation(
+            test_dataset=ds,
+            train_vocab=train_vocab,
+            external_vocabs=ExternalVocabularies(morphlex_vocab, pretrained_vocab),
+        )
+        return evaluation.tagging_profile(ds)
+    else:  # lemmas
+        train_lemmas = Vocab.from_file(train_lemmas)
+        evaluation = LemmatizationEvaluation(
+            test_dataset=ds, train_vocab=train_vocab, train_lemmas=train_lemmas
+        )
+        return evaluation.lemma_profile(ds)
 
 
 def format_result(results: Tuple[Measures, Measures]) -> str:
