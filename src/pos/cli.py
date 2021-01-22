@@ -177,7 +177,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--epochs", default=20)
 @click.option("--batch_size", default=32)
 @click.option("--optimizer", default="sgd", type=click.Choice(["sgd", "adam"], case_sensitive=False), help="The optimizer to use.")
-@click.option("--scheduler", default="multiply", type=click.Choice(["multiply", "plateau"], case_sensitive=False), help="The learning rate scheduler to use.")
+@click.option("--scheduler", default="multiply", type=click.Choice(["none", "multiply", "plateau"], case_sensitive=False), help="The learning rate scheduler to use.")
 # fmt: on
 def train_and_tag(**kwargs):
     """Train a POS tagger and/or lemmatizer on intpus and write out the tagged test file.

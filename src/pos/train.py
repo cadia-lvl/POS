@@ -137,6 +137,8 @@ def get_scheduler(torch_optimizer, scheduler):
     """Return the training scheduler to use based on options."""
     if scheduler == "multiply":
         return LambdaLR(torch_optimizer, lr_lambda=lambda epoch: 0.95 ** epoch)
+    elif scheduler == "none":
+        return LambdaLR(torch_optimizer, lr_lambda=lambda epoch: 1)
     elif scheduler == "plateau":
         return ReduceLROnPlateau(
             optimizer=torch_optimizer,
