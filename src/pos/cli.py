@@ -455,7 +455,6 @@ def evaluate_predictions(
         predictions: The tagged test file.
         fields: The fields present in the test file. Separated with ',', f.ex. 'tokens,gold_tags,tags'."""
     ds = FieldedDataset.from_file(predictions, fields=tuple(fields.split(",")))
-    train_tokens = Vocab.from_file(train_tokens)
     if criteria == "accuracy":
         result = evaluate.get_accuracy_from_files(
             feature,

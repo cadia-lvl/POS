@@ -27,7 +27,7 @@ def tokens_to_sentences(
             example.append(line)
 
 
-def read_tsv(f) -> Iterable[Optional[Tuple[str, ...]]]:
+def read_tsv(f, sep="\t") -> Iterable[Optional[Tuple[str, ...]]]:
     """Read a .tsv file and return a tuple based on each line. Empty lines are None.
 
     None is appended at then end if the last line in the file is not empty.
@@ -40,7 +40,7 @@ def read_tsv(f) -> Iterable[Optional[Tuple[str, ...]]]:
             yield None
         else:
             empty_sent = False
-            yield line.split("\t")
+            yield line.split(sep)
     if not empty_sent:
         yield None
         log.info("No newline at end of file, handling it.")

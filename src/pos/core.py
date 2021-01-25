@@ -311,10 +311,10 @@ class FieldedDataset(Dataset):
             write_tsv(f, self._iter_for_tsv())
 
     @staticmethod
-    def from_file(filepath: str, fields: Tuple[str, ...] = None):
+    def from_file(filepath: str, fields: Tuple[str, ...] = None, sep="\t"):
         """Construct from a file. By default we assume first there are Tokens, GoldTags, GoldLemmas."""
         with open(filepath) as f:
-            examples = tuple(zip(*tuple(tokens_to_sentences(read_tsv(f)))))
+            examples = tuple(zip(*tuple(tokens_to_sentences(read_tsv(f, sep=sep)))))
         if not fields:
             fields = tuple()
             if len(examples) >= 1:
