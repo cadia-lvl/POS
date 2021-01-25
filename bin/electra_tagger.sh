@@ -28,14 +28,15 @@ train-and-tag \
 "$TEST" \
 "$OUT_DIR" \
 --tagger \
+--tagger_embedding bert \
 --bert_encoder electra-small-pytorch \
---main_lstm_dim 256 \
+--main_lstm_dim 128 \
 --main_lstm_layers 1 \
 --label_smoothing 0.1 \
 --epochs 20 \
---batch_size 8 \
+--batch_size 16 \
 --save_vocab \
 --save_model \
---optimizer sgd \
---learning_rate 5e-2 \
+--optimizer adam \
+--learning_rate 5e-5 \
 $*
