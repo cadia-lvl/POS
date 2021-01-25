@@ -33,10 +33,10 @@ train-and-tag \
 --morphlex_freeze \
 --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
 --known_chars_file data/extra/characters_training.txt \
---char_emb_dim 20 \
---char_lstm_dim 64 \
+--char_emb_dim 40 \
+--char_lstm_dim 128 \
 --char_lstm_layers 1 \
---main_lstm_dim 64 \
+--main_lstm_dim 128 \
 --main_lstm_layers 2 \
 --label_smoothing 0.1 \
 --epochs 40 \
