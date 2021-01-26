@@ -90,7 +90,7 @@ def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
         hidden_dim=hidden_dim,
         context_dim=hidden_dim,
         num_layers=2,
-        emb_dim=emb_dim,
+        char_emb_dim=emb_dim,
     )
     for batch in data_loader:
         embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])

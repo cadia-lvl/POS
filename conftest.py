@@ -111,7 +111,7 @@ def lemmatizer_module(vocab_maps, encoder) -> CharacterDecoder:
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=encoder.output_dim,
         context_dim=encoder.output_dim,
-        emb_dim=20,
+        char_emb_dim=20,
         dropout=0.0,
     )
 

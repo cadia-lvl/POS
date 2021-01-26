@@ -155,28 +155,30 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--tagger_weight", default=1.0, help="Value to multiply tagging loss")
 @click.option("--tagger_embedding", default="bilstm", help="The embedding to feed to the Tagger, see pos.model.Modules.")
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
-@click.option("--lemmatizer_weight", default=1.0, help="Value to multiply lemmatizer loss")
+@click.option("--lemmatizer_weight", default=0.1, help="Value to multiply lemmatizer loss")
+@click.option("--lemmatizer_embedding", default="bilstm", help="The embedding to feed to the Lemmatizer, see pos.model.Modules.")
+@click.option("--lemmatizer_hidden_dim", default=128, help="The hidden dim of the decoder RNN.")
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
 @click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
 @click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
 @click.option("--known_chars_file", default=None, help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
 @click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
 @click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
-@click.option("--char_emb_dim", default=20, help="The embedding size for characters.")
+@click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
 @click.option("--morphlex_embeddings_file", default=None, help="A file which contains the morphological embeddings.")
-@click.option("--morphlex_freeze", is_flag=True, default=True)
+@click.option("--morphlex_freeze/--no_morphlex_freeze", is_flag=True, default=True)
 @click.option("--pretrained_word_embeddings_file", default=None, help="A file which contains pretrained word embeddings. See implementation for supported formats.")
 @click.option("--word_embedding_dim", default=0, help="The word/token embedding dimension. Set to 0 to disable word embeddings.")
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
-@click.option("--bert_layers", default="weights", help="How to construct the embeddings from the BERT layers. 'weights' are learnt weights. Other values default to the last layer")
+@click.option("--bert_layers", default="last", help="How to construct the embeddings from the BERT layers. 'weights' are learnt weights. Other values default to the last layer")
 @click.option("--main_lstm_layers", default=1, help="The number of bilstm layers to use in the encoder.")
-@click.option("--main_lstm_dim", default=512, help="The dimension of the lstm to use in the encoder.")
+@click.option("--main_lstm_dim", default=128, help="The dimension of the lstm to use in the encoder.")
 @click.option("--emb_dropouts", default=0.0, help="The dropout to use for Embeddings.")
-@click.option("--label_smoothing", default=0.0)
-@click.option("--learning_rate", default=0.20)
+@click.option("--label_smoothing", default=0.1)
+@click.option("--learning_rate", default=5e-5)
 @click.option("--epochs", default=20)
-@click.option("--batch_size", default=32)
-@click.option("--optimizer", default="sgd", type=click.Choice(["sgd", "adam"], case_sensitive=False), help="The optimizer to use.")
+@click.option("--batch_size", default=16)
+@click.option("--optimizer", default="adam", type=click.Choice(["sgd", "adam"], case_sensitive=False), help="The optimizer to use.")
 @click.option("--scheduler", default="multiply", type=click.Choice(["none", "multiply", "plateau"], case_sensitive=False), help="The learning rate scheduler to use.")
 # fmt: on
 def train_and_tag(**kwargs):
@@ -232,7 +234,7 @@ def train_and_tag(**kwargs):
         embs[Modules.MorphLex] = PretrainedEmbedding(
             vocab_map=dicts[Dicts.MorphLex],
             embeddings=embeddings[Dicts.MorphLex],
-            freeze=True,
+            freeze=kwargs["morphlex_freeze"],
             dropout=kwargs["emb_dropouts"],
         )
     if kwargs["pretrained_word_embeddings_file"]:
@@ -268,7 +270,9 @@ def train_and_tag(**kwargs):
         log.info("Training Tagger")
         decoders[Modules.Tagger] = Tagger(
             vocab_map=dicts[Dicts.FullTag],
-            input_dim=encoder.output_dim,
+            input_dim=embs[Modules(kwargs["tagger_embedding"])]
+            if Modules(kwargs["tagger_embedding"]) in embs
+            else encoder.output_dim,
             embedding=Modules(kwargs["tagger_embedding"]),
             weight=kwargs["tagger_weight"],
         )
@@ -276,9 +280,12 @@ def train_and_tag(**kwargs):
         log.info("Training Lemmatizer")
         decoders[Modules.Lemmatizer] = CharacterDecoder(
             vocab_map=dicts[Dicts.Chars],
-            hidden_dim=encoder.output_dim,
-            emb_dim=kwargs["lemmatizer_char_dim"],
-            context_dim=encoder.output_dim,
+            context_dim=embs[Modules(kwargs["lemmatizer_embedding"])]
+            if Modules(kwargs["lemmatizer_embedding"]) in embs
+            else encoder.output_dim,
+            hidden_dim=kwargs["lemmatizer_hidden_dim"],
+            char_emb_dim=kwargs["lemmatizer_char_dim"],
+            context_embedding=Modules(kwargs["lemmatizer_embedding"]),
             attention_dim=embs[Modules.CharactersToTokens].output_dim
             if Modules.CharactersToTokens in embs
             else 0,

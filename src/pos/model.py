@@ -351,7 +351,8 @@ class CharacterDecoder(Decoder):
         vocab_map: VocabMap,
         hidden_dim,
         context_dim,
-        emb_dim,
+        char_emb_dim,
+        context_embedding=Modules.BiLSTM,
         num_layers=1,
         attention_dim=0,
         char_attention=False,
@@ -365,6 +366,7 @@ class CharacterDecoder(Decoder):
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
         self.attention_dim = attention_dim
+        self.context_embedding = context_embedding
         self._output_dim = len(
             vocab_map
         )  # The number of characters, these will be interpreted as logits.
@@ -372,11 +374,11 @@ class CharacterDecoder(Decoder):
         self.char_attention = char_attention
 
         self.sparse_embedding = nn.Embedding(
-            len(vocab_map), emb_dim, sparse=True
+            len(vocab_map), char_emb_dim, sparse=True
         )  # We map the input idx to vectors.
         # last character + sentence context + character attention
         rnn_in_dim = (
-            emb_dim
+            char_emb_dim
             + self.context_dim
             + (self.attention_dim if self.char_attention else 0)
         )
@@ -488,7 +490,7 @@ class CharacterDecoder(Decoder):
         self, encoded: Dict[Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
     ) -> Tensor:
         """Run the decoder on the batch."""
-        context = encoded[Modules.BiLSTM]
+        context = encoded[self.context_embedding]
         b, s, f = (*context.shape,)
         # 1 for EOS
         c = (
