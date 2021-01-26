@@ -36,7 +36,7 @@ train-and-tag \
 --char_emb_dim 40 \
 --char_lstm_dim 128 \
 --char_lstm_layers 1 \
---main_lstm_dim 100 \
+--main_lstm_dim 256 \
 --main_lstm_layers 2 \
 --label_smoothing 0.1 \
 --epochs 40 \
