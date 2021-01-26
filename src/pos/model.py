@@ -183,9 +183,19 @@ class CharacterAsWordEmbedding(Embedding):
         # (b * seq, chars, f)
         self.rnn.flatten_parameters()
         out, hidden = self.rnn(char_embs)
+        if type(self.rnn) == nn.LSTM:
+            # If we are running an LSTM, just take the hidden, not the cell.
+            hidden = hidden[0]
         # Warning! We return a tuple here, the last hidden state and the sequence.
-        # also map (layers, batch, f/2) -> (batch, f)
-        return (self.dropout(out), self.dropout(hidden.reshape(-1, out.shape[-1])))
+        # Output documentation: (seq_len, batch, num_directions * hidden_size)
+        # Batch first and our names: (b * seq, chars, num_directions * hidden_size)
+        # Hidden documentation (GRU): (num_layers * num_directions, batch, hidden_size)
+        # Batch is NOT placed first in the hidden.
+        # We map it to (b * seq, hidden_size * num_layers * num_directions)
+        return (
+            self.dropout(out),
+            self.dropout(hidden.permute(1, 0, 2).reshape(out.shape[0], -1)),
+        )
 
     @property
     def output_dim(self):

@@ -3,6 +3,7 @@ from torch import zeros
 import torch
 
 from pos.model import (
+    CharacterAsWordEmbedding,
     ClassingWordEmbedding,
     MultiplicativeAttention,
     Modules,
@@ -42,8 +43,15 @@ def test_pretrained_wemb(vocab_maps, data_loader):
         assert embs.requires_grad == False
 
 
-def test_chars_as_words():
-    assert True  # We will not do this now.
+def test_chars_as_words(vocab_maps, data_loader):
+    wemb = CharacterAsWordEmbedding(vocab_map=vocab_maps[Dicts.Chars])
+    # The TransformerEmbedding expects the input to be a Sentence, not vectors.
+    for batch in data_loader:
+        embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])[
+            0
+        ]  # Only take the chars
+        assert embs.shape == (3 * 3, 9, 64 * 2)
+        assert embs.requires_grad == True
 
 
 def test_transformer_embedding_electra_small(electra_model, data_loader):
