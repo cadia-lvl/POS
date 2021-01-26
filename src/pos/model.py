@@ -156,7 +156,7 @@ class CharacterAsWordEmbedding(Embedding):
         )
         nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
         # The character RNN
-        self.rnn = nn.LSTM(
+        self.rnn = nn.GRU(
             input_size=character_embedding_dim,
             hidden_size=char_lstm_dim,
             num_layers=char_lstm_layers,
