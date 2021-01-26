@@ -39,7 +39,7 @@ train-and-tag \
 --main_lstm_dim 256 \
 --main_lstm_layers 2 \
 --label_smoothing 0.1 \
---epochs 40 \
+--epochs 25 \
 --batch_size 16 \
 --save_vocab \
 --save_model \
