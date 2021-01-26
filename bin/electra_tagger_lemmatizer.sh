@@ -23,12 +23,12 @@ train-and-tag \
 "$TEST" \
 "$OUT_DIR" \
 --lemmatizer \
---lemmatizer_embedding bert \
+--lemmatizer_embedding bilstm \
 --lemmatizer_weight 0.1 \
 --lemmatizer_hidden_dim 256 \
 --lemmatizer_char_dim 64 \
 --tagger \
---tagger_embedding bert \
+--tagger_embedding bilstm \
 --bert_encoder electra-small-pytorch \
 --bert_layers last \
 --known_chars_file data/extra/characters_training.txt \
@@ -41,6 +41,6 @@ train-and-tag \
 --batch_size 16 \
 --save_vocab \
 --save_model \
---optimizer sgd \
---learning_rate 5e-2 \
+--optimizer adam \
+--learning_rate 5e-5 \
 $*

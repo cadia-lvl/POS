@@ -23,16 +23,27 @@ train-and-tag \
 "$TEST" \
 "$OUT_DIR" \
 --lemmatizer \
+--lemmatizer_embedding bilstm \
+--lemmatizer_weight 0.1 \
+--lemmatizer_hidden_dim 256 \
+--lemmatizer_char_dim 64 \
+--tagger \
+--tagger_embedding bilstm \
+--morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+--morphlex_freeze \
+--pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
+--bert_encoder electra-small-pytorch \
+--bert_layers last \
 --known_chars_file data/extra/characters_training.txt \
 --char_lstm_layers 1 \
---char_emb_dim 64 \
---main_lstm_layers 1 \
---main_lstm_dim 128 \
+--char_lstm_dim 128 # 256\
+--char_emb_dim 64 #128 \
+--main_lstm_dim 256 \
 --label_smoothing 0.1 \
---epochs 10 \
---batch_size 8 \
+--epochs 20 \
+--batch_size 16 \
 --save_vocab \
 --save_model \
---optimizer sgd \
---learning_rate 5e-2 \
+--optimizer adam \
+--learning_rate 5e-5 \
 $*
