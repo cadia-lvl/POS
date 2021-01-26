@@ -23,10 +23,12 @@ train-and-tag \
 "$TEST" \
 "$OUT_DIR" \
 --lemmatizer \
+--lemmatizer_embedding bert \
 --lemmatizer_weight 0.1 \
 --lemmatizer_hidden_dim 128 \
 --lemmatizer_char_dim 64 \
 --tagger \
+--tagger_embedding bert \
 --bert_encoder electra-small-pytorch \
 --bert_layers last \
 --known_chars_file data/extra/characters_training.txt \
