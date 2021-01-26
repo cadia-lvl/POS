@@ -270,7 +270,7 @@ def train_and_tag(**kwargs):
         log.info("Training Tagger")
         decoders[Modules.Tagger] = Tagger(
             vocab_map=dicts[Dicts.FullTag],
-            input_dim=embs[Modules(kwargs["tagger_embedding"])]
+            input_dim=embs[Modules(kwargs["tagger_embedding"])].output_dim
             if Modules(kwargs["tagger_embedding"]) in embs
             else encoder.output_dim,
             embedding=Modules(kwargs["tagger_embedding"]),
@@ -280,7 +280,7 @@ def train_and_tag(**kwargs):
         log.info("Training Lemmatizer")
         decoders[Modules.Lemmatizer] = CharacterDecoder(
             vocab_map=dicts[Dicts.Chars],
-            context_dim=embs[Modules(kwargs["lemmatizer_embedding"])]
+            context_dim=embs[Modules(kwargs["lemmatizer_embedding"])].output_dim
             if Modules(kwargs["lemmatizer_embedding"]) in embs
             else encoder.output_dim,
             hidden_dim=kwargs["lemmatizer_hidden_dim"],
