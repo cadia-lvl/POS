@@ -25,7 +25,7 @@ train-and-tag \
 --lemmatizer \
 --lemmatizer_embedding bert \
 --lemmatizer_weight 0.1 \
---lemmatizer_hidden_dim 128 \
+--lemmatizer_hidden_dim 256 \
 --lemmatizer_char_dim 64 \
 --tagger \
 --tagger_embedding bert \
