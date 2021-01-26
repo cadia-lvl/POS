@@ -264,7 +264,7 @@ def train_and_tag(**kwargs):
         main_lstm_layers=kwargs["main_lstm_layers"],
         lstm_dropouts=0.0,
         input_dropouts=kwargs["emb_dropouts"],
-        residual=False,
+        residual=True,
     )
     decoders: Dict[Modules, Decoder] = {}
     if kwargs["tagger"]:
