@@ -628,11 +628,13 @@ class Encoder(nn.Module):
         )
 
         bilstm_in_dim = sum(emb.output_dim for emb in self.embeddings.values())
-        self.linear = nn.Linear(bilstm_in_dim, main_lstm_dim)  # type: ignore
+        if self.residual:
+            self.linear = nn.Linear(bilstm_in_dim, main_lstm_dim)
+            bilstm_in_dim = main_lstm_dim
 
         # BiLSTM over all inputs
         self.bilstm = nn.LSTM(
-            input_size=main_lstm_dim,
+            input_size=bilstm_in_dim,
             hidden_size=main_lstm_dim,
             num_layers=main_lstm_layers,
             dropout=lstm_dropouts,
@@ -665,8 +667,9 @@ class Encoder(nn.Module):
             to_bilstm[Modules.CharactersToTokens.value] = last_hidden.reshape(
                 len(lengths), -1, last_hidden.shape[-1]
             )
-        embs_to_linear = torch.cat(list(to_bilstm.values()), dim=2)
-        embs_to_bilstm = self.linear(embs_to_linear)
+        embs_to_bilstm = torch.cat(list(to_bilstm.values()), dim=2)
+        if self.residual:
+            embs_to_bilstm = self.linear(embs_to_bilstm)
 
         # Pack the paddings
         packed = pack_padded_sequence(
