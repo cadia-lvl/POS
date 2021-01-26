@@ -33,9 +33,9 @@ class Tagger:
         """Tag a (single) sentence. To tag multiple sentences at once (faster) use "tag_bulk".
 
         Args:
-            sent: A tokenized sentence; a Sequence[str].
+            sent: A tokenized sentence; a Tuple[str, ...] (a tuple of strings)
 
-        Returns: The POS tags a Sequence[str].
+        Returns: The POS tags a Tuple[str, ...] where the first element in the tuple corresponds to the first token in the input sentence.
         """
         return self.tag_bulk((sent,), batch_size=1)[0]
 
@@ -47,9 +47,10 @@ class Tagger:
         """Tag multiple sentence. This is a faster alternative to "tag_sent", used for batch processing.
 
         Args:
-            dataset: A collection of tokenized sentence; a List[List[str]], Tuple[Tuple[str]] or SimpleDataset.
+            dataset: A collection of tokenized sentence; a Tuple[Tuple[str, ...], ...] or FieldedDataset.
+            batch_size: The number of sentences to process at once. Set it to as high as possible without blowing up the memory.
 
-        Returns: The POS tags a Tuple[Tuple[str]] or SimpleDataset.
+        Returns: The POS tags a Tuple[Tuple[str, ...], ...] or FieldedDataset.
         """
         dataset = cast_types(dataset)
         log.info("Predicting tags")

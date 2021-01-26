@@ -291,6 +291,7 @@ class MultiplicativeAttention(nn.Module):
         Args:
             query: (b, f_d), b is the batch_size, f the features
             values: (b, t, f_e) where t is timeseries to attend to.
+
         Returns:
             context: (b, f)
         """

@@ -411,9 +411,10 @@ def tag(model_file, data_in, output, device, contains_tags):
 
     Args:
         model_file: A filepath to a trained model.
-        dictionaries_file: A filepath to dictionaries (vocabulary mappings) for preprocessing.
         data_in: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
         output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
+        device: cpu or gpu:0
+        contains_tags: A flag. Set it if the data_in already contains tags.
     """
     tagger = api_tagger(model_file=model_file, device=device)
     log.info("Reading dataset")
@@ -459,9 +460,18 @@ def evaluate_predictions(
 ):
     """Evaluate predictions.
 
+    Evaluate a single prediction file.
+
     Args:
         predictions: The tagged test file.
-        fields: The fields present in the test file. Separated with ',', f.ex. 'tokens,gold_tags,tags'."""
+        fields: The fields present in the test file. Separated with ',', f.ex. 'tokens,gold_tags,tags'.
+        morphlex_vocab: The location of the morphlex vocab.
+        pretrained_vocab: The location of the pretrained vocab.
+        train_tokens: The location of the tokens used in training.
+        train_lemmas: The location of the lemmas used in training.
+        criteria: The evaluation criteria
+        feature: Lemmas or tags?
+    """
     ds = FieldedDataset.from_file(predictions, fields=tuple(fields.split(",")))
     if criteria == "accuracy":
         result = evaluate.get_accuracy_from_files(

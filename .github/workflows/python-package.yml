@@ -22,7 +22,7 @@ jobs:
         poetry install
     - name: Check documentation with pydocstyle
       run: |
-        poetry run pydocstyle --match-dir src
+        poetry run pydocstyle
     - name: Test with pytest
       run: |
         poetry run pytest
