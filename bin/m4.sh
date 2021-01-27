@@ -24,9 +24,9 @@ do
     --tagger \
     --tagger_embedding bilstm \
     --bert_encoder electra-small-pytorch \
-    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+    --morphlex_embeddings_file data/extra/dmii.vectors \
     --morphlex_freeze \
-    --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
+    --pretrained_word_embeddings_file data/extra/igc2018.vec \
     --known_chars_file data/extra/characters_training.txt \
     --char_lstm_layers 1 \
     --char_emb_dim 128 \
