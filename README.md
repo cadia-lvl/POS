@@ -1,8 +1,8 @@
-# POS tagger for Icelandic
-The goal of this project is to create a part-of-speech tagger for Icelandic using the revised fine-grained tagging schema for Icelandic.
-For further information about the schema see [MIM-GOLD on CLARIN-IS](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/40) (the description pdf).
+# POS tagger and lemmatizer for Icelandic
+The goal of this project is to create a combined part-of-speech tagger and lemmatizer for Icelandic using the revised fine-grained tagging schema for Icelandic.
+For further information about the schema see [MIM-Gold on CLARIN-IS](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/40) (the description pdf).
 
-This work is based on the ABLTagger (in [References](#references)) but with some model modifications and runs on PyTorch 1.6.0.
+This work is based on the ABLTagger (in [References](#references)) but with considerable model modifications and runs on Python 3.8, PyTorch 1.7.0 and [transformers 4.1.1](https://github.com/huggingface/transformers).
 
 # Table of Contents
 - [POS tagger for Icelandic](#pos-tagger-for-icelandic)
@@ -27,29 +27,26 @@ This work is based on the ABLTagger (in [References](#references)) but with some
 
 
 # Installation
+To use a pretrained model follow the instructions below.
+
+```
+# Using v2.0.0 - consider using the latest tag.
+pip install git+https://github.com/cadia-lvl/POS.git@v2.0.0
+# Download the model
+wget DOWNLOAD_LINK
+# Test the installation
+pos tag path/to/tagger.pt example.txt example_tagged.txt
+```
 The tagger expects input to be tokenized and a tokenizer is not bundled with this package. We reccomend [tokenizer](https://github.com/mideind/Tokenizer) version 2.0+.
 
-Installing the PoS tagger locally without using Docker:
-```
-# Using v1.0.0
-pip install git+https://github.com/cadia-lvl/POS.git@v1.0.0
-# Download the model & additional files
-wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/53/tagger.pt
-wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/53/dictionaries.pickle
-# Test the installation
-pos tag path/to/tagger.pt path/to/dictionaries.pickle example.txt example_tagged.txt
-```
+A docker container with the an in-built model is also provided, see [Docker](#docker).
 
-For usage examples see next sections.
-
-For Docker installation see [Docker](#docker).
-
-For installation for further development see [Contributing](#Contributing).
+Instructions for further development can be found in [Contributing](#Contributing).
 
 ## Command line usage
-Note that current version of the tagger expects the input and output to be paths (i.e. not stdin or stdout).
+Note that the input and output should be paths (i.e. not stdin or stdout).
 
-example.txt is correctly formatted input file: One token per line and sentences are separated with an empty line.
+`example.txt` is correctly formatted input file: One token per line and sentences are separated with an empty line.
 ```Bash
 cat example.txt 
 Þar
@@ -100,18 +97,19 @@ Laxness
 ```
 Tagging this file
 ```Bash
-pos tag path/to/tagger.pt path/to/dictionaries.pickle example.txt example_tagged.txt
-2020-10-02 15:56:06,463 - Setting device.
-2020-10-02 15:56:06,463 - Reading dictionaries
-2020-10-02 15:56:09,266 - Reading model file
-2020-10-02 15:56:18,891 - Reading dataset
-2020-10-02 15:56:18,893 - No newline at end of file, handling it.
-2020-10-02 15:56:18,893 - Predicting tags
-2020-10-02 15:56:19,030 - Tagged 84 tokens
-2020-10-02 15:56:19,030 - Tagging took=0:00:00.136156 seconds
-2020-10-02 15:56:19,030 - Done predicting!
-2020-10-02 15:56:19,031 - Writing results
-2020-10-02 15:56:19,032 - Done!!
+pos tag path/to/tagger.pt example.txt example_tagged.txt
+2021-01-27 13:01:20,442 - Setting device.
+2021-01-27 13:01:20,443 - Using 1 CPU threads
+2021-01-27 13:01:20,443 - Reading model file...
+2021-01-27 13:01:20,785 - Reading dataset
+2021-01-27 13:01:20,786 - No newline at end of file, handling it.
+2021-01-27 13:01:20,786 - Splitting sentences in order to fit BERT-like model
+2021-01-27 13:01:20,787 - Predicting tags
+2021-01-27 13:01:20,934 - Processed 44 tokens in 0:00:00.145607 seconds
+2021-01-27 13:01:20,934 - Done predicting!
+2021-01-27 13:01:20,934 - Reversing the splitting of sentences in order to fit BERT-like model
+2021-01-27 13:01:20,934 - Writing results
+2021-01-27 13:01:20,935 - Done!
 cat example_tagged.txt 
 Þar     aa
 sem     c
@@ -136,8 +134,8 @@ himninum        nkeþg
 búa     sfg3fn
 ekki    aa
 framar  aam
-neinar  fovfo
-sorgir  nvfo
+neinar  fovfn
+sorgir  nvfn
 og      c
 þess    fphee
 vegna   af
@@ -168,19 +166,31 @@ import pos
 
 # Initialize the tagger
 tagger = pos.Tagger(
-    model_file="tagger.pt", dictionaries_file="dictionaries.pickle", device="cpu",
+    model_file="tagger.pt",
+    device="cpu",
 )
 
 # Tag a single sentence
 tags = tagger.tag_sent(["Þetta", "er", "setning", "."])
 print(tags)
 # ('fahen', 'sfg3en', 'nven', 'pl')
+# Tuple[str, ...]
+
+# Tag multiple sentences at the same time (faster).
+tags = tagger.tag_bulk(
+    [["Þetta", "er", "setning", "."], ["Og", "önnur", "!"]], batch_size=2
+)
+print(tags)
+# (('fahen', 'sfg3en', 'nven', 'pl'), ('c', 'foven', 'pl'))
+# Tuple[Tuple[str, ...], ...]
 
 # Tag a correctly formatted file.
-dataset = pos.SimpleDataset.from_file("example.txt")
-tags = tagger.tag_bulk(dataset=dataset)
+dataset = pos.FieldedDataset.from_file("example.txt")
+tags = tagger.tag_bulk(dataset)
 print(tags)
-# (('aa', 'c', 'nkeog', 'sfg3en', 'af', 'nheo', 'sfg3en', 'nheng', 'cn', 'sng', 'lhensf', 'pk', 'c', 'nveng', 'sfg3en', 'nveo', 'af', 'nkeþg', 'pk', 'aa', 'sfg3fn', 'aa', 'aam', 'fovfo', 'nvfo', 'c', 'fphee', 'af', 'sfg3en', 'nveng', 'aa', 'lvensf', 'pk', 'aa', 'sfg3en', 'nveng', 'lvensf', 'pk', 'afm', 'foveþ', 'nveþ', 'pl'), ('nken-s', 'nken-s'))
+# (('aa', 'c', 'nkeog', 'sfg3en', 'af', 'nheo', 'sfg3en', 'nheng', 'cn', 'sng', 'lhensf', 'pk', 'c', 'nveng', 'sfg3en', 'nveo', 'af', 'nkeþg', 'pk', 'aa', 'sfg3fn', 'aa', 'aam', 'fovfn', 'nvfn', 'c', 'fphee', 'af', 'sfg3en', 'nveng', 'aa', 'lvensf', 'pk', 'aa', 'sfg3en', 'nveng', 'lvensf', 'pk', 'afm', 'foveþ', 'nveþ', 'pl'), ('nken-s', 'nken-s'))
+# Tuple[Tuple[str, ...], ...]
+
 ```
 For additional information, see the docstrings provided.
 # Docker
@@ -191,8 +201,8 @@ Trained models are distributed with Docker and then the command line client is e
 Before running the docker command be sure that the docker daemon has access to roughly 4GB of RAM.
 
 ```Bash
-# Using version 1.0.0
-docker run -v $PWD:/data haukurp/pos:1.0.0 /data/example.txt /data/example_tagged.txt
+# Using version 2.0.0
+docker run -v $PWD:/data haukurp/pos:2.0.0 /data/example.txt /data/example_tagged.txt
 ```
 
 # License
@@ -217,11 +227,12 @@ This project was funded (partly) by the Language Technology Programme for Icelan
 For more involved installation instructions and how to train different models.
 
 ## Installation
-We use poetry to manage dependencies and to build wheels. Install poetry and do `poetry install`.
+We use [poetry](https://python-poetry.org/) to manage dependencies and to build wheels. Install poetry and do `poetry install`.
+To activate the environment within the current shell call `poetry shell`.
 
 ## Running the tests
 To run the tests simply run `pytest` within the `poetry` environment.
-To run without starting the environment, run `poetry run pytest`
+To run without starting the environment, run `poetry run pytest`.
 
 This will run all the unit-tests and skip a few tests which rely on external data (model files).
 
@@ -304,10 +315,11 @@ Parameters with default values (options) are prefixed with `--`.
 It is also useful to look at the BASH scripts in `bin/`
 
 # Versions
+- 2.0.0 Support for BERT-like language models and preliminary lemmatization. Adding the lemmatization required an overhaul of the exposed API. A model which supports lemmatization is not provided.
 - 1.0.1 Bug fixes to Python module.
 - 1.0.0 First release.
 
-To see older versions we suggest looking through the git tags of the project.
+To see older versions we suggest looking through the git tags of the project (DyNet model + code, original DyNet model implemented in Pytorch).
 
 # References
 [Augmenting a BiLSTM Tagger with a Morphological Lexicon and a Lexical Category Identification Step](https://www.aclweb.org/anthology/R19-1133/)
