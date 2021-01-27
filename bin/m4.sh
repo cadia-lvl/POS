@@ -22,21 +22,22 @@ do
     $DATA_DIR/mim/${fold}PM.plain \
     $OUT_DIR \
     --tagger \
+    --tagger_embedding bilstm \
     --bert_encoder electra-small-pytorch \
-    --morphlex_embeddings_file data/extra/dmii.vectors \
+    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
     --morphlex_freeze \
-    --pretrained_word_embeddings_file data/extra/igc2018.vec \
+    --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
     --known_chars_file data/extra/characters_training.txt \
     --char_lstm_layers 1 \
     --char_emb_dim 128 \
     --main_lstm_dim 256 \
     --main_lstm_layers 1 \
     --label_smoothing 0.1 \
-    --epochs 14 \
-    --batch_size 8 \
+    --epochs 20 \
+    --batch_size 16 \
     --save_vocab \
     --save_model \
-    --optimizer sgd \
-    --learning_rate 5e-2 \
+    --optimizer adam \
+    --learning_rate 5e-5 \
     --gpu"
 done
