@@ -447,6 +447,7 @@ def tag(model_file, data_in, output, device, contains_tags):
 @click.option("--train_lemmas", help="The location of the training lemmas used to train the model.", default=None)
 @click.option("--criteria", type=click.Choice(["accuracy", "profile", "confusion"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
 @click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
+@click.option("--up_to", help="For --criteria profile, the number of errors to report", default=30)
 # fmt: on
 def evaluate_predictions(
     predictions,
@@ -457,6 +458,7 @@ def evaluate_predictions(
     train_lemmas,
     criteria,
     feature,
+    up_to,
 ):
     """Evaluate predictions.
 
@@ -492,7 +494,7 @@ def evaluate_predictions(
             morphlex_vocab=morphlex_vocab,
             pretrained_vocab=pretrained_vocab,
         )
-        click.echo(evaluate.format_profile(result))
+        click.echo(evaluate.format_profile(result, up_to=up_to))
     else:  # confusion
         train_lemmas = Vocab.from_file(train_lemmas)
         morphlex_vocab = Vocab.from_file(morphlex_vocab)
@@ -516,9 +518,10 @@ def evaluate_predictions(
 @click.option("--pretrained_vocab", help="The location of the pretrained vocabulary.", default=PRETRAINED_VOCAB_PATH)
 @click.option("--criteria", type=click.Choice(["accuracy", "profile"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
 @click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
+@click.option("--up_to", help="For --criteria profile, the number of errors to report", default=30)
 # fmt: on
 def evaluate_experiments(
-    directories, fields, pretrained_vocab, morphlex_vocab, criteria, feature
+    directories, fields, pretrained_vocab, morphlex_vocab, criteria, feature, up_to
 ):
     """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
     directories = [pathlib.Path(directory) for directory in directories]
@@ -554,4 +557,4 @@ def evaluate_experiments(
             evaluate.format_results(evaluate.all_accuracy_average(accuracy_results))
         )
     elif criteria == "profile":
-        click.echo(evaluate.format_profile(profile, up_to=30))
+        click.echo(evaluate.format_profile(profile, up_to=up_to))
