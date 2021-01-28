@@ -474,6 +474,7 @@ def evaluate_predictions(
         criteria: The evaluation criteria
         feature: Lemmas or tags?
     """
+    click.echo(f"Evaluating: {predictions}")
     ds = FieldedDataset.from_file(predictions, fields=tuple(fields.split(",")))
     if criteria == "accuracy":
         result = evaluate.get_accuracy_from_files(
