@@ -33,7 +33,7 @@ To use a pretrained model follow the instructions below.
 # Using v2.0.0 - consider using the latest tag.
 pip install git+https://github.com/cadia-lvl/POS.git@v2.0.0
 # Download the model
-wget DOWNLOAD_LINK
+wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/98/tagger-v2.0.0.pt
 # Test the installation
 pos tag path/to/tagger.pt example.txt example_tagged.txt
 ```
