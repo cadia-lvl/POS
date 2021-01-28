@@ -3,28 +3,25 @@ import torch
 from pos import model
 
 
-def test_copy_into_larger_tensor():
-    test = torch.arange(start=0, end=4).view(2, 2)
-    print(test)
-    bigger_tensor = torch.ones((3, 3))
-    assert torch.all(
-        model.copy_into_larger_tensor(test, bigger_tensor).eq(
-            torch.tensor([[0, 1, 0], [2, 3, 0], [0, 0, 0]])
-        )
-    )
+def test_soft_stack():
+    a = torch.randn(1, 2, 3)
+    b = torch.randn(1, 2)
+    c = b.mul(a[:, :, 0])
+    for l in range(1, a.shape[-1]):
+        c += b.mul(a[:, :, l])
 
 
 def test_loss():
     criterion = torch.nn.CrossEntropyLoss()
 
-    test_score = torch.tensor([[1, 2]]).float()
-    test_idx = torch.tensor([0])
+    test_score = torch.Tensor([[1, 2]]).float()
+    test_idx = torch.Tensor([0.0]).long()
     loss = criterion(test_score, test_idx)
     expected_loss = 1.31326162815094
     assert loss.item() == expected_loss
 
-    test_score2 = torch.tensor([[2, 1]]).float()
-    test_idx2 = torch.tensor([1])
+    test_score2 = torch.Tensor([[2, 1]]).float()
+    test_idx2 = torch.Tensor([1.0]).long()
     loss2 = criterion(test_score2, test_idx2)
     expected_loss2 = 1.31326162815094
     assert loss2.item() == expected_loss2
@@ -59,27 +56,3 @@ def test_loss():
     loss_ignore = criterion(test_score_combined, test_idx_combined)
     assert loss_ignore.shape[0] == 2
     assert loss_ignore.sum().eq(loss2)
-
-
-def test_batch_first_to_batch_second():
-    test = torch.tensor(
-        [
-            [[1, 2, 3], [4, 5, 6],],  # first batch  # first word  # second word
-            [[7, 8, 9], [10, 11, 12],],  # second batch  # first word  # second word
-        ]
-    )
-    print(test)
-    test_b_2nd = model.batch_first_to_batch_second(test)
-    assert test_b_2nd.eq(
-        torch.tensor(
-            [
-                [[1, 2, 3], [7, 8, 9],],  # first word  # first batch  # second batch
-                [
-                    [4, 5, 6],
-                    [10, 11, 12],
-                ],  # second word  # first batch  # second batch
-            ]
-        )
-    ).all()
-
-    assert test.eq(model.batch_second_to_batch_first(test_b_2nd)).all()

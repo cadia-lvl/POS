@@ -1,31 +1,75 @@
 #!/usr/bin/env python
 """The main entrypoint to training and running a POS-tagger."""
+from collections import Counter
+from functools import reduce
+from operator import add
 import pickle
-import random
+from pprint import pprint, pformat
 import logging
 import json
 import pathlib
 from typing import Dict
-from functools import reduce, partial
-from operator import add
 
 import click
-import torch
-import numpy as np
+from torch.utils.data.dataloader import DataLoader
+from torch import save
 
-from . import data, train, api
-from .types import write_tsv
+from pos.data import (
+    load_dicts,
+    read_datasets,
+    emb_pairs_to_dict,
+    bin_str_to_emb_pair,
+    read_morphlex,
+    read_pretrained_word_embeddings,
+    wemb_str_to_emb_pair,
+    collate_fn,
+    chunk_dataset,
+    dechunk_dataset,
+)
+from pos import core
+from pos.core import Vocab, FieldedDataset, Dicts, Fields, set_device, set_seed
+from pos.model import (
+    Decoder,
+    Embedding,
+    Encoder,
+    Tagger,
+    ABLTagger,
+    TransformerEmbedding,
+    PretrainedEmbedding,
+    ClassingWordEmbedding,
+    CharacterAsWordEmbedding,
+    CharacterDecoder,
+    Modules,
+)
+from pos.train import (
+    MODULE_TO_FIELD,
+    print_tagger,
+    get_criterion,
+    tag_data_loader,
+    get_parameter_groups,
+    get_optimizer,
+    get_scheduler,
+    run_epochs,
+)
+from pos.api import Tagger as api_tagger
+from pos.utils import write_tsv
+from pos import evaluate
 
 DEBUG = False
+
+MORPHLEX_VOCAB_PATH = "./data/extra/morphlex_vocab.txt"
+PRETRAINED_VOCAB_PATH = "./data/extra/pretrained_vocab.txt"
+
 log = logging.getLogger(__name__)
 
 
 @click.group()
 @click.option("--debug/--no-debug", default=False)
-def cli(debug):
+@click.option("--log/--no-log", default=False)
+def cli(debug, log):  # pylint: disable=redefined-outer-name
     """Entrypoint to the program. --debug flag from command line is caught here."""
     log_level = logging.INFO
-    if debug:
+    if debug or log:
         log_level = logging.DEBUG
     logging.basicConfig(format="%(asctime)s - %(message)s", level=log_level)
     global DEBUG
@@ -34,13 +78,34 @@ def cli(debug):
 
 @cli.command()
 @click.argument("filepaths", nargs=-1)
-@click.argument("output", type=click.File("w+"))
-def gather_tags(filepaths, output):
-    """Read all input tsv files and extract all tags in files."""
-    ds = reduce(add, (data.Dataset.from_file(filepath) for filepath in filepaths), (),)
-    tags = data.Vocab.from_symbols(y for x, y in ds)
-    for tag_ in sorted(list(tags)):
-        output.write(f"{tag_}\n")
+@click.argument("output", type=click.File("w"))
+@click.option(
+    "--type",
+    type=click.Choice(
+        ["tags", "tokens", "lemmas", "morphlex", "pretrained"], case_sensitive=False
+    ),
+    default="tags",
+)
+def collect_vocabularies(filepaths, output, type):
+    """Read all input files and extract relevant vocabulary."""
+    result = []
+    if type == "tags":
+        ds = read_datasets(filepaths)
+        result = list(Vocab.from_symbols(ds.get_field(Fields.GoldTags)))
+    elif type == "tokens":
+        ds = read_datasets(filepaths)
+        result = list(Vocab.from_symbols(ds.get_field(Fields.Tokens)))
+    elif type == "lemmas":
+        ds = read_datasets(filepaths)
+        result = list(Vocab.from_symbols(ds.get_field(Fields.GoldLemmas)))
+    elif type == "morphlex":
+        vocab_map, _ = read_morphlex(filepaths[0])
+        result = list(vocab_map.w2i.keys())
+    elif type == "pretrained":
+        vocab_map, _ = read_pretrained_word_embeddings(filepaths[0])
+        result = list(vocab_map.w2i.keys())
+    for element in sorted(result):
+        output.write(f"{element}\n")
 
 
 @cli.command()
@@ -60,24 +125,25 @@ def filter_embedding(filepaths, embedding, output, emb_format):
     format: The format of the embedding file being read, 'bin' or 'wemb'.
     """
     log.info(f"Reading files={filepaths}")
-    ds = reduce(add, (data.Dataset.from_file(filepath) for filepath in filepaths), (),)
-    tokens = data.Vocab.from_symbols(ds.unpack_dataset()[0])
+    ds = read_datasets(filepaths)
+    tokens = Vocab.from_symbols(ds.get_field())
 
     log.info(f"Number of tokens={len(tokens)}")
     with open(embedding) as f:
         if emb_format == "bin":
-            emb_dict = data.emb_pairs_to_dict(f, data.bin_str_to_emb_pair)
+            emb_dict = emb_pairs_to_dict(f, bin_str_to_emb_pair)
             for token, value in emb_dict.items():
                 if token in tokens:  # pylint: disable=unsupported-membership-test
                     output.write(f"{token};[{','.join((str(x) for x in value))}]\n")
         elif emb_format == "wemb":
-            emb_dict = data.emb_pairs_to_dict(f, data.wemb_str_to_emb_pair)
+            emb_dict = emb_pairs_to_dict(f, wemb_str_to_emb_pair)
             output.write("x x\n")
             for token, value in emb_dict.items():
                 if token in tokens:  # pylint: disable=unsupported-membership-test
                     output.write(f"{token} {' '.join((str(x) for x in value))}\n")
 
 
+# fmt: off
 @cli.command()
 @click.argument("training_files", nargs=-1)
 @click.argument("test_file")
@@ -85,314 +151,250 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--gpu/--no_gpu", default=False)
 @click.option("--save_model/--no_save_model", default=False)
 @click.option("--save_vocab/--no_save_vocab", default=False)
-@click.option(
-    "--known_chars_file",
-    help="A file which contains the characters the model should know. Omit, to disable character embeddings. "
-    + "File should be a single line, the line is split() to retrieve characters.",
-)
-@click.option("--char_lstm_layers", default=1)
-@click.option(
-    "--morphlex_embeddings_file",
-    default=None,
-    help="A file which contains the morphological embeddings.",
-)
-@click.option("--morphlex_freeze", is_flag=True, default=False)
-@click.option(
-    "--morphlex_extra_dim",
-    default=-1,
-    help="The dimension to map morphlex embeddings to. -1 to disable.",
-)
-@click.option(
-    "--pretrained_word_embeddings_file",
-    default=None,
-    help="A file which contains pretrained word embeddings. See implementation for supported formats.",
-)
-@click.option(
-    "--word_embedding_dim",
-    default=-1,
-    help="The word/token embedding dimension. Set to -1 to disable word embeddings.",
-)
-@click.option(
-    "--word_embedding_lr", default=0.2, help="The word/token embedding learning rate."
-)
-@click.option(
-    "--pretrained_model_folder",
-    default=None,
-    help="A folder which contains a pretrained BERT-like model.",
-)
-@click.option("--main_lstm_layers", default=1)
-@click.option(
-    "--final_layer",
-    default="dense",
-    type=click.Choice(["dense", "none", "attention"], case_sensitive=False),
-    help="The type of final layer to use.",
-)
-@click.option(
-    "--final_layer_attention_heads",
-    default=1,
-    help="The number of attention heads to use.",
-)
-@click.option("--final_dim", default=32)
-@click.option("--label_smoothing", default=0.0)
-@click.option("--learning_rate", default=0.20)
+@click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
+@click.option("--tagger_weight", default=1.0, help="Value to multiply tagging loss")
+@click.option("--tagger_embedding", default="bilstm", help="The embedding to feed to the Tagger, see pos.model.Modules.")
+@click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
+@click.option("--lemmatizer_weight", default=0.1, help="Value to multiply lemmatizer loss")
+@click.option("--lemmatizer_embedding", default="bilstm", help="The embedding to feed to the Lemmatizer, see pos.model.Modules.")
+@click.option("--lemmatizer_hidden_dim", default=128, help="The hidden dim of the decoder RNN.")
+@click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
+@click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
+@click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
+@click.option("--known_chars_file", default=None, help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
+@click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
+@click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
+@click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
+@click.option("--morphlex_embeddings_file", default=None, help="A file which contains the morphological embeddings.")
+@click.option("--morphlex_freeze/--no_morphlex_freeze", is_flag=True, default=True)
+@click.option("--pretrained_word_embeddings_file", default=None, help="A file which contains pretrained word embeddings. See implementation for supported formats.")
+@click.option("--word_embedding_dim", default=0, help="The word/token embedding dimension. Set to 0 to disable word embeddings.")
+@click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
+@click.option("--bert_layers", default="last", help="How to construct the embeddings from the BERT layers. 'weights' are learnt weights. Other values default to the last layer")
+@click.option("--main_lstm_layers", default=1, help="The number of bilstm layers to use in the encoder.")
+@click.option("--main_lstm_dim", default=128, help="The dimension of the lstm to use in the encoder.")
+@click.option("--emb_dropouts", default=0.0, help="The dropout to use for Embeddings.")
+@click.option("--label_smoothing", default=0.1)
+@click.option("--learning_rate", default=5e-5)
 @click.option("--epochs", default=20)
-@click.option("--batch_size", default=32)
-@click.option(
-    "--optimizer",
-    default="sgd",
-    type=click.Choice(["sgd", "adam"], case_sensitive=False),
-    help="The optimizer to use.",
-)
-@click.option(
-    "--scheduler",
-    default="multiply",
-    type=click.Choice(["multiply", "plateau"], case_sensitive=False),
-    help="The learning rate scheduler to use.",
-)
-def train_and_tag(
-    training_files,
-    test_file,
-    output_dir,
-    known_chars_file,
-    morphlex_embeddings_file,
-    morphlex_freeze,
-    morphlex_extra_dim,
-    pretrained_word_embeddings_file,
-    word_embedding_lr,
-    word_embedding_dim,
-    pretrained_model_folder,
-    main_lstm_layers,
-    char_lstm_layers,
-    label_smoothing,
-    final_layer,
-    final_layer_attention_heads,
-    final_dim,
-    batch_size,
-    save_model,
-    save_vocab,
-    gpu,
-    optimizer,
-    learning_rate,
-    epochs,
-    scheduler,
-):
-    """Train a POS tagger on intpus and write out the tagged the test files.
+@click.option("--batch_size", default=16)
+@click.option("--optimizer", default="adam", type=click.Choice(["sgd", "adam"], case_sensitive=False), help="The optimizer to use.")
+@click.option("--scheduler", default="multiply", type=click.Choice(["none", "multiply", "plateau"], case_sensitive=False), help="The learning rate scheduler to use.")
+# fmt: on
+def train_and_tag(**kwargs):
+    """Train a POS tagger and/or lemmatizer on intpus and write out the tagged test file.
 
     training_files: Files to use for training (supports multiple files = globbing).
-    All training files should be .tsv, with two columns, the token and tag.
+    All training files should be .tsv, with two/three columns, the token, tag, lemma.
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
-    # Set the seed on all platforms
-    SEED = 42
-    if SEED:
-        random.seed(SEED)
-        np.random.seed(SEED)
-        torch.manual_seed(SEED)
-        torch.backends.cudnn.deterministic = True  # type: ignore
-
-    if torch.cuda.is_available() and gpu:
-        device = torch.device("cuda")
-        # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
-        # --gres=gpu:titanx:2
-        log.info(f"Using {torch.cuda.device_count()} GPUs")
-    else:
-        device = torch.device("cpu")
-        threads = 1
-        # Set the number of threads to use for CPU
-        torch.set_num_threads(threads)
-        log.info(f"Using {threads} CPU threads")
-
-    # Run parameters
-    parameters = {
-        "training_files": training_files,
-        "test_file": test_file,
-        "epochs": epochs,
-        "batch_size": batch_size,
-        "learning_rate": learning_rate,
-        "word_embedding_lr": word_embedding_lr,
-        "scheduler": scheduler,
-        "label_smoothing": label_smoothing,
-        "optimizer": optimizer,
-    }
+    pprint(kwargs)
+    set_seed()
+    set_device(gpu_flag=kwargs["gpu"])
 
     # Read train and test data
-    train_ds = data.Dataset(
-        reduce(
-            add,
-            (data.Dataset.from_file(training_file) for training_file in training_files),
-            (),
-        )
+
+    unchunked_train_ds = read_datasets(
+        kwargs["training_files"],
     )
-    test_ds = data.Dataset.from_file(test_file)
-
-    # DEBUG - read a subset of the data
-    if DEBUG:
-        device = torch.device("cpu")
-        threads = 1
-        # Set the number of threads to use for CPU
-        torch.set_num_threads(threads)
-        log.info(f"Using {threads} CPU threads")
-        train_ds = data.Dataset(
-            train_ds[:batch_size]  # pylint: disable=unsubscriptable-object
-        )
-        test_ds = data.Dataset(
-            test_ds[:batch_size]  # pylint: disable=unsubscriptable-object
-        )
-
+    unchunked_test_ds = read_datasets(
+        [kwargs["test_file"]],
+    )
     # Set configuration values and create mappers
-    dictionaries: Dict[str, data.VocabMap] = {}
-    extras: Dict[str, np.array] = {}
-
-    # WORD EMBEDDINGS
-    # By default we do not use word-embeddings.
-    w_emb = "none"
-    if pretrained_word_embeddings_file is not None:
-        # If a file is provided, we use it.
-        w_emb = "pretrained"
-        with open(pretrained_word_embeddings_file) as f:
-            it = iter(f)
-            # pop the number of vectors and dimension
-            next(it)
-            embedding_dict = data.emb_pairs_to_dict(it, data.wemb_str_to_emb_pair)
-            w_map, w_embedding = data.map_embedding(
-                embedding_dict=embedding_dict,
-                filter_on=None,
-                special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
-            )
-            dictionaries["w_map"] = w_map
-            extras["word_embeddings"] = torch.from_numpy(w_embedding).float().to(device)
-    # We are given a pretrained BERT like model, we use it.
-    elif pretrained_model_folder is not None:
-        w_emb = "electra"
-    elif word_embedding_dim != -1:
-        # No file is given and the dimension is not -1 we train from scratch.
-        w_emb = "standard"
-        dictionaries["w_map"] = data.VocabMap(
-            data.Vocab.from_symbols((x for x, y in train_ds)),
-            special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID)],
-        )
-
-    # MORPHLEX EMBEDDINGS
-    # By default we do not use morphlex embeddings.
-    m_emb = "none"
-    if morphlex_embeddings_file is not None:
-        # File is provided, use it.
-        m_emb = "standard"
-        with open(morphlex_embeddings_file) as f:
-            it = iter(f)
-            embedding_dict = data.emb_pairs_to_dict(it, data.bin_str_to_emb_pair)
-            m_map, m_embedding = data.map_embedding(
-                embedding_dict=embedding_dict,
-                filter_on=None,
-                special_tokens=[(data.UNK, data.UNK_ID), (data.PAD, data.PAD_ID)],
-            )
-            dictionaries["m_map"] = m_map
-            extras["morphlex_embeddings"] = (
-                torch.from_numpy(m_embedding).float().to(device)
-            )
-        if morphlex_extra_dim != -1:
-            m_emb = "extra"
-
-    # CHARACTER EMBEDDINGS
-    # By default we do not use character embeddings.
-    c_emb = "none"
-    if known_chars_file is not None:
-        # A file is given, use it.
-        c_emb = "standard"
-        char_vocab = data.Vocab.from_file(known_chars_file)
-        dictionaries["c_map"] = data.VocabMap(
-            char_vocab,
-            special_tokens=[
-                (data.UNK, data.UNK_ID),
-                (data.PAD, data.PAD_ID),
-                (data.EOS, data.EOS_ID),
-                (data.SOS, data.SOS_ID),
-            ],
-        )
-
-    # TAGS (POS)
-    dictionaries["t_map"] = data.VocabMap(
-        data.Vocab.from_symbols((y for x, y in train_ds)),
-        special_tokens=[(data.PAD, data.PAD_ID), (data.UNK, data.UNK_ID),],
+    embeddings, dicts = load_dicts(
+        train_ds=unchunked_train_ds,
+        pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
+        morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
+        known_chars_file=kwargs["known_chars_file"],
     )
 
-    model_parameters = {
-        "w_emb": w_emb,
-        "c_emb": c_emb,
-        "m_emb": m_emb,
-        "char_dim": len(dictionaries["c_map"]) if "c_map" in dictionaries else 0,
-        "token_dim": len(dictionaries["w_map"]) if w_emb == "standard" else 0,
-        "tags_dim": len(dictionaries["t_map"]),
-        "emb_char_dim": 20,  # The characters are mapped to this dim
-        "char_lstm_dim": 64,  # The character LSTM will output with this dim
-        "char_lstm_layers": char_lstm_layers,  # The character LSTM will output with this dim
-        "emb_token_dim": word_embedding_dim,  # The tokens are mapped to this dim
-        "main_lstm_dim": 64,  # The main LSTM dim will output with this dim
-        "main_lstm_layers": main_lstm_layers,  # The main LSTM dim will output with this dim
-        "final_layer": final_layer,
-        "final_layer_attention_heads": final_layer_attention_heads,
-        "final_dim": final_dim,  # The main LSTM time-steps will be mapped to this dim
-        "morphlex_extra_dim": morphlex_extra_dim,
-        "lstm_dropouts": 0.1,
-        "input_dropouts": 0.0,
-        "noise": 0.1,  # Noise to main_in, to main_bilstm
-        "morphlex_freeze": morphlex_freeze,
-    }
+    embs: Dict[Modules, Embedding] = {}
+    if kwargs["bert_encoder"]:
+        embs[Modules.BERT] = TransformerEmbedding(
+            kwargs["bert_encoder"],
+            dropout=kwargs["emb_dropouts"],
+            layers=kwargs["bert_layers"],
+        )
+        train_ds = chunk_dataset(
+            unchunked_train_ds,
+            embs[Modules.BERT].tokenizer,
+            embs[Modules.BERT].max_length,
+        )
+        test_ds = chunk_dataset(
+            unchunked_test_ds,
+            embs[Modules.BERT].tokenizer,
+            embs[Modules.BERT].max_length,
+        )
+    else:
+        train_ds = unchunked_train_ds
+        test_ds = unchunked_test_ds
 
-    # Write all configuration to disk
-    output_dir = pathlib.Path(output_dir)
-    with output_dir.joinpath("hyperparamters.json").open(mode="+w") as f:
-        json.dump({**parameters, **model_parameters}, f, indent=4)
+    if kwargs["morphlex_embeddings_file"]:
+        embs[Modules.MorphLex] = PretrainedEmbedding(
+            vocab_map=dicts[Dicts.MorphLex],
+            embeddings=embeddings[Dicts.MorphLex],
+            freeze=kwargs["morphlex_freeze"],
+            dropout=kwargs["emb_dropouts"],
+        )
+    if kwargs["pretrained_word_embeddings_file"]:
+        embs[Modules.Pretrained] = PretrainedEmbedding(
+            vocab_map=dicts[Dicts.Pretrained],
+            embeddings=embeddings[Dicts.Pretrained],
+            freeze=True,
+            dropout=kwargs["emb_dropouts"],
+        )
+    if kwargs["word_embedding_dim"]:
+        embs[Modules.Trained] = ClassingWordEmbedding(
+            dicts[Dicts.Tokens],
+            kwargs["word_embedding_dim"],
+            dropout=kwargs["emb_dropouts"],
+        )
+    if kwargs["char_lstm_layers"]:
+        embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(
+            dicts[Dicts.Chars],
+            character_embedding_dim=kwargs["char_emb_dim"],
+            char_lstm_layers=kwargs["char_lstm_layers"],
+            char_lstm_dim=kwargs["char_lstm_dim"],  # we use the same dimension
+            dropout=kwargs["emb_dropouts"],
+        )
+    encoder = Encoder(
+        embeddings=embs,
+        main_lstm_dim=kwargs["main_lstm_dim"],
+        main_lstm_layers=kwargs["main_lstm_layers"],
+        lstm_dropouts=0.0,
+        input_dropouts=kwargs["emb_dropouts"],
+        residual=True,
+    )
+    decoders: Dict[Modules, Decoder] = {}
+    if kwargs["tagger"]:
+        log.info("Training Tagger")
+        decoders[Modules.Tagger] = Tagger(
+            vocab_map=dicts[Dicts.FullTag],
+            input_dim=embs[Modules(kwargs["tagger_embedding"])].output_dim
+            if Modules(kwargs["tagger_embedding"]) in embs
+            else encoder.output_dim,
+            embedding=Modules(kwargs["tagger_embedding"]),
+            weight=kwargs["tagger_weight"],
+        )
+    if kwargs["lemmatizer"]:
+        log.info("Training Lemmatizer")
+        decoders[Modules.Lemmatizer] = CharacterDecoder(
+            vocab_map=dicts[Dicts.Chars],
+            context_dim=embs[Modules(kwargs["lemmatizer_embedding"])].output_dim
+            if Modules(kwargs["lemmatizer_embedding"]) in embs
+            else encoder.output_dim,
+            hidden_dim=kwargs["lemmatizer_hidden_dim"],
+            char_emb_dim=kwargs["lemmatizer_char_dim"],
+            context_embedding=Modules(kwargs["lemmatizer_embedding"]),
+            attention_dim=embs[Modules.CharactersToTokens].output_dim
+            if Modules.CharactersToTokens in embs
+            else 0,
+            char_attention=Modules.CharactersToTokens in embs
+            and kwargs["lemmatizer_char_attention"],
+            num_layers=kwargs["lemmatizer_num_layers"],
+            dropout=kwargs["emb_dropouts"],
+            weight=kwargs["lemmatizer_weight"],
+        )
+    abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(core.device)
 
     # Train a model
-    data_loader = partial(
-        data.data_loader,
-        device=device,
-        w_emb=w_emb,
-        c_emb=c_emb,
-        m_emb=m_emb,
-        dictionaries=dictionaries,
+    print_tagger(abl_tagger)
+
+    train_dl = DataLoader(
+        train_ds,
+        collate_fn=collate_fn,  # type: ignore
+        shuffle=True,
+        batch_size=kwargs["batch_size"],
     )
-    tagger = train.run_training(
-        run_parameters=parameters,
-        model_parameters=model_parameters,
-        model_extras=extras,
-        data_loader=data_loader,
-        dictionaries=dictionaries,
-        device=device,
-        train_ds=train_ds,
-        test_ds=test_ds,
+    test_dl = DataLoader(
+        test_ds,
+        collate_fn=collate_fn,  # type: ignore
+        shuffle=False,
+        batch_size=kwargs["batch_size"] * 10,
+    )
+    criterion = get_criterion(
+        decoders=decoders, label_smoothing=kwargs["label_smoothing"]
+    )
+    parameter_groups = get_parameter_groups(abl_tagger)
+    log.info(
+        f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}"
+    )
+    optimizer = get_optimizer(
+        parameter_groups, kwargs["optimizer"], kwargs["learning_rate"]
+    )
+    scheduler = get_scheduler(optimizer, kwargs["scheduler"])
+    evaluators = {}
+    if Modules.Tagger in decoders:
+        evaluators[Modules.Tagger] = evaluate.TaggingEvaluation(
+            test_dataset=test_ds,
+            train_vocab=train_ds.get_vocab(),
+            external_vocabs=evaluate.ExternalVocabularies(
+                morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
+                pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+            ),
+        ).tagging_accuracy
+    if Modules.Lemmatizer in decoders:
+        evaluators[Modules.Lemmatizer] = evaluate.LemmatizationEvaluation(
+            test_dataset=test_ds,
+            train_vocab=train_ds.get_vocab(),
+            train_lemmas=Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)),
+        ).lemma_accuracy
+
+    # Write all configuration to disk
+    output_dir = pathlib.Path(kwargs["output_dir"])
+    write_hyperparameters(output_dir / "hyperparamters.json", (kwargs))
+
+    # Start the training
+    run_epochs(
+        model=abl_tagger,
+        optimizer=optimizer,
+        criterion=criterion,
+        scheduler=scheduler,
+        evaluators=evaluators,
+        train_data_loader=train_dl,
+        test_data_loader=test_dl,
+        epochs=kwargs["epochs"],
         output_dir=output_dir,
     )
-    test_tags_tagged = tagger.tag_sents(
-        data_loader=data_loader(
-            dataset=test_ds, shuffle=False, batch_size=batch_size * 10,
-        ),
-        dictionaries=dictionaries,
-        criterion=None,
+    _, values = tag_data_loader(
+        model=abl_tagger,
+        data_loader=test_dl,
     )
     log.info("Writing predictions, dictionaries and model")
-    with (output_dir / "predictions.tsv").open("w") as f:
-        write_tsv(f, (*test_ds.unpack(), test_tags_tagged))
+    for module_name, value in values.items():
+        test_ds = test_ds.add_field(value, MODULE_TO_FIELD[module_name])
+    # Dechunk - if we chunked
+    if len(test_ds) != len(unchunked_test_ds):
+        test_ds = dechunk_dataset(unchunked_test_ds, test_ds)
+
+    test_ds.to_tsv_file(str(output_dir / "predictions.tsv"))
+
     with (output_dir / "known_toks.txt").open("w+") as f:
-        for token in data.Vocab.from_symbols(  # pylint: disable=not-an-iterable
-            x for x, y in train_ds
-        ):
+        for token in Vocab.from_symbols(train_ds.get_field(Fields.Tokens)):
             f.write(f"{token}\n")
-    if save_vocab:
+    if Fields.GoldLemmas in train_ds.fields:
+        with (output_dir / "known_lemmas.txt").open("w+") as f:
+            for lemma in Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)):
+                f.write(f"{lemma}\n")
+    if kwargs["save_vocab"]:
         save_location = output_dir.joinpath("dictionaries.pickle")
         with save_location.open("wb+") as f:
-            pickle.dump(dictionaries, f)
-    if save_model:
+            pickle.dump(dicts, f)
+    if kwargs["save_model"]:
         save_location = output_dir.joinpath("tagger.pt")
-        torch.save(tagger, str(save_location))
+        save(abl_tagger, str(save_location))
     log.info("Done!")
+
+
+def write_hyperparameters(path, hyperparameters):
+    """Write hyperparameters to disk."""
+    with path.open(mode="w") as f:
+        json.dump(hyperparameters, f, indent=4)
 
 
 @cli.command()
 @click.argument("model_file")
-@click.argument("dictionaries_file")
 @click.argument("data_in", type=str)
 @click.argument("output", type=str)
 @click.option(
@@ -404,29 +406,156 @@ def train_and_tag(
     default=False,
     help="Does input data contain tags? Useful when predicting tags on a dataset which is already tagged (gold tags). All are written out: token\tgold\tpredicted",
 )
-def tag(model_file, dictionaries_file, data_in, output, device, contains_tags):
+def tag(model_file, data_in, output, device, contains_tags):
     """Tag tokens in a file.
 
     Args:
         model_file: A filepath to a trained model.
-        dictionaries_file: A filepath to dictionaries (vocabulary mappings) for preprocessing.
         data_in: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
         output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
+        device: cpu or gpu:0
+        contains_tags: A flag. Set it if the data_in already contains tags.
     """
-    tagger = api.Tagger(
-        model_file=model_file, dictionaries_file=dictionaries_file, device=device
-    )
+    tagger = api_tagger(model_file=model_file, device=device)
     log.info("Reading dataset")
+    fields = (Fields.Tokens,)
     if contains_tags:
-        ds_with_tags = data.Dataset.from_file(data_in)
-        ds, gold = ds_with_tags.unpack()
-    else:
-        ds = data.SimpleDataset.from_file(data_in)
-    predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=16)
+        fields = fields + (Fields.GoldTags,)
+    ds = FieldedDataset.from_file(data_in, fields)
+    chunked_ds = chunk_dataset(
+        ds,
+        tokenizer=tagger.model.encoder.embeddings[Modules.BERT.value].tokenizer,
+        max_sequence_length=tagger.model.encoder.embeddings[
+            Modules.BERT.value
+        ].max_length,
+    )
+    predicted_tags = tagger.tag_bulk(dataset=chunked_ds, batch_size=16)
+    chunked_ds = chunked_ds.add_field(predicted_tags, Fields.Tags)
+    dechunk_ds = dechunk_dataset(ds, chunked_ds)
     log.info("Writing results")
-    with open(output, "w+") as f:
-        if contains_tags:
-            write_tsv(f=f, data=(ds, gold, predicted_tags))
-        else:
-            write_tsv(f=f, data=(ds, predicted_tags))
+    dechunk_ds.to_tsv_file(output)
     log.info("Done!")
+
+
+# fmt: off
+@cli.command()
+@click.argument("predictions")
+@click.argument("fields")
+@click.option("--morphlex_vocab", help="The location of the morphlex vocabulary.", default=MORPHLEX_VOCAB_PATH)
+@click.option("--pretrained_vocab", help="The location of the pretrained vocabulary.", default=PRETRAINED_VOCAB_PATH)
+@click.option("--train_tokens", help="The location of the training tokens used to train the model.", default=None)
+@click.option("--train_lemmas", help="The location of the training lemmas used to train the model.", default=None)
+@click.option("--criteria", type=click.Choice(["accuracy", "profile", "confusion"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
+@click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
+@click.option("--up_to", help="For --criteria profile, the number of errors to report", default=30)
+# fmt: on
+def evaluate_predictions(
+    predictions,
+    fields,
+    morphlex_vocab,
+    pretrained_vocab,
+    train_tokens,
+    train_lemmas,
+    criteria,
+    feature,
+    up_to,
+):
+    """Evaluate predictions.
+
+    Evaluate a single prediction file.
+
+    Args:
+        predictions: The tagged test file.
+        fields: The fields present in the test file. Separated with ',', f.ex. 'tokens,gold_tags,tags'.
+        morphlex_vocab: The location of the morphlex vocab.
+        pretrained_vocab: The location of the pretrained vocab.
+        train_tokens: The location of the tokens used in training.
+        train_lemmas: The location of the lemmas used in training.
+        criteria: The evaluation criteria
+        feature: Lemmas or tags?
+    """
+    click.echo(f"Evaluating: {predictions}")
+    ds = FieldedDataset.from_file(predictions, fields=tuple(fields.split(",")))
+    if criteria == "accuracy":
+        result = evaluate.get_accuracy_from_files(
+            feature,
+            ds,
+            train_tokens=train_tokens,
+            train_lemmas=train_lemmas,
+            morphlex_vocab=morphlex_vocab,
+            pretrained_vocab=pretrained_vocab,
+        )
+        click.echo(evaluate.format_result(result))
+    elif criteria == "profile":
+        result = evaluate.get_profile_from_files(
+            feature,
+            ds,
+            train_tokens=train_tokens,
+            train_lemmas=train_lemmas,
+            morphlex_vocab=morphlex_vocab,
+            pretrained_vocab=pretrained_vocab,
+        )
+        click.echo(evaluate.format_profile(result, up_to=up_to))
+    else:  # confusion
+        train_lemmas = Vocab.from_file(train_lemmas)
+        morphlex_vocab = Vocab.from_file(morphlex_vocab)
+        pretrained_vocab = Vocab.from_file(pretrained_vocab)
+        evaluation = evaluate.TaggingLemmatizationEvaluation(
+            test_dataset=ds,
+            train_vocab=train_tokens,
+            external_vocabs=evaluate.ExternalVocabularies(
+                morphlex_vocab, pretrained_vocab
+            ),
+            train_lemmas=train_lemmas,
+        )
+        click.echo(evaluation.lemma_tag_confusion_matrix())
+
+
+# fmt: off
+@cli.command()
+@click.argument("directories", nargs=-1)
+@click.argument("fields")
+@click.option("--morphlex_vocab", help="The location of the morphlex vocabulary.", default=MORPHLEX_VOCAB_PATH)
+@click.option("--pretrained_vocab", help="The location of the pretrained vocabulary.", default=PRETRAINED_VOCAB_PATH)
+@click.option("--criteria", type=click.Choice(["accuracy", "profile"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
+@click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
+@click.option("--up_to", help="For --criteria profile, the number of errors to report", default=30)
+# fmt: on
+def evaluate_experiments(
+    directories, fields, pretrained_vocab, morphlex_vocab, criteria, feature, up_to
+):
+    """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
+    directories = [pathlib.Path(directory) for directory in directories]
+    fields = fields.split(",")
+    accuracy_results = []
+    profile = Counter()
+    for directory in directories:
+        ds = FieldedDataset.from_file(str(directory / "predictions.tsv"), fields=fields)
+        train_tokens = str(directory / "known_toks.txt")
+        train_lemmas = str(directory / "known_lemmas.txt")
+        if criteria == "accuracy":
+            accuracy_results.append(
+                evaluate.get_accuracy_from_files(
+                    feature,
+                    ds,
+                    train_tokens=train_tokens,
+                    train_lemmas=train_lemmas,
+                    morphlex_vocab=morphlex_vocab,
+                    pretrained_vocab=pretrained_vocab,
+                )
+            )
+        elif criteria == "profile":
+            profile += evaluate.get_profile_from_files(
+                feature,
+                ds,
+                train_tokens=train_tokens,
+                train_lemmas=train_lemmas,
+                morphlex_vocab=morphlex_vocab,
+                pretrained_vocab=pretrained_vocab,
+            )
+    if criteria == "accuracy":
+        click.echo(
+            evaluate.format_results(evaluate.all_accuracy_average(accuracy_results))
+        )
+    elif criteria == "profile":
+        click.echo(evaluate.format_profile(profile, up_to=up_to))

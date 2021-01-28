@@ -1,8 +1,8 @@
 #!/bin/bash
-FOLDS="01 02 03 04 05 06 07 08 09"
+FOLDS="10"
 DATA_DIR=./data/raw
 
-NAME="$1"
+NAME="m4_full"
 # Move the arguments forward
 
 # --begin=now+8hour \
@@ -13,7 +13,7 @@ do
     sbatch \
     --output="$OUT_DIR/slurm-%j.out" \
     --gres=gpu \
-    --mem=10G \
+    --mem=20G \
     --wrap="pos \
     train-and-tag \
     $DATA_DIR/otb/${fold}TM.plain \
@@ -24,9 +24,9 @@ do
     --tagger \
     --tagger_embedding bilstm \
     --bert_encoder electra-small-pytorch \
-    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
+    --morphlex_embeddings_file data/extra/dmii.vectors \
     --morphlex_freeze \
-    --pretrained_word_embeddings_file data/extra/igc2018.vec_filtered \
+    --pretrained_word_embeddings_file data/extra/igc2018.vec \
     --known_chars_file data/extra/characters_training.txt \
     --char_lstm_layers 1 \
     --char_emb_dim 128 \
