@@ -5,6 +5,7 @@ For further information about the schema see [MIM-Gold on CLARIN-IS](https://rep
 This work is based on the ABLTagger (in [References](#references)) but with considerable model modifications and runs on Python 3.8, PyTorch 1.7.0 and [transformers 4.1.1](https://github.com/huggingface/transformers).
 
 # Table of Contents
+- [Versions](#versions)
 - [Installation](#installation)
   * [Command line usage](#command-line-usage)
   * [Python module](#python-module)
@@ -20,17 +21,24 @@ This work is based on the ABLTagger (in [References](#references)) but with cons
   * [Additional training data (Morphological lexicon)](#additional-training-data--morphological-lexicon-)
     + [Filtering the morphological lexicon](#filtering-the-morphological-lexicon)
   * [Training models](#training-models)
-- [Versions](#versions)
 - [References](#references)
 
 <small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
+
+# Versions
+- 2.0.1 Adding support for Python 3.6 and up. Model file from v2.0.0 is compatible.
+- 2.0.0 Support for BERT-like language models and preliminary lemmatization. Adding the lemmatization required an overhaul of the exposed API. A model which supports lemmatization is not provided.
+- 1.0.1 Bug fixes to Python module.
+- 1.0.0 First release.
+
+To see older versions we suggest looking through the git tags of the project (DyNet model + code, original DyNet model implemented in Pytorch).
 
 # Installation
 To use a pretrained model follow the instructions below.
 
 ```
-# Using v2.0.0 - consider using the latest tag.
-pip install git+https://github.com/cadia-lvl/POS.git@v2.0.0
+# Using v2.0.1 - consider using the latest tag.
+pip install git+https://github.com/cadia-lvl/POS.git@v2.0.1
 # Download the model
 wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/98/tagger-v2.0.0.pt
 # Test the installation
@@ -312,13 +320,6 @@ For a description of all the arguments and options, run `pos train-and-tag --hel
 Parameters with default values (options) are prefixed with `--`.
 
 It is also useful to look at the BASH scripts in `bin/`
-
-# Versions
-- 2.0.0 Support for BERT-like language models and preliminary lemmatization. Adding the lemmatization required an overhaul of the exposed API. A model which supports lemmatization is not provided.
-- 1.0.1 Bug fixes to Python module.
-- 1.0.0 First release.
-
-To see older versions we suggest looking through the git tags of the project (DyNet model + code, original DyNet model implemented in Pytorch).
 
 # References
 [Augmenting a BiLSTM Tagger with a Morphological Lexicon and a Lexical Category Identification Step](https://www.aclweb.org/anthology/R19-1133/)
