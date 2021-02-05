@@ -38,8 +38,8 @@ To see older versions we suggest looking through the git tags of the project (Dy
 To use a pretrained model follow the instructions below.
 
 ```
-# Using v2.0.1 - consider using the latest tag.
-pip install git+https://github.com/cadia-lvl/POS.git@v2.0.1
+# Using v2.0.2 - consider using the latest tag.
+pip install git+https://github.com/cadia-lvl/POS.git@v2.0.2
 # Download the model
 wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/98/tagger-v2.0.0.pt
 # Test the installation
