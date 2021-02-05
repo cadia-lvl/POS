@@ -26,6 +26,7 @@ This work is based on the ABLTagger (in [References](#references)) but with cons
 <small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
 
 # Versions
+- 2.0.2 Downgrading the "transformers" library to 4.1.1 to avoid conflicts in saved CLARIN model.
 - 2.0.1 Adding support for Python 3.6 and up. Model file from v2.0.0 is compatible.
 - 2.0.0 Support for BERT-like language models and preliminary lemmatization. Adding the lemmatization required an overhaul of the exposed API. A model which supports lemmatization is not provided.
 - 1.0.1 Bug fixes to Python module.
