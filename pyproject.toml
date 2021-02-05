@@ -20,7 +20,7 @@ testpaths = [
 
 [tool.poetry]
 name = "pos"
-version = "2.0.1"
+version = "2.0.2"
 description = "A Part-of-Speech tagger for Icelandic"
 authors = ["Haukur <haukurpalljonsson@gmail.com>"]
 license = "Apache-2.0"
