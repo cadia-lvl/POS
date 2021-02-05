@@ -1,6 +1,4 @@
 """Test api.py functionality."""
-import pytest
-
 import pos
 from pos.core import FieldedDataset
 
