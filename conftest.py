@@ -9,6 +9,7 @@ from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
 from pos.core import Fields, Vocab, VocabMap, Dicts, FieldedDataset
 from pos.data import collate_fn, load_dicts
 from pos import evaluate
+import pos
 from pos.model import (
     ABLTagger,
     Encoder,
@@ -35,14 +36,23 @@ def electra_model(request):
         return electra_model_path
 
 
-@fixture()
+@fixture(scope="session")
 def pretrained_tagger(request):
     """Exposes the command-line option to a test case."""
     pretrained_tagger_path = request.config.getoption("--tagger")
     if not pretrained_tagger_path:
         pytest.skip("No --tagger given")
     else:
-        return pretrained_tagger_path
+        return pos.Tagger(
+            model_file=pretrained_tagger_path,
+            device="cpu",
+        )
+
+
+@fixture()
+def test_tsv_untagged_file():
+    """Return the filepath of the test tsv file."""
+    return "./tests/test_untagged.tsv"
 
 
 @fixture()

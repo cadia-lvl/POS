@@ -11,8 +11,7 @@ import pathlib
 from typing import Dict
 
 import click
-from torch.utils.data.dataloader import DataLoader
-from torch import save
+import torch
 
 from pos.data import (
     load_dicts,
@@ -301,13 +300,13 @@ def train_and_tag(**kwargs):
     # Train a model
     print_tagger(abl_tagger)
 
-    train_dl = DataLoader(
+    train_dl = torch.utils.data.DataLoader(
         train_ds,
         collate_fn=collate_fn,  # type: ignore
         shuffle=True,
         batch_size=kwargs["batch_size"],
     )
-    test_dl = DataLoader(
+    test_dl = torch.utils.data.DataLoader(
         test_ds,
         collate_fn=collate_fn,  # type: ignore
         shuffle=False,
@@ -383,7 +382,7 @@ def train_and_tag(**kwargs):
             pickle.dump(dicts, f)
     if kwargs["save_model"]:
         save_location = output_dir.joinpath("tagger.pt")
-        save(abl_tagger, str(save_location))
+        torch.save(abl_tagger, str(save_location))
     log.info("Done!")
 
 
@@ -422,18 +421,10 @@ def tag(model_file, data_in, output, device, contains_tags):
     if contains_tags:
         fields = fields + (Fields.GoldTags,)
     ds = FieldedDataset.from_file(data_in, fields)
-    chunked_ds = chunk_dataset(
-        ds,
-        tokenizer=tagger.model.encoder.embeddings[Modules.BERT.value].tokenizer,
-        max_sequence_length=tagger.model.encoder.embeddings[
-            Modules.BERT.value
-        ].max_length,
-    )
-    predicted_tags = tagger.tag_bulk(dataset=chunked_ds, batch_size=16)
-    chunked_ds = chunked_ds.add_field(predicted_tags, Fields.Tags)
-    dechunk_ds = dechunk_dataset(ds, chunked_ds)
+    predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=16)
+    ds = ds.add_field(predicted_tags, Fields.Tags)
     log.info("Writing results")
-    dechunk_ds.to_tsv_file(output)
+    ds.to_tsv_file(output)
     log.info("Done!")
 
 
@@ -473,6 +464,7 @@ def evaluate_predictions(
         train_lemmas: The location of the lemmas used in training.
         criteria: The evaluation criteria
         feature: Lemmas or tags?
+        up_to: The number of errors for profile.
     """
     click.echo(f"Evaluating: {predictions}")
     ds = FieldedDataset.from_file(predictions, fields=tuple(fields.split(",")))
