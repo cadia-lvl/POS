@@ -7,7 +7,7 @@ data/raw/*
 data/pred/*
 out/*
 slurm-*
-dmii.*
+dmii.vectors*
 igc*
 electra*/
 *.egg-info
