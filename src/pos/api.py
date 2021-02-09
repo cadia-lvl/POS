@@ -6,10 +6,10 @@ from torch.utils.data.dataloader import DataLoader
 from torch import load
 
 import pos.core as core
-from pos.model import Modules
+from pos.model import ABLTagger, Modules
 from pos.core import FieldedDataset, Fields, Sentence, Sentences, set_device
 from pos.train import tag_data_loader
-from pos.data import collate_fn
+from pos.data import collate_fn, chunk_dataset, dechunk_dataset
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class Tagger:
         log.info("Setting device.")
         set_device(gpu_flag="cpu" != device)
         log.info("Reading model file...")
-        self.model = load(model_file, map_location=core.device)
+        self.model: ABLTagger = load(model_file, map_location=core.device)
 
     def tag_sent(self, sent: Sentence) -> Sentence:
         """Tag a (single) sentence. To tag multiple sentences at once (faster) use "tag_bulk".
@@ -43,7 +43,7 @@ class Tagger:
         self,
         dataset: Union[Sentences, FieldedDataset],
         batch_size=16,
-    ):
+    ) -> Sentences:
         """Tag multiple sentence. This is a faster alternative to "tag_sent", used for batch processing.
 
         Args:
@@ -52,13 +52,20 @@ class Tagger:
 
         Returns: The POS tags a Tuple[Tuple[str, ...], ...] or FieldedDataset.
         """
-        dataset = cast_types(dataset)
+        ds = cast_types(dataset)
+        chunked_ds = chunk_dataset(
+            ds,
+            tokenizer=self.model.encoder.embeddings[Modules.BERT.value].tokenizer,
+            max_sequence_length=self.model.encoder.embeddings[
+                Modules.BERT.value
+            ].max_length,
+        )
         log.info("Predicting tags")
         # Initialize DataLoader
         # with collate_fn - that function needs the dict
         # The dict needs to be loaded based on some files
         dl = DataLoader(
-            dataset,
+            chunked_ds,
             collate_fn=collate_fn,
             shuffle=False,
             batch_size=batch_size,
@@ -66,8 +73,15 @@ class Tagger:
 
         _, values = tag_data_loader(self.model, dl)
         log.info("Done predicting!")
+
+        if Modules.Tagger in values:
+            chunked_ds = chunked_ds.add_field(values[Modules.Tagger], Fields.Tags)
+        if Modules.Lemmatizer in values:
+            chunked_ds = chunked_ds.add_field(values[Modules.Lemmatizer], Fields.Lemmas)
+        # Dechunk
+        dechunk_ds = dechunk_dataset(ds, chunked_ds)
         # TODO: Add lemmas
-        return values[Modules.Tagger]
+        return dechunk_ds.get_field(field=Fields.Tags)
 
 
 def cast_types(sentences: Union[Sentences, FieldedDataset]) -> FieldedDataset:

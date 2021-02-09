@@ -422,18 +422,10 @@ def tag(model_file, data_in, output, device, contains_tags):
     if contains_tags:
         fields = fields + (Fields.GoldTags,)
     ds = FieldedDataset.from_file(data_in, fields)
-    chunked_ds = chunk_dataset(
-        ds,
-        tokenizer=tagger.model.encoder.embeddings[Modules.BERT.value].tokenizer,
-        max_sequence_length=tagger.model.encoder.embeddings[
-            Modules.BERT.value
-        ].max_length,
-    )
-    predicted_tags = tagger.tag_bulk(dataset=chunked_ds, batch_size=16)
-    chunked_ds = chunked_ds.add_field(predicted_tags, Fields.Tags)
-    dechunk_ds = dechunk_dataset(ds, chunked_ds)
+    predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=16)
+    ds = ds.add_field(predicted_tags, Fields.Tags)
     log.info("Writing results")
-    dechunk_ds.to_tsv_file(output)
+    ds.to_tsv_file(output)
     log.info("Done!")
 
 
