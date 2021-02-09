@@ -26,24 +26,18 @@ This work is based on the ABLTagger (in [References](#references)) but with cons
 <small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
 
 # Versions
-- 2.0.2 Downgrading the "transformers" library to 4.1.1 to avoid conflicts in saved CLARIN model.
-- 2.0.1 Adding support for Python 3.6 and up. Model file from v2.0.0 is compatible.
-- 2.0.0 Support for BERT-like language models and preliminary lemmatization. Adding the lemmatization required an overhaul of the exposed API. A model which supports lemmatization is not provided.
-- 1.0.1 Bug fixes to Python module.
-- 1.0.0 First release.
-
-To see older versions we suggest looking through the git tags of the project (DyNet model + code, original DyNet model implemented in Pytorch).
+See [releases](https://github.com/cadia-lvl/POS/releases)
 
 # Installation
 To use a pretrained model follow the instructions below.
 
 ```
-# Using v2.0.2 - consider using the latest tag.
-pip install git+https://github.com/cadia-lvl/POS.git@v2.0.2
+# Using v2.0.3 - consider using the latest version: [releases](https://github.com/cadia-lvl/POS/releases)
+pip install git+https://github.com/cadia-lvl/POS.git@v2.0.3
 # Download the model
 wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/98/tagger-v2.0.0.pt
 # Test the installation
-pos tag path/to/tagger.pt example.txt example_tagged.txt
+pos tag path/to/tagger-v2.0.0.pt example.txt example_tagged.txt
 ```
 The tagger expects input to be tokenized and a tokenizer is not bundled with this package. We reccomend [tokenizer](https://github.com/mideind/Tokenizer) version 2.0+.
 
