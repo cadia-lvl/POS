@@ -2,8 +2,7 @@
 from typing import Union, cast
 import logging
 
-from torch.utils.data.dataloader import DataLoader
-from torch import load
+import torch
 
 import pos.core as core
 from pos.model import ABLTagger, Modules
@@ -27,7 +26,7 @@ class Tagger:
         log.info("Setting device.")
         set_device(gpu_flag="cpu" != device)
         log.info("Reading model file...")
-        self.model: ABLTagger = load(model_file, map_location=core.device)
+        self.model: ABLTagger = torch.load(model_file, map_location=core.device)
 
     def tag_sent(self, sent: Sentence) -> Sentence:
         """Tag a (single) sentence. To tag multiple sentences at once (faster) use "tag_bulk".
@@ -64,7 +63,7 @@ class Tagger:
         # Initialize DataLoader
         # with collate_fn - that function needs the dict
         # The dict needs to be loaded based on some files
-        dl = DataLoader(
+        dl = torch.utils.data.DataLoader(
             chunked_ds,
             collate_fn=collate_fn,
             shuffle=False,
