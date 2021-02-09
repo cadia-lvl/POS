@@ -18,6 +18,7 @@ from pos.model import (
     Tagger,
     Modules,
 )
+from pos.morphlex.dmii import DMII
 
 
 def pytest_addoption(parser):
@@ -92,7 +93,7 @@ def ds_lemma(test_tsv_lemma_file):
 @fixture
 def vocab_maps(ds_lemma) -> Dict[Dicts, VocabMap]:
     """Return the dictionaries for the dataset."""
-    return load_dicts(ds_lemma)[1]
+    return load_dicts(ds_lemma, morphlex=DMII())[1]
 
 
 @fixture()

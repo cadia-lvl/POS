@@ -40,6 +40,9 @@ from pos.model import (
     CharacterDecoder,
     Modules,
 )
+from pos.model.embeddings import MorphLexEmbedding
+from pos.morphlex import DMII
+from pos.morphlex.interface import MorphologicalLexicon
 from pos.train import (
     MODULE_TO_FIELD,
     print_tagger,
@@ -54,7 +57,6 @@ from pos.api import Tagger as api_tagger
 from pos.utils import write_tsv
 from pos import evaluate
 
-DEBUG = False
 
 MORPHLEX_VOCAB_PATH = "./data/extra/morphlex_vocab.txt"
 PRETRAINED_VOCAB_PATH = "./data/extra/pretrained_vocab.txt"
@@ -63,16 +65,13 @@ log = logging.getLogger(__name__)
 
 
 @click.group()
-@click.option("--debug/--no-debug", default=False)
 @click.option("--log/--no-log", default=False)
-def cli(debug, log):  # pylint: disable=redefined-outer-name
+def cli(log):  # pylint: disable=redefined-outer-name
     """Entrypoint to the program. --debug flag from command line is caught here."""
     log_level = logging.INFO
-    if debug or log:
+    if log:
         log_level = logging.DEBUG
     logging.basicConfig(format="%(asctime)s - %(message)s", level=log_level)
-    global DEBUG
-    DEBUG = debug
 
 
 @cli.command()
@@ -164,8 +163,8 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
 @click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
 @click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
-@click.option("--morphlex_embeddings_file", default=None, help="A file which contains the morphological embeddings.")
-@click.option("--morphlex_freeze/--no_morphlex_freeze", is_flag=True, default=True)
+@click.option("--dmii/--no_dmii", is_flag=True, default=False, help="Should we use the DMII?")
+@click.option("--tag_dim", default=128, help="The tagging embedding dimension. Used in DMII and other parts.")
 @click.option("--pretrained_word_embeddings_file", default=None, help="A file which contains pretrained word embeddings. See implementation for supported formats.")
 @click.option("--word_embedding_dim", default=0, help="The word/token embedding dimension. Set to 0 to disable word embeddings.")
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
@@ -200,11 +199,14 @@ def train_and_tag(**kwargs):
     unchunked_test_ds = read_datasets(
         [kwargs["test_file"]],
     )
+    morphlex = None
+    if kwargs["dmii"]:
+        morphlex = DMII()
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
         train_ds=unchunked_train_ds,
         pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
-        morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
+        morphlex=morphlex,
         known_chars_file=kwargs["known_chars_file"],
     )
 
@@ -229,11 +231,11 @@ def train_and_tag(**kwargs):
         train_ds = unchunked_train_ds
         test_ds = unchunked_test_ds
 
-    if kwargs["morphlex_embeddings_file"]:
-        embs[Modules.MorphLex] = PretrainedEmbedding(
+    if kwargs["dmii"]:
+        embs[Modules.MorphLex] = MorphLexEmbedding(
+            morphlex=morphlex,
             vocab_map=dicts[Dicts.MorphLex],
-            embeddings=embeddings[Dicts.MorphLex],
-            freeze=kwargs["morphlex_freeze"],
+            tag_embedding_dim=kwargs["tag_dim"],
             dropout=kwargs["emb_dropouts"],
         )
     if kwargs["pretrained_word_embeddings_file"]:

@@ -16,6 +16,8 @@ from pos.model import (
 )
 from pos.core import Dicts
 from pos.data import BATCH_KEYS, collate_fn
+from pos.model.embeddings import MorphLexEmbedding
+from pos.morphlex.dmii import DMII
 
 
 def test_classic_wemb(vocab_maps, data_loader):
@@ -41,6 +43,17 @@ def test_pretrained_wemb(vocab_maps, data_loader):
         embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         assert embs.shape == (3, 3, emb_dim)
         assert embs.requires_grad == False
+
+
+def test_morphlex_emb(vocab_maps, data_loader):
+    emb_dim = 4
+    wemb = MorphLexEmbedding(
+        DMII(), vocab_maps[Dicts.MorphLex], tag_embedding_dim=emb_dim
+    )
+    for batch in data_loader:
+        embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
+        assert embs.shape == (3, 3, 9, emb_dim)
+        assert embs.requires_grad == True
 
 
 def test_chars_as_words(vocab_maps, data_loader):

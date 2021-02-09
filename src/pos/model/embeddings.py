@@ -8,6 +8,8 @@ from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerFast, Auto
 from pos import core
 from pos.data import map_to_index, get_initial_token_mask
 from pos.data.batch import map_to_chars_batch
+from pos.data.constants import PAD
+from pos.morphlex import MorphologicalLexicon
 from . import abltagger
 
 
@@ -65,6 +67,93 @@ class PretrainedEmbedding(ClassingWordEmbedding):
         self.sparse_embedding = nn.Embedding.from_pretrained(
             embeddings, freeze=freeze, padding_idx=padding_idx, sparse=True
         )
+
+
+class CharacterEmbedding(abltagger.Embedding):
+    """Character embedding."""
+
+    def __init__(
+        self, vocab_map: core.VocabMap, char_dim: int, padding_idx=0, dropout=0.0
+    ):
+        """Inititalize character embeddings."""
+        super().__init__()
+        self.sparse_embedding = nn.Embedding(
+            len(vocab_map),
+            char_dim,
+            padding_idx=padding_idx,
+            sparse=True,
+        )
+        self.dropout = nn.Dropout(p=dropout)
+
+    def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
+        """Preprocess the sentence batch."""
+        return map_to_chars_batch(batch, self.vocab_map.w2i)
+
+    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> torch.Tensor:
+        """Apply the embedding."""
+        return self.dropout(self.sparse_embedding(batch))
+
+    @property
+    def output_dim(self):
+        """Return the output dimension."""
+        return self.sparse_embedding.weight.data.shape[1]
+
+
+class MorphLexEmbedding(abltagger.Embedding):
+    """Morphological lexicon embedding."""
+
+    def __init__(
+        self,
+        morphlex: MorphologicalLexicon,
+        vocab_map: core.VocabMap,
+        tag_embedding_dim: int,
+        padding_idx=0,
+        dropout=0.0,
+    ):
+        """Inititialize."""
+        super().__init__()
+        # TODO: add lemmas
+        self.morphlex = morphlex
+        self.sparse_embedding = nn.Embedding(
+            len(vocab_map), tag_embedding_dim, padding_idx=padding_idx, sparse=True
+        )
+        self.vocab_map = vocab_map
+        self.dropout = nn.Dropout(p=dropout)
+
+    def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
+        """Preprocess the sentence batch."""
+        # (b, tokens, tags)
+        batch_tags = []
+        for sent in batch:
+            sent_tags = []
+            for token in sent:
+                results = self.morphlex.lookup_word(token)
+                # (tags) - put a PAD, so the model can easily choose none.
+                # TODO: add lemmas
+                token_tags = map_to_index(
+                    (PAD,) + tuple(tag for tag, _ in results), w2i=self.vocab_map.w2i
+                )
+                sent_tags.append(token_tags)
+            batch_tags.append(sent_tags)
+        max_num_tokens = max(len(sent) for sent in batch_tags)
+        max_num_tags = max(tags.shape[0] for sent in batch_tags for tags in sent)
+        # (b, tokens, tags)
+        padded = torch.zeros(
+            size=(len(batch), max_num_tokens, max_num_tags), device=core.device
+        ).long()
+        for s_idx, sent in enumerate(batch_tags):
+            for t_idx, token in enumerate(sent):
+                padded[s_idx : s_idx + 1, t_idx : t_idx + 1, : token.shape[0]] = token
+        return padded
+
+    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> torch.Tensor:
+        """Apply the embedding."""
+        return self.dropout(self.sparse_embedding(batch))
+
+    @property
+    def output_dim(self):
+        """Return the output dimension."""
+        return self.sparse_embedding.weight.data.shape[1]
 
 
 class CharacterAsWordEmbedding(abltagger.Embedding):

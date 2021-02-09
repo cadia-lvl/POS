@@ -38,6 +38,7 @@ torch = "^1.7.0"
 tqdm = "^4.48.2"
 click = "^7.1.2"
 transformers = "~4.1.1"
+reynir = "^2.10.1"
 
 [tool.poetry.dev-dependencies]
 pydocstyle = "^5.0.2"

@@ -2,6 +2,7 @@ import torch
 from torch import Tensor
 from torch.utils.data.dataloader import DataLoader
 from pos.data.dataset import dechunk_dataset, get_adjusted_lengths
+from pos.morphlex.dmii import DMII
 
 from pos.utils import read_tsv, tokens_to_sentences
 from pos.data import (
@@ -161,6 +162,15 @@ def test_load_dicts(ds):
     assert Dicts.Chars in dicts
     assert Dicts.FullTag in dicts
     assert len(dicts) == 3
+
+
+def test_load_dicts(ds):
+    _, dicts = load_dicts(ds, morphlex=DMII())
+    assert Dicts.Tokens in dicts
+    assert Dicts.Chars in dicts
+    assert Dicts.FullTag in dicts
+    assert Dicts.MorphLex in dicts
+    assert len(dicts) == 4
 
 
 def test_load_dicts_read_datasets(test_tsv_file):

@@ -8,6 +8,7 @@ from torch import (
 )
 from torch.nn.utils.rnn import pad_sequence
 
+from pos.morphlex import MorphologicalLexicon
 from pos import core
 from pos.core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset
 from .constants import UNK, SOS, EOS, PAD, BATCH_KEYS
@@ -20,6 +21,7 @@ from .pretrained import (
 def map_to_index(sentence: Sentence, w2i: Dict[str, int]) -> Tensor:
     """Map a sequence to indices."""
     return (
+        # (tokens)
         Tensor([w2i[token] if token in w2i else w2i[UNK] for token in sentence])
         .long()
         .to(core.device)
@@ -108,7 +110,7 @@ def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[BATCH_KEYS, Any]:
 def load_dicts(
     train_ds: FieldedDataset,
     pretrained_word_embeddings_file=None,
-    morphlex_embeddings_file=None,
+    morphlex: MorphologicalLexicon = None,
     known_chars_file=None,
 ):
     """Load all the modules for the model."""
@@ -126,11 +128,14 @@ def load_dicts(
     dictionaries[Dicts.Tokens] = train_ds.get_vocab_map(special_tokens=VocabMap.UNK_PAD)
 
     # MorphLex
-    if morphlex_embeddings_file:
+    if morphlex is not None:
         # File is provided, use it.
-        m_map, m_embedding = read_morphlex(morphlex_embeddings_file)
-        embeddings[Dicts.MorphLex] = m_embedding
-        dictionaries[Dicts.MorphLex] = m_map
+        tags = set()
+        for token in train_ds.get_vocab():
+            results = morphlex.lookup_word(token)
+            for tag, _ in results:
+                tags.add(tag)
+        dictionaries[Dicts.MorphLex] = VocabMap(tags, special_tokens=VocabMap.UNK_PAD)
 
     # Character mappings, if a file is provided, use it. Otherwise, build from dataset.
     if known_chars_file:
