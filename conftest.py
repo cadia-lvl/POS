@@ -44,9 +44,15 @@ def pretrained_tagger(request):
         pytest.skip("No --tagger given")
     else:
         return pos.Tagger(
-            model_file=pretrained_tagger,
+            model_file=pretrained_tagger_path,
             device="cpu",
         )
+
+
+@fixture()
+def test_tsv_untagged_file():
+    """Return the filepath of the test tsv file."""
+    return "./tests/test_untagged.tsv"
 
 
 @fixture()
