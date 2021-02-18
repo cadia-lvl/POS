@@ -1,8 +1,6 @@
 """A collection of types and function used to evaluate the performance of a tagger."""
 from dataclasses import Field
-import json
-from os import stat
-from typing import Callable, Iterable, Optional, Tuple, List, Dict, Set, Any, Union
+from typing import Iterable, Optional, Tuple, List, Dict, Set, Any, Union
 import logging
 from collections import Counter
 from pathlib import Path
@@ -56,6 +54,7 @@ class Evaluation:
         comparison_field: Fields,
         gold_field: Fields,
         pred_field=Fields,
+        skip_gold_ex=False,
     ) -> Tuple[float, int]:
         """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter.
 
@@ -67,9 +66,11 @@ class Evaluation:
             pred_field: The field in the predictions to consider predictions.
         """
 
-        def in_vocabulary(token, vocab):
+        def in_vocabulary(token, tag, vocab):
             """Filter condition."""
             # Empty vocab implies all
+            if skip_gold_ex and (tag == "e" or tag == "x"):
+                return False
             if vocab is None:
                 return True
             else:
@@ -78,9 +79,12 @@ class Evaluation:
         total = sum(
             (
                 1
-                for tokens in predictions.get_field(comparison_field)
-                for token in tokens
-                if in_vocabulary(token, vocab)
+                for tokens, tags in zip(
+                    predictions.get_field(comparison_field),
+                    predictions.get_field(Fields.GoldTags),
+                )
+                for token, tag in zip(tokens, tags)
+                if in_vocabulary(token, tag, vocab)
             )
         )
         if total == 0:
@@ -88,13 +92,14 @@ class Evaluation:
         correct = sum(
             (
                 predicted == gold
-                for tokens, golds, predicted in zip(
+                for tokens, golds, predicted, tags in zip(
                     predictions.get_field(comparison_field),
                     predictions.get_field(gold_field),
                     predictions.get_field(pred_field),
+                    predictions.get_field(Fields.GoldTags),
                 )
-                for token, gold, predicted in zip(tokens, golds, predicted)
-                if in_vocabulary(token, vocab)
+                for token, gold, predicted, tag in zip(tokens, golds, predicted, tags)
+                if in_vocabulary(token, tag, vocab)
             )
         )
         return (correct / total, total)
@@ -121,10 +126,12 @@ class TaggingEvaluation(Evaluation):
     def __init__(
         self,
         external_vocabs: ExternalVocabularies,
+        skip_gold_ex=False,
         **kw,
     ):
         """Initialize."""
         super().__init__(**kw)
+        self.skip_gold_ex = skip_gold_ex
         morphlex_tokens = external_vocabs.morphlex_tokens.intersection(self.test_tokens)  # type: ignore
         pretrained_tokens = external_vocabs.pretrained_tokens.intersection(self.test_tokens)  # type: ignore
         # fmt: off
@@ -149,6 +156,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unknown": self.accuracy(
                 predictions,
@@ -156,6 +164,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Known": self.accuracy(
                 predictions,
@@ -163,6 +172,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Known-Wemb": self.accuracy(
                 predictions,
@@ -170,6 +180,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Known-Wemb+Morph": self.accuracy(
                 predictions,
@@ -177,6 +188,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Known-Morph": self.accuracy(
                 predictions,
@@ -184,6 +196,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Seen": self.accuracy(
                 predictions,
@@ -191,6 +204,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unknown-Wemb": self.accuracy(
                 predictions,
@@ -198,6 +212,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unknown-Wemb+Morph": self.accuracy(
                 predictions,
@@ -205,6 +220,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unknown-Morph": self.accuracy(
                 predictions,
@@ -212,6 +228,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unseen": self.accuracy(
                 predictions,
@@ -219,6 +236,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
         }
 
@@ -405,6 +423,7 @@ def get_accuracy_from_files(
     train_lemmas: str,
     morphlex_vocab: str,
     pretrained_vocab: str,
+    skip_gold_ex=False,
 ) -> Tuple[Measures, Measures]:
     """Get the accuracy results based on the feature and files."""
     train_vocab = Vocab.from_file(train_tokens)
@@ -415,6 +434,7 @@ def get_accuracy_from_files(
             test_dataset=ds,
             train_vocab=train_vocab,
             external_vocabs=ExternalVocabularies(morphlex_vocab, pretrained_vocab),
+            skip_gold_ex=skip_gold_ex,
         )
         return evaluation._tagging_accuracy(ds)
     else:  # lemmas

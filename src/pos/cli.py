@@ -512,9 +512,17 @@ def evaluate_predictions(
 @click.option("--criteria", type=click.Choice(["accuracy", "profile"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
 @click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
 @click.option("--up_to", help="For --criteria profile, the number of errors to report", default=30)
+@click.option("--skip_gold_ex/--no_skip_gold_ex", is_flag=True, default=False, help="When evaluating accurcy, should we ignore 'e' and 'x' gold tags?")
 # fmt: on
 def evaluate_experiments(
-    directories, fields, pretrained_vocab, morphlex_vocab, criteria, feature, up_to
+    directories,
+    fields,
+    pretrained_vocab,
+    morphlex_vocab,
+    criteria,
+    feature,
+    up_to,
+    skip_gold_ex,
 ):
     """Evaluate the model predictions in the directory. If the directory contains other directories, it will recurse into it."""
     directories = [pathlib.Path(directory) for directory in directories]
@@ -534,6 +542,7 @@ def evaluate_experiments(
                     train_lemmas=train_lemmas,
                     morphlex_vocab=morphlex_vocab,
                     pretrained_vocab=pretrained_vocab,
+                    skip_gold_ex=skip_gold_ex,
                 )
             )
         elif criteria == "profile":
