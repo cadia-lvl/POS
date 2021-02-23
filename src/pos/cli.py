@@ -290,7 +290,7 @@ def train_and_tag(**kwargs):
             dropout=kwargs["emb_dropouts"],
             weight=kwargs["lemmatizer_weight"],
         )
-    abl_tagger = ABLTagger(encoder=encoder, decoders=decoders).to(core.device)
+    abl_tagger = ABLTagger(encoder=encoder, **{key.value: value for key, value in decoders.items()}).to(core.device)
 
     # Train a model
     print_tagger(abl_tagger)

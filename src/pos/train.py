@@ -5,6 +5,7 @@ During training this module handles:
 - Epochs (iterations) and evaluation.
 - Schedulers and optimizers. 
 """
+from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import logging
 from datetime import datetime
@@ -201,7 +202,7 @@ def tag_batch(
     """Tag (apply POS) on a given data set."""
     preds, losses = run_batch(model, batch, criterion, optimizer)
     preds = {
-        key: model.decoders[key.value].postprocess(preds, batch[BATCH_KEYS.LENGTHS])  # type: ignore
+        key: model.__getattr__(key.value).postprocess(preds, batch[BATCH_KEYS.LENGTHS])  # type: ignore
         for key, preds in preds.items()
     }
     return losses, preds  # type: ignore
@@ -213,8 +214,8 @@ def tag_data_loader(
     criterion=None,
 ) -> Tuple[Dict[Modules, float], Dict[Modules, Sentences]]:
     """Tag (apply POS) on a given data set. Sets the model to evaluation mode."""
-    total_values: Dict[Modules, Sentences] = {Modules(key): tuple() for key in model.decoders}
-    total_losses = {Modules(key): 0.0 for key in model.decoders}
+    total_values = defaultdict(tuple)
+    total_losses = defaultdict(float)
     total_tokens = 0
     model.eval()
     with no_grad():
@@ -227,7 +228,7 @@ def tag_data_loader(
             total_tokens += sum(batch[BATCH_KEYS.LENGTHS])
         end = datetime.now()
     log.info(f"Processed {total_tokens} tokens in {end-start} seconds")
-    return total_losses, total_values
+    return dict(total_losses), dict(total_values)
 
 
 def train_model(
@@ -239,7 +240,8 @@ def train_model(
 ) -> Dict[Modules, float]:
     """Run a single training epoch and evaluate the model."""
     model.train()
-    epoch_losses = {Modules(module_name): 0.0 for module_name in model.decoders}
+
+    epoch_losses = defaultdict(float)
     for i, batch in enumerate(data_loader, start=1):
         preds, losses = run_batch(model, batch, criterion, optimizer)
         for module_name, loss in losses.items():
@@ -250,7 +252,7 @@ def train_model(
                 log.info(
                     f"{log_prepend}batch={i}/{len(data_loader)}, module_name={module_name} acc={acc}, loss={loss:.4f}"
                 )
-    return epoch_losses
+    return dict(epoch_losses)
 
 
 def run_epochs(

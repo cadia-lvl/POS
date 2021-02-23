@@ -19,15 +19,11 @@ from pos.train import (
 )
 
 
-def test_train_tagger(
-    decoders, encoder, data_loader, kwargs, tagger_evaluator, lemma_evaluator
-):
-    abl_tagger = ABLTagger(encoder=encoder, decoders=decoders)
+def test_train_tagger(decoders, encoder, data_loader, kwargs, tagger_evaluator, lemma_evaluator):
+    abl_tagger = ABLTagger(encoder=encoder, **{key.value: value for key, value in decoders.items()})
     criterion = get_criterion(decoders)
     parameter_groups = get_parameter_groups(abl_tagger)
-    optimizer = get_optimizer(
-        parameter_groups, optimizer=kwargs["optimizer"], lr=kwargs["learning_rate"]
-    )
+    optimizer = get_optimizer(parameter_groups, optimizer=kwargs["optimizer"], lr=kwargs["learning_rate"])
     scheduler = get_scheduler(optimizer, scheduler=kwargs["scheduler"])
     # TODO: Add evaluator for Lemmas
     evaluators = {Modules.Tagger: tagger_evaluator, Modules.Lemmatizer: lemma_evaluator}
@@ -53,7 +49,7 @@ def test_train_tagger(
     )
 
 
-def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
+def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps, tagger_module):
     dicts = vocab_maps
     embs = {}
     embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(
@@ -62,7 +58,6 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
         char_lstm_layers=kwargs["char_lstm_layers"],
         char_lstm_dim=10,
     )
-    decoders = {}
     encoder = Encoder(
         embeddings=embs,
         main_lstm_dim=kwargs["main_lstm_dim"],
@@ -70,7 +65,7 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
         lstm_dropouts=0.0,
         input_dropouts=0.0,
     )
-    decoders[Modules.Lemmatizer] = Lemmatizer(
+    lemmatizer = Lemmatizer(
         vocab_map=dicts[Dicts.Chars],
         hidden_dim=encoder.output_dim,
         context_dim=encoder.output_dim,
@@ -79,12 +74,10 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
         attention_dim=embs[Modules.CharactersToTokens].output_dim,
         char_attention=True,
     )
-    abl_tagger = ABLTagger(encoder=encoder, decoders=decoders)
-    criterion = get_criterion(decoders)
+    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger_module, lemmatizer=lemmatizer)
+    criterion = get_criterion({Modules.Tagger: tagger_module, Modules.Lemmatizer: lemmatizer})
     parameter_groups = get_parameter_groups(abl_tagger)
-    optimizer = get_optimizer(
-        parameter_groups, optimizer=kwargs["optimizer"], lr=kwargs["learning_rate"]
-    )
+    optimizer = get_optimizer(parameter_groups, optimizer=kwargs["optimizer"], lr=kwargs["learning_rate"])
     scheduler = get_scheduler(optimizer, scheduler=kwargs["scheduler"])
     # TODO: Add evaluator for Lemmas
     evaluators = {Modules.Lemmatizer: lemma_evaluator}

@@ -76,17 +76,13 @@ def test_tsv_lemma_file():
 @fixture
 def ds(test_tsv_file):
     """Return a sequence tagged dataset."""
-    return FieldedDataset.from_file(
-        test_tsv_file, fields=(Fields.Tokens, Fields.GoldTags)
-    )
+    return FieldedDataset.from_file(test_tsv_file, fields=(Fields.Tokens, Fields.GoldTags))
 
 
 @fixture
 def ds_lemma(test_tsv_lemma_file):
     """Return a sequence tagged dataset."""
-    return FieldedDataset.from_file(
-        test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas)
-    )
+    return FieldedDataset.from_file(test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
 
 
 @fixture
@@ -137,7 +133,8 @@ def abl_tagger(encoder, tagger_module, lemmatizer_module) -> ABLTagger:
     """Return a default ABLTagger."""
     return ABLTagger(
         encoder=encoder,
-        decoders={Modules.Tagger: tagger_module, Modules.Lemmatizer: lemmatizer_module},
+        tagger=tagger_module,
+        lemmatizer=lemmatizer_module,
     )
 
 

@@ -177,7 +177,9 @@ class Lemmatizer(abltagger.Decoder):
         else:
             return last_timestep_idxs
 
-    def decode(self, encoded: Dict[abltagger.Modules, Tensor], batch: Dict[BATCH_KEYS, Any]) -> Tensor:
+    def decode(
+        self, encoded: Dict[abltagger.Modules, Tensor], batch: Dict[BATCH_KEYS, Any], tags: Optional[Tensor]
+    ) -> Tensor:
         """Run the decoder on the batch."""
         context = encoded[self.context_embedding]
         b, s, f = (*context.shape,)
@@ -260,7 +262,9 @@ class Tagger(abltagger.Decoder):
         """Return the decoder weight."""
         return self._weight
 
-    def decode(self, encoded: Dict[abltagger.Modules, Any], batch: Dict[BATCH_KEYS, Any]) -> Tensor:
+    def decode(
+        self, encoded: Dict[abltagger.Modules, Any], batch: Dict[BATCH_KEYS, Any], decoders: Optional[Tensor]
+    ) -> Tensor:
         """Run the decoder on the batch."""
         # Now we map the subtokens to tokens.
         if self.embedding == abltagger.Modules.BERT:

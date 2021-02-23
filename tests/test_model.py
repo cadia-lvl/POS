@@ -20,9 +20,7 @@ from pos.data import BATCH_KEYS, collate_fn
 
 def test_classic_wemb(vocab_maps, data_loader):
     emb_dim = 3
-    wemb = ClassingWordEmbedding(
-        vocab_map=vocab_maps[Dicts.Tokens], embedding_dim=emb_dim
-    )
+    wemb = ClassingWordEmbedding(vocab_map=vocab_maps[Dicts.Tokens], embedding_dim=emb_dim)
     for batch in data_loader:
         embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         assert embs.shape == (3, 3, emb_dim)
@@ -47,9 +45,7 @@ def test_chars_as_words(vocab_maps, data_loader):
     wemb = CharacterAsWordEmbedding(vocab_map=vocab_maps[Dicts.Chars])
     # The TransformerEmbedding expects the input to be a Sentence, not vectors.
     for batch in data_loader:
-        embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])[
-            0
-        ]  # Only take the chars
+        embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])[0]  # Only take the chars
         assert embs.shape == (3 * 3, 9, 64 * 2)
         assert embs.requires_grad == True
 
@@ -82,9 +78,7 @@ def test_encoder(encoder: Encoder, data_loader):
 
 
 def test_tagger(encoder, data_loader, vocab_maps):
-    tagger_module = Tagger(
-        vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim
-    )
+    tagger_module = Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)
     for batch in data_loader:
         embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         tag_embs = tagger_module(embs, batch)
@@ -117,7 +111,7 @@ def test_full_run(data_loader, vocab_maps, electra_model):
     emb = TransformerEmbedding(electra_model)
     encoder = Encoder(embeddings={Modules.BERT: emb})
     tagger = Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)
-    abl_tagger = ABLTagger(encoder=encoder, decoders={Modules.Tagger: tagger})
+    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger)
     for batch in data_loader:
         abl_tagger(batch)
 
