@@ -19,27 +19,17 @@ from .pretrained import (
 
 def map_to_index(sentence: Sentence, w2i: Dict[str, int]) -> Tensor:
     """Map a sequence to indices."""
-    return (
-        Tensor([w2i[token] if token in w2i else w2i[UNK] for token in sentence])
-        .long()
-        .to(core.device)
-    )
+    return Tensor([w2i[token] if token in w2i else w2i[UNK] for token in sentence]).long().to(core.device)
 
 
-def map_to_chars_and_index(
-    sentence: Sentence, w2i: Dict[str, int], add_eos=True, add_sos=True
-) -> Tensor:
+def map_to_chars_and_index(sentence: Sentence, w2i: Dict[str, int], add_eos=True, add_sos=True) -> Tensor:
     """Map a sequence to characters then to indices."""
     SOS_l = [w2i[SOS]] if add_sos else []
     EOS_l = [w2i[EOS]] if add_eos else []
     # (tokens, chars)
     return pad_sequence(
         [
-            Tensor(
-                SOS_l
-                + [w2i[char] if char in w2i else w2i[UNK] for char in token]
-                + EOS_l
-            ).long()
+            Tensor(SOS_l + [w2i[char] if char in w2i else w2i[UNK] for char in token] + EOS_l).long()
             for token in sentence
         ],
         batch_first=True,
@@ -47,21 +37,14 @@ def map_to_chars_and_index(
     ).to(core.device)
 
 
-def map_to_chars_batch(
-    sentences: Sequence[Sentence], w2i: Dict[str, int], add_eos=True, add_sos=True
-) -> Tensor:
+def map_to_chars_batch(sentences: Sequence[Sentence], w2i: Dict[str, int], add_eos=True, add_sos=True) -> Tensor:
     """Map a batch of sentences to characters of words. This is convoluted, I know."""
     sents_padded = []
     for sentence in sentences:
-        sents_padded.append(
-            map_to_chars_and_index(sentence, w2i, add_eos=add_eos, add_sos=add_sos)
-        )
+        sents_padded.append(map_to_chars_and_index(sentence, w2i, add_eos=add_eos, add_sos=add_sos))
     max_words = max((t.shape[0] for t in sents_padded))
     max_chars = max((t.shape[1] for t in sents_padded))
-    sents_padded = [
-        copy_into_larger_tensor(t, t.new_zeros(size=(max_words, max_chars)))
-        for t in sents_padded
-    ]
+    sents_padded = [copy_into_larger_tensor(t, t.new_zeros(size=(max_words, max_chars))) for t in sents_padded]
     # (b * tokens, chars)
     return (
         pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
@@ -99,9 +82,7 @@ def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[BATCH_KEYS, Any]:
     batch_dict[BATCH_KEYS.TOKEN_CHARS_LENS] = tuple(
         len(token) for sent in batch_dict[BATCH_KEYS.TOKENS] for token in sent  # type: ignore
     )
-    batch_dict[BATCH_KEYS.LENGTHS] = tuple(
-        len(x) for x in batch_dict[BATCH_KEYS.TOKENS]  # type: ignore
-    )
+    batch_dict[BATCH_KEYS.LENGTHS] = tuple(len(x) for x in batch_dict[BATCH_KEYS.TOKENS])  # type: ignore
     return batch_dict
 
 
@@ -117,9 +98,7 @@ def load_dicts(
 
     # Pretrained
     if pretrained_word_embeddings_file:
-        m_map, m_embedding = read_pretrained_word_embeddings(
-            pretrained_word_embeddings_file
-        )
+        m_map, m_embedding = read_pretrained_word_embeddings(pretrained_word_embeddings_file)
         embeddings[Dicts.Pretrained] = m_embedding
         dictionaries[Dicts.Pretrained] = m_map
 
@@ -144,7 +123,5 @@ def load_dicts(
     dictionaries[Dicts.Chars] = c_map
 
     # TAGS (POS)
-    dictionaries[Dicts.FullTag] = train_ds.get_tag_vocab_map(
-        special_tokens=VocabMap.UNK_PAD
-    )
+    dictionaries[Dicts.FullTag] = train_ds.get_tag_vocab_map(special_tokens=VocabMap.UNK_PAD)
     return embeddings, dictionaries

@@ -28,6 +28,4 @@ def is_initial(offset_mapping: Tuple[int, int]) -> bool:
 
 def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]]):
     """Return the inital token masks for subtokenized tokens. Special tokens are not considered inital."""
-    return [
-        1 if is_initial(offset_mapping) else 0 for offset_mapping in offsets_mapping
-    ]
+    return [1 if is_initial(offset_mapping) else 0 for offset_mapping in offsets_mapping]

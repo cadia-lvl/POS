@@ -81,9 +81,7 @@ def cli(debug, log):  # pylint: disable=redefined-outer-name
 @click.argument("output", type=click.File("w"))
 @click.option(
     "--type",
-    type=click.Choice(
-        ["tags", "tokens", "lemmas", "morphlex", "pretrained"], case_sensitive=False
-    ),
+    type=click.Choice(["tags", "tokens", "lemmas", "morphlex", "pretrained"], case_sensitive=False),
     default="tags",
 )
 def collect_vocabularies(filepaths, output, type):
@@ -286,11 +284,8 @@ def train_and_tag(**kwargs):
             hidden_dim=kwargs["lemmatizer_hidden_dim"],
             char_emb_dim=kwargs["lemmatizer_char_dim"],
             context_embedding=Modules(kwargs["lemmatizer_embedding"]),
-            attention_dim=embs[Modules.CharactersToTokens].output_dim
-            if Modules.CharactersToTokens in embs
-            else 0,
-            char_attention=Modules.CharactersToTokens in embs
-            and kwargs["lemmatizer_char_attention"],
+            attention_dim=embs[Modules.CharactersToTokens].output_dim if Modules.CharactersToTokens in embs else 0,
+            char_attention=Modules.CharactersToTokens in embs and kwargs["lemmatizer_char_attention"],
             num_layers=kwargs["lemmatizer_num_layers"],
             dropout=kwargs["emb_dropouts"],
             weight=kwargs["lemmatizer_weight"],
@@ -312,16 +307,10 @@ def train_and_tag(**kwargs):
         shuffle=False,
         batch_size=kwargs["batch_size"] * 10,
     )
-    criterion = get_criterion(
-        decoders=decoders, label_smoothing=kwargs["label_smoothing"]
-    )
+    criterion = get_criterion(decoders=decoders, label_smoothing=kwargs["label_smoothing"])
     parameter_groups = get_parameter_groups(abl_tagger)
-    log.info(
-        f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}"
-    )
-    optimizer = get_optimizer(
-        parameter_groups, kwargs["optimizer"], kwargs["learning_rate"]
-    )
+    log.info(f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}")
+    optimizer = get_optimizer(parameter_groups, kwargs["optimizer"], kwargs["learning_rate"])
     scheduler = get_scheduler(optimizer, kwargs["scheduler"])
     evaluators = {}
     if Modules.Tagger in decoders:
@@ -396,9 +385,7 @@ def write_hyperparameters(path, hyperparameters):
 @click.argument("model_file")
 @click.argument("data_in", type=str)
 @click.argument("output", type=str)
-@click.option(
-    "--device", default="cpu", help="The device to use, 'cpu' or 'cuda:0' for GPU."
-)
+@click.option("--device", default="cpu", help="The device to use, 'cpu' or 'cuda:0' for GPU.")
 @click.option(
     "--contains_tags",
     is_flag=True,
@@ -495,9 +482,7 @@ def evaluate_predictions(
         evaluation = evaluate.TaggingLemmatizationEvaluation(
             test_dataset=ds,
             train_vocab=train_tokens,
-            external_vocabs=evaluate.ExternalVocabularies(
-                morphlex_vocab, pretrained_vocab
-            ),
+            external_vocabs=evaluate.ExternalVocabularies(morphlex_vocab, pretrained_vocab),
             train_lemmas=train_lemmas,
         )
         click.echo(evaluation.lemma_tag_confusion_matrix())
@@ -555,8 +540,6 @@ def evaluate_experiments(
                 pretrained_vocab=pretrained_vocab,
             )
     if criteria == "accuracy":
-        click.echo(
-            evaluate.format_results(evaluate.all_accuracy_average(accuracy_results))
-        )
+        click.echo(evaluate.format_results(evaluate.all_accuracy_average(accuracy_results)))
     elif criteria == "profile":
         click.echo(evaluate.format_profile(profile, up_to=up_to))

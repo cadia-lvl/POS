@@ -14,15 +14,11 @@ from . import abltagger
 class ClassingWordEmbedding(abltagger.Embedding):
     """Classic word embeddings."""
 
-    def __init__(
-        self, vocab_map: core.VocabMap, embedding_dim: int, padding_idx=0, dropout=0.0
-    ):
+    def __init__(self, vocab_map: core.VocabMap, embedding_dim: int, padding_idx=0, dropout=0.0):
         """Create one."""
         super().__init__()
         self.vocab_map = vocab_map
-        self.sparse_embedding = nn.Embedding(
-            len(vocab_map), embedding_dim, padding_idx=padding_idx, sparse=True
-        )
+        self.sparse_embedding = nn.Embedding(len(vocab_map), embedding_dim, padding_idx=padding_idx, sparse=True)
         # Skip the first index, should be zero
         nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
         self.dropout = nn.Dropout(p=dropout)
@@ -145,9 +141,7 @@ class TransformerEmbedding(abltagger.Embedding):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
         self.model = AutoModel.from_pretrained(model_path, config=self.config)
-        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(
-            model_path
-        )
+        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_path)
         # ELECTRA property
         self.num_layers = self.config.num_hidden_layers
         self.hidden_dim = self.config.hidden_size
@@ -173,14 +167,9 @@ class TransformerEmbedding(abltagger.Embedding):
             preprocessed["input_ids"].append(encoded["input_ids"][0])
             preprocessed["attention_mask"].append(encoded["attention_mask"][0])
             preprocessed["initial_token_masks"].append(
-                torch.Tensor(
-                    get_initial_token_mask(encoded["offset_mapping"][0].tolist())
-                ).bool()
+                torch.Tensor(get_initial_token_mask(encoded["offset_mapping"][0].tolist())).bool()
             )
-        return {
-            key: torch.stack(value).to(core.device)
-            for key, value in preprocessed.items()
-        }
+        return {key: torch.stack(value).to(core.device) for key, value in preprocessed.items()}
 
     def embed(self, batch: Dict[str, torch.Tensor], lengths: Sequence[int]) -> Any:
         """Apply the embedding."""

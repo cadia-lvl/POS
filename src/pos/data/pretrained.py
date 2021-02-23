@@ -35,9 +35,7 @@ def bin_str_to_emb_pair(line: str) -> Tuple[str, Tensor]:
     return (key, Tensor([float(n) for n in vector[1:-1].split(",")]))
 
 
-def emb_pairs_to_dict(
-    lines: Iterable[str], f: Callable[[str], Tuple[str, Tensor]]
-) -> Dict[str, Tensor]:
+def emb_pairs_to_dict(lines: Iterable[str], f: Callable[[str], Tuple[str, Tensor]]) -> Dict[str, Tensor]:
     """Map a sequence of strings which are embeddings using f to dictionary."""
     embedding_dict: Dict[str, Tensor] = dict()
     for line in tqdm(lines):
@@ -81,9 +79,7 @@ def map_embedding(
         else:
             embedding_dict[token] = Tensor([0 for _ in range(length_of_embeddings)])
 
-    embeddings = zeros(
-        size=(len(words_to_add) + len(special_tokens), length_of_embeddings)
-    )
+    embeddings = zeros(size=(len(words_to_add) + len(special_tokens), length_of_embeddings))
 
     vocab_map = VocabMap(words_to_add, special_tokens=special_tokens)
     for symbol, idx in vocab_map.w2i.items():

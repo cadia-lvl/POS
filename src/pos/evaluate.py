@@ -43,9 +43,7 @@ class Evaluation:
         self.test_tokens = Vocab.from_symbols(test_dataset.get_field(Fields.Tokens))
         self.test_dataset = test_dataset
         self.known_tokens = self.train_tokens.intersection(self.test_tokens)
-        self.unknown_tokens = self.test_tokens.difference(
-            self.known_tokens
-        )  # pylint: disable=no-member
+        self.unknown_tokens = self.test_tokens.difference(self.known_tokens)  # pylint: disable=no-member
 
     @staticmethod
     def accuracy(
@@ -105,9 +103,7 @@ class Evaluation:
         return (correct / total, total)
 
     @staticmethod
-    def error_profile(
-        predictions: FieldedDataset, gold_field: Fields, pred_field: Field
-    ):
+    def error_profile(predictions: FieldedDataset, gold_field: Fields, pred_field: Field):
         """Return an error profile with counts of errors (pred > correct/gold)."""
         return Counter(
             f"{predicted} > {gold}"
@@ -145,9 +141,7 @@ class TaggingEvaluation(Evaluation):
         self.test_tokens_only = self.unknown_tokens.difference(pretrained_tokens).difference(morphlex_tokens)
         # fmt: on
 
-    def _tagging_accuracy(
-        self, predictions: FieldedDataset
-    ) -> Tuple[Measures, Measures]:
+    def _tagging_accuracy(self, predictions: FieldedDataset) -> Tuple[Measures, Measures]:
         """Return all tagging accuracies. Assumes that predicted tags have been set."""
         accuracy_results = {
             "Total": self.accuracy(
@@ -247,18 +241,14 @@ class TaggingEvaluation(Evaluation):
     def tagging_accuracy(self, tags):
         """Calculate the tagging accuracy, given some tags."""
         if Fields.Tags in self.test_dataset.fields:
-            raise RuntimeError(
-                "Unable to evaluate predictions. Predicted tags are already present."
-            )
+            raise RuntimeError("Unable to evaluate predictions. Predicted tags are already present.")
 
         test_ds = self.test_dataset.add_field(tags, Fields.Tags)
         return self._tagging_accuracy(test_ds)
 
     def tagging_profile(self, predictions: FieldedDataset):
         """Error profile for tagging."""
-        return self.error_profile(
-            predictions, gold_field=Fields.GoldTags, pred_field=Fields.Tags
-        )
+        return self.error_profile(predictions, gold_field=Fields.GoldTags, pred_field=Fields.Tags)
 
 
 class LemmatizationEvaluation(Evaluation):
@@ -272,13 +262,9 @@ class LemmatizationEvaluation(Evaluation):
         """Initialize."""
         super().__init__(**kw)
         self.train_lemmas = train_lemmas
-        self.test_lemmas = Vocab.from_symbols(
-            self.test_dataset.get_field(Fields.GoldLemmas)
-        )
+        self.test_lemmas = Vocab.from_symbols(self.test_dataset.get_field(Fields.GoldLemmas))
         self.known_lemmas = self.train_lemmas.intersection(self.test_lemmas)
-        self.unknown_lemmas = self.test_lemmas.difference(
-            self.known_lemmas
-        )  # pylint: disable=no-member
+        self.unknown_lemmas = self.test_lemmas.difference(self.known_lemmas)  # pylint: disable=no-member
 
     def _lemma_accuracy(self, predictions: FieldedDataset) -> Tuple[Measures, Measures]:
         """Return all lemma accuracies."""
@@ -327,18 +313,14 @@ class LemmatizationEvaluation(Evaluation):
     def lemma_accuracy(self, lemmas: Sentences):
         """Calculate the lemmatization accuracy, given some lemmas."""
         if Fields.Lemmas in self.test_dataset.fields:
-            raise RuntimeError(
-                "Unable to evaluate predictions. Predicted lemmas are already present."
-            )
+            raise RuntimeError("Unable to evaluate predictions. Predicted lemmas are already present.")
 
         test_ds = self.test_dataset.add_field(lemmas, Fields.Lemmas)
         return self._lemma_accuracy(test_ds)
 
     def lemma_profile(self, predictions: FieldedDataset):
         """Error profile for lemmatization."""
-        return self.error_profile(
-            predictions, gold_field=Fields.GoldLemmas, pred_field=Fields.Lemmas
-        )
+        return self.error_profile(predictions, gold_field=Fields.GoldLemmas, pred_field=Fields.Lemmas)
 
 
 class TaggingLemmatizationEvaluation(TaggingEvaluation, LemmatizationEvaluation):
@@ -380,9 +362,7 @@ class TaggingLemmatizationEvaluation(TaggingEvaluation, LemmatizationEvaluation)
                 self.test_dataset.get_field(Fields.GoldLemmas),
                 self.test_dataset.get_field(Fields.Lemmas),
             )
-            for gold_tag, tag, gold_lemma, lemma in zip(
-                gold_tags, tags, gold_lemmas, lemmas
-            )
+            for gold_tag, tag, gold_lemma, lemma in zip(gold_tags, tags, gold_lemmas, lemmas)
         )
         return confusion
 
@@ -394,9 +374,7 @@ def get_average(accuracies: List[Measures]) -> Measures_std:
     for key in keys:
         totals[key] = (
             average([accuracy[key] for accuracy in accuracies]),
-            stdev([accuracy[key] for accuracy in accuracies])
-            if len(accuracies) >= 2
-            else 0.0,
+            stdev([accuracy[key] for accuracy in accuracies]) if len(accuracies) >= 2 else 0.0,
         )
     return totals
 
@@ -406,9 +384,7 @@ def average(values: List[Union[int, float]]) -> float:
     return sum(values) / len(values)
 
 
-def all_accuracy_average(
-    accuracies: List[Tuple[Measures, Measures]]
-) -> Tuple[Measures_std, Measures_std]:
+def all_accuracy_average(accuracies: List[Tuple[Measures, Measures]]) -> Tuple[Measures_std, Measures_std]:
     """Return the average of all accuracies."""
     return (
         get_average([accuracy for accuracy, _ in accuracies]),
@@ -468,9 +444,7 @@ def get_profile_from_files(
         return evaluation.tagging_profile(ds)
     else:  # lemmas
         train_lemmas = Vocab.from_file(train_lemmas)
-        evaluation = LemmatizationEvaluation(
-            test_dataset=ds, train_vocab=train_vocab, train_lemmas=train_lemmas
-        )
+        evaluation = LemmatizationEvaluation(test_dataset=ds, train_vocab=train_vocab, train_lemmas=train_lemmas)
         return evaluation.lemma_profile(ds)
 
 

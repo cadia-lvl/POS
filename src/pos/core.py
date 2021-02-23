@@ -75,9 +75,7 @@ class Vocab(set):
     def from_file(filepath: str):
         """Create a Vocab from a file with a sequence of Symbols."""
         with open(filepath) as f:
-            return Vocab(
-                (symbol for line in f.readlines() for symbol in line.strip().split())
-            )
+            return Vocab((symbol for line in f.readlines() for symbol in line.strip().split()))
 
 
 class VocabMap:
@@ -105,9 +103,7 @@ class VocabMap:
     w2i: Dict[str, int]
     i2w: Dict[int, str]
 
-    def __init__(
-        self, vocab: Vocab, special_tokens: Optional[List[Tuple[str, int]]] = None
-    ):
+    def __init__(self, vocab: Vocab, special_tokens: Optional[List[Tuple[str, int]]] = None):
         """Build a vocabulary mapping from the provided vocabulary, needs to start at index=0.
 
         If special_tokens is given, will add these tokens first and start from the next index of the highest index provided.
@@ -154,9 +150,7 @@ class FieldedDataset(Dataset):
             if lengths == -1:
                 lengths = self._get_field_length(field)
             else:
-                assert lengths == self._get_field_length(
-                    field
-                ), "All fields should be of the same size"
+                assert lengths == self._get_field_length(field), "All fields should be of the same size"
 
     def __getitem__(self, idx) -> Tuple[Sentence, ...]:
         """Support itemgetter."""
@@ -172,9 +166,7 @@ class FieldedDataset(Dataset):
 
     def __add__(self, other):
         """Support addition."""
-        new_data = tuple(
-            data + other_data for data, other_data in zip(self.data, other.data)
-        )
+        new_data = tuple(data + other_data for data, other_data in zip(self.data, other.data))
         return self.__class__(new_data, self.fields)
 
     def _get_field_length(self, field: str) -> Tuple[int]:
@@ -210,9 +202,7 @@ class FieldedDataset(Dataset):
                     adjusted_sentences[index] = part
                     index += 1
             else:
-                log.error(
-                    f"Shortening but element too short {element}, {len(element)}, {length}"
-                )
+                log.error(f"Shortening but element too short {element}, {len(element)}, {length}")
                 raise ValueError("Bad lengths")
         return tuple(adjusted_sentences)
 
@@ -243,9 +233,7 @@ class FieldedDataset(Dataset):
                 index += 1
         return tuple(adjusted_sentences)
 
-    def _adjust_field_length(
-        self, field, lengths: Tuple[int], shorten=True
-    ) -> Sentences:
+    def _adjust_field_length(self, field, lengths: Tuple[int], shorten=True) -> Sentences:
         if shorten:
             return self._shorten_field_length(field, lengths)
         else:
@@ -272,9 +260,7 @@ class FieldedDataset(Dataset):
 
     def get_char_vocab(self, field=Fields.Tokens) -> Vocab:
         """Return the character Vocabulary in the dataset."""
-        return Vocab.from_symbols(
-            (tok for sent in self.get_field(field) for tok in sent)
-        )
+        return Vocab.from_symbols((tok for sent in self.get_field(field) for tok in sent))
 
     def get_char_vocab_map(self, special_tokens=None, field=Fields.Tokens) -> VocabMap:
         """Return the character VocabularyMapping in the dataset."""
@@ -318,7 +304,5 @@ class FieldedDataset(Dataset):
             if len(examples) >= 3:
                 fields = fields + (Fields.GoldLemmas,)
             if len(examples) >= 4:
-                raise ValueError(
-                    "Unable to guess fields in TSV file. Please set 'fields'"
-                )
+                raise ValueError("Unable to guess fields in TSV file. Please set 'fields'")
         return FieldedDataset(examples, fields=fields)

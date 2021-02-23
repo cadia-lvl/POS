@@ -322,9 +322,7 @@ def vectorise_all(word_form_list, outfile):
             temp = numpy.array(tag_matrix["fn"]) + numpy.array(tag_matrix["pfn"])
         if current_2 == "fs":
             temp += (
-                numpy.array(tag_matrix["st_þag"])
-                + numpy.array(tag_matrix["st_þol"])
-                + numpy.array(tag_matrix["st_ef"])
+                numpy.array(tag_matrix["st_þag"]) + numpy.array(tag_matrix["st_þol"]) + numpy.array(tag_matrix["st_ef"])
             )
         if current_2 == "st":
             temp += numpy.array(tag_matrix["st"])
@@ -369,9 +367,7 @@ def vectorise_all(word_form_list, outfile):
 
         # using a dict for it all - merging all possibilities for a wordform into one vector
         if current_wordform in bin_dict:
-            bin_dict[current_wordform] = numpy.logical_or(
-                bin_dict[current_wordform], temp
-            )
+            bin_dict[current_wordform] = numpy.logical_or(bin_dict[current_wordform], temp)
         else:
             bin_dict[current_wordform] = temp
 
@@ -397,15 +393,9 @@ def vectorise_all(word_form_list, outfile):
 
 if __name__ == "__main__":
     # reading input parameters
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument(
-        "--input", "-i", help="Name of input file.", default="./data/SHsnid.csv"
-    )
-    parser.add_argument(
-        "--output", "-o", help="Name of output file.", default="./extra/dmii.vectors"
-    )
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--input", "-i", help="Name of input file.", default="./data/SHsnid.csv")
+    parser.add_argument("--output", "-o", help="Name of output file.", default="./extra/dmii.vectors")
 
     try:
         args = parser.parse_args()

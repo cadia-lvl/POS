@@ -44,9 +44,7 @@ class BatchPreprocess(metaclass=abc.ABCMeta):
 class Embedding(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
     """A module which accepts string inputs and embeds them to tensors."""
 
-    def forward(
-        self, batch: Sequence[Sentence], lengths: Sequence[int]
-    ) -> torch.Tensor:
+    def forward(self, batch: Sequence[Sentence], lengths: Sequence[int]) -> torch.Tensor:
         """Run a generic forward pass for the Embeddings."""
         return self.embed(self.preprocess(batch), lengths)
 
@@ -82,14 +80,10 @@ class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
         """Add the decoder targets to the batch dictionary. SIDE-EFFECTS!."""
 
     @abc.abstractmethod
-    def decode(
-        self, encoded: Dict[Modules, Any], batch: Dict[BATCH_KEYS, Any]
-    ) -> torch.Tensor:
+    def decode(self, encoded: Dict[Modules, Any], batch: Dict[BATCH_KEYS, Any]) -> torch.Tensor:
         """Run the decoder on the batch."""
 
-    def forward(
-        self, encoded: Dict[Modules, torch.Tensor], batch: Dict[BATCH_KEYS, Any]
-    ) -> torch.Tensor:
+    def forward(self, encoded: Dict[Modules, torch.Tensor], batch: Dict[BATCH_KEYS, Any]) -> torch.Tensor:
         """Run a generic forward pass for the Embeddings."""
         self.add_targets(batch)
         return self.decode(encoded=encoded, batch=batch)
@@ -110,9 +104,7 @@ class Encoder(nn.Module):
         """Initialize the module given the parameters."""
         super().__init__()
         self.residual = residual
-        self.embeddings = nn.ModuleDict(
-            {key.value: emb for key, emb in embeddings.items()}
-        )
+        self.embeddings = nn.ModuleDict({key.value: emb for key, emb in embeddings.items()})
 
         bilstm_in_dim = sum(emb.output_dim for emb in self.embeddings.values())
         if self.residual:
@@ -138,25 +130,17 @@ class Encoder(nn.Module):
         self.main_bilstm_out_dropout = nn.Dropout(p=input_dropouts)
         self.output_dim = main_lstm_dim * 2
 
-    def forward(
-        self, batch: Sequence[Sentence], lengths: Sequence[int]
-    ) -> Dict[Modules, torch.Tensor]:
+    def forward(self, batch: Sequence[Sentence], lengths: Sequence[int]) -> Dict[Modules, torch.Tensor]:
         """Run a forward pass through the module. Input should be tensors."""
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # Embeddings
-        embedded = {
-            Modules(key): emb(batch, lengths) for key, emb in self.embeddings.items()
-        }
+        embedded = {Modules(key): emb(batch, lengths) for key, emb in self.embeddings.items()}
 
-        to_bilstm = {
-            Modules(key): embedded[Modules(key)] for key in self.embeddings.keys()
-        }
+        to_bilstm = {Modules(key): embedded[Modules(key)] for key in self.embeddings.keys()}
         if Modules.CharactersToTokens in to_bilstm:
             last_hidden = to_bilstm[Modules.CharactersToTokens][1]
             # Reshape from (b*s, f) -> (b, s, f)
-            to_bilstm[Modules.CharactersToTokens] = last_hidden.reshape(
-                len(lengths), -1, last_hidden.shape[-1]
-            )
+            to_bilstm[Modules.CharactersToTokens] = last_hidden.reshape(len(lengths), -1, last_hidden.shape[-1])
         if Modules.BERT in to_bilstm:
             to_bilstm[Modules.BERT] = get_emb_by_initial_token_masks(to_bilstm)
         embs_to_bilstm = torch.cat(list(to_bilstm.values()), dim=2)
@@ -175,9 +159,7 @@ class Encoder(nn.Module):
         # Ignore the hidden outputs
         packed_out, _ = self.bilstm(packed)
         # Unpack and ignore the lengths
-        bilstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(
-            packed_out, batch_first=True
-        )
+        bilstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(packed_out, batch_first=True)
         bilstm_out = self.main_bilstm_out_dropout(bilstm_out)
         # Use residual connections
         if self.residual:
@@ -199,13 +181,8 @@ class ABLTagger(nn.Module):
 
     def forward(self, batch: Dict[BATCH_KEYS, Any]) -> Dict[Modules, torch.Tensor]:
         """Forward pass."""
-        encoded: Dict[Modules, torch.Tensor] = self.encoder(
-            batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS]
-        )
-        return {
-            Modules(key): decoder(encoded, batch)
-            for key, decoder in self.decoders.items()
-        }
+        encoded: Dict[Modules, torch.Tensor] = self.encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
+        return {Modules(key): decoder(encoded, batch) for key, decoder in self.decoders.items()}
 
 
 def get_emb_by_initial_token_masks(encoded) -> torch.Tensor:

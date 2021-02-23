@@ -55,9 +55,7 @@ class Tagger:
         chunked_ds = chunk_dataset(
             ds,
             tokenizer=self.model.encoder.embeddings[Modules.BERT.value].tokenizer,
-            max_sequence_length=self.model.encoder.embeddings[
-                Modules.BERT.value
-            ].max_length,
+            max_sequence_length=self.model.encoder.embeddings[Modules.BERT.value].max_length,
         )
         log.info("Predicting tags")
         # Initialize DataLoader

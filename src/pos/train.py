@@ -159,12 +159,8 @@ def print_tagger(tagger: Module):
     log.info(tagger)
     for name, tensor in tagger.state_dict().items():
         log.info(f"{name}: {numel(tensor)}")
-    log.info(
-        f"Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}"
-    )
-    log.info(
-        f"Not trainable parameters={sum(p.numel() for p in tagger.parameters() if not p.requires_grad)}"
-    )
+    log.info(f"Trainable parameters={sum(p.numel() for p in tagger.parameters() if p.requires_grad)}")
+    log.info(f"Not trainable parameters={sum(p.numel() for p in tagger.parameters() if not p.requires_grad)}")
 
 
 def run_batch(
@@ -217,9 +213,7 @@ def tag_data_loader(
     criterion=None,
 ) -> Tuple[Dict[Modules, float], Dict[Modules, Sentences]]:
     """Tag (apply POS) on a given data set. Sets the model to evaluation mode."""
-    total_values: Dict[Modules, Sentences] = {
-        Modules(key): tuple() for key in model.decoders
-    }
+    total_values: Dict[Modules, Sentences] = {Modules(key): tuple() for key in model.decoders}
     total_losses = {Modules(key): 0.0 for key in model.decoders}
     total_tokens = 0
     model.eval()
@@ -227,9 +221,7 @@ def tag_data_loader(
         start = datetime.now()
         for batch in data_loader:
             losses, preds = tag_batch(model, batch, criterion)
-            for module_name, values, loss in zip(
-                preds.keys(), preds.values(), losses.values()
-            ):
+            for module_name, values, loss in zip(preds.keys(), preds.values(), losses.values()):
                 total_losses[module_name] += loss
                 total_values[module_name] = total_values[module_name] + values
             total_tokens += sum(batch[BATCH_KEYS.LENGTHS])
@@ -253,12 +245,8 @@ def train_model(
         for module_name, loss in losses.items():
             epoch_losses[module_name] += loss
         if i % 10 == 0:
-            for module_name, preds, loss in zip(
-                preds.keys(), preds.values(), losses.values()
-            ):
-                acc = categorical_accuracy(
-                    preds, batch[MODULE_TO_BATCHKEY[module_name]].to(preds.device)
-                )
+            for module_name, preds, loss in zip(preds.keys(), preds.values(), losses.values()):
+                acc = categorical_accuracy(preds, batch[MODULE_TO_BATCHKEY[module_name]].to(preds.device))
                 log.info(
                     f"{log_prepend}batch={i}/{len(data_loader)}, module_name={module_name} acc={acc}, loss={loss:.4f}"
                 )
@@ -270,9 +258,7 @@ def run_epochs(
     optimizer,
     criterion,
     scheduler,
-    evaluators: Dict[
-        Modules, Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]
-    ],
+    evaluators: Dict[Modules, Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]],
     train_data_loader: DataLoader,
     test_data_loader: DataLoader,
     epochs: int,
@@ -288,9 +274,7 @@ def run_epochs(
     for epoch in range(1, epochs + 1):
         # Time it
         start = datetime.now()
-        log.info(
-            f'Epoch={epoch}/{epochs}, lr={list(param_group["lr"] for param_group in optimizer.param_groups)}'
-        )
+        log.info(f'Epoch={epoch}/{epochs}, lr={list(param_group["lr"] for param_group in optimizer.param_groups)}')
         train_losses = train_model(
             model=model,
             optimizer=optimizer,
