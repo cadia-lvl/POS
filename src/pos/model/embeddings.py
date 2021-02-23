@@ -1,5 +1,5 @@
 """Implementation of several embeddings."""
-from typing import Dict, Sequence
+from typing import Any, Dict, Sequence
 
 from torch import nn
 import torch
@@ -110,7 +110,7 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
         """Preprocess the sentence batch."""
         return map_to_chars_batch(batch, self.vocab_map.w2i)
 
-    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> torch.Tensor:
+    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> Any:
         """Apply the embedding."""
         # (b * seq, chars)
         char_embs = self.emb_dropout(self.sparse_embedding(batch))
@@ -140,7 +140,7 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
 class TransformerEmbedding(abltagger.Embedding):
     """An embedding of a sentence after going through a Transformer."""
 
-    def __init__(self, model_path: str, layers="weights", dropout=0.0):
+    def __init__(self, model_path: str, dropout=0.0):
         """Initialize it be reading the config, model and tokenizer."""
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
@@ -153,9 +153,6 @@ class TransformerEmbedding(abltagger.Embedding):
         self.hidden_dim = self.config.hidden_size
         self.max_length = self.tokenizer.max_len_single_sentence
         self.dropout = nn.Dropout(p=dropout)
-        self.layers = layers
-        if self.layers == "weights":
-            self.layer_weights = nn.parameter.Parameter(torch.randn(self.num_layers))
 
     def preprocess(self, batch: Sequence[core.Sentence]) -> Dict[str, torch.Tensor]:
         """Preprocess the sentence batch."""
@@ -185,9 +182,7 @@ class TransformerEmbedding(abltagger.Embedding):
             for key, value in preprocessed.items()
         }
 
-    def embed(
-        self, batch: Dict[str, torch.Tensor], lengths: Sequence[int]
-    ) -> torch.Tensor:
+    def embed(self, batch: Dict[str, torch.Tensor], lengths: Sequence[int]) -> Any:
         """Apply the embedding."""
         outputs = self.model(
             input_ids=batch["input_ids"],
@@ -195,22 +190,8 @@ class TransformerEmbedding(abltagger.Embedding):
             return_dict=True,
         )
         # Tuple[(b, s, f), ...]
-        output = outputs["hidden_states"][-self.num_layers :]
-        emb = outputs["last_hidden_state"]
-        if self.layers == "weights":
-            weights = nn.functional.softmax(self.layer_weights, dim=0)
-            weighted_layers = output[0] * weights[0]
-            for l in range(1, self.num_layers):
-                weighted_layers += output[l] * weights[l]
-            emb = weighted_layers
-        # Now we map the subtokens to tokens.
-        tokens_emb = []
-        for b in range(emb.shape[0]):
-            initial_token_mask = batch["initial_token_masks"][b]
-            output_sent = emb[b, :, :]
-            tokens_emb.append(output_sent[initial_token_mask, :])
-        padded = torch.nn.utils.rnn.pad_sequence(tokens_emb, batch_first=True)
-        return self.dropout(padded)
+        outputs["initial_token_masks"] = batch["initial_token_masks"]
+        return outputs
 
     @property
     def output_dim(self):

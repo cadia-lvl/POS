@@ -6,7 +6,7 @@ from pos.model import (
     ABLTagger,
     CharacterAsWordEmbedding,
     Encoder,
-    CharacterDecoder,
+    Lemmatizer,
     Modules,
 )
 from pos.train import (
@@ -70,7 +70,7 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps):
         lstm_dropouts=0.0,
         input_dropouts=0.0,
     )
-    decoders[Modules.Lemmatizer] = CharacterDecoder(
+    decoders[Modules.Lemmatizer] = Lemmatizer(
         vocab_map=dicts[Dicts.Chars],
         hidden_dim=encoder.output_dim,
         context_dim=encoder.output_dim,

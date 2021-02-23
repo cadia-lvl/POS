@@ -12,6 +12,7 @@ from typing import Dict
 
 import click
 import torch
+from torch import nn
 
 from pos.data import (
     load_dicts,
@@ -37,7 +38,7 @@ from pos.model import (
     PretrainedEmbedding,
     ClassingWordEmbedding,
     CharacterAsWordEmbedding,
-    CharacterDecoder,
+    Lemmatizer,
     Modules,
 )
 from pos.train import (
@@ -153,6 +154,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
 @click.option("--tagger_weight", default=1.0, help="Value to multiply tagging loss")
 @click.option("--tagger_embedding", default="bilstm", help="The embedding to feed to the Tagger, see pos.model.Modules.")
+@click.option("--tagger_transformer_layers", default=0, help="The number of transformer layers to use. 0 to disable.")
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option("--lemmatizer_weight", default=0.1, help="Value to multiply lemmatizer loss")
 @click.option("--lemmatizer_embedding", default="bilstm", help="The embedding to feed to the Lemmatizer, see pos.model.Modules.")
@@ -169,7 +171,6 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--pretrained_word_embeddings_file", default=None, help="A file which contains pretrained word embeddings. See implementation for supported formats.")
 @click.option("--word_embedding_dim", default=0, help="The word/token embedding dimension. Set to 0 to disable word embeddings.")
 @click.option("--bert_encoder", default=None, help="A folder which contains a pretrained BERT-like model. Set to None to disable.")
-@click.option("--bert_layers", default="last", help="How to construct the embeddings from the BERT layers. 'weights' are learnt weights. Other values default to the last layer")
 @click.option("--main_lstm_layers", default=1, help="The number of bilstm layers to use in the encoder.")
 @click.option("--main_lstm_dim", default=128, help="The dimension of the lstm to use in the encoder.")
 @click.option("--emb_dropouts", default=0.0, help="The dropout to use for Embeddings.")
@@ -213,7 +214,6 @@ def train_and_tag(**kwargs):
         embs[Modules.BERT] = TransformerEmbedding(
             kwargs["bert_encoder"],
             dropout=kwargs["emb_dropouts"],
-            layers=kwargs["bert_layers"],
         )
         train_ds = chunk_dataset(
             unchunked_train_ds,
@@ -278,7 +278,7 @@ def train_and_tag(**kwargs):
         )
     if kwargs["lemmatizer"]:
         log.info("Training Lemmatizer")
-        decoders[Modules.Lemmatizer] = CharacterDecoder(
+        decoders[Modules.Lemmatizer] = Lemmatizer(
             vocab_map=dicts[Dicts.Chars],
             context_dim=embs[Modules(kwargs["lemmatizer_embedding"])].output_dim
             if Modules(kwargs["lemmatizer_embedding"]) in embs

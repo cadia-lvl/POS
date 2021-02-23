@@ -1,6 +1,7 @@
 """Implmementation of some decoders."""
 
 from typing import Dict, List, Optional, Sequence, Tuple, Any
+
 import torch.nn as nn
 import torch
 from torch import Tensor, softmax
@@ -47,11 +48,8 @@ class MultiplicativeAttention(nn.Module):
         return weights.unsqueeze(dim=1).bmm(values).squeeze()
 
 
-class CharacterDecoder(abltagger.Decoder):
-    """Cho et al., 2014 GRU RNN decoder which uses the context vector for each timestep. LSTM instead of GRU due to errors.
-
-    Code adjusted from: https://github.com/bentrevett/pytorch-seq2seq/
-    """
+class Lemmatizer(abltagger.Decoder):
+    """The lemmatizer."""
 
     MAX_SEQUENCE_ADDITIONAL = 20
 
@@ -289,14 +287,18 @@ class Tagger(abltagger.Decoder):
         return self._weight
 
     def decode(
-        self, encoded: Dict[abltagger.Modules, Tensor], batch: Dict[BATCH_KEYS, Any]
+        self, encoded: Dict[abltagger.Modules, Any], batch: Dict[BATCH_KEYS, Any]
     ) -> Tensor:
         """Run the decoder on the batch."""
-        context = torch.cat(
-            tuple(emb for key, emb in encoded.items() if key in {self.embedding}),
-            dim=2,
-        )
-        return self.tagger(context)
+        # Now we map the subtokens to tokens.
+        if self.embedding == abltagger.Modules.BERT:
+            padded = abltagger.get_emb_by_initial_token_masks(encoded)
+            logits = self.tagger(padded)
+            return logits
+        elif self.embedding == abltagger.Modules.BiLSTM:
+            return self.tagger(encoded[abltagger.Modules.BiLSTM])
+        else:
+            raise NotImplementedError(f"{self.embedding} is not implemented in Tagger")
 
     def add_targets(self, batch: Dict[BATCH_KEYS, Any]):
         """Add the decoder targets to the batch dictionary. SIDE-EFFECTS!."""

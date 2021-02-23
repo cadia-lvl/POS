@@ -12,7 +12,7 @@ from pos.model import (
     Tagger,
     Encoder,
     ABLTagger,
-    CharacterDecoder,
+    Lemmatizer,
 )
 from pos.core import Dicts
 from pos.data import BATCH_KEYS, collate_fn
@@ -59,16 +59,18 @@ def test_transformer_embedding_electra_small(electra_model, data_loader):
     # The TransformerEmbedding expects the input to be a Sentence, not vectors.
     for batch in data_loader:
         embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
-        assert embs.shape == (3, 3, 256)
+        embs = embs["hidden_states"][-1]
+        assert embs.shape == (3, 126, 256)
         assert embs.requires_grad == True
 
 
 def test_transformer_embedding_electra_small_only_last(electra_model, data_loader):
-    wemb = TransformerEmbedding(electra_model, layers="last")
+    wemb = TransformerEmbedding(electra_model)
     # The TransformerEmbedding expects the input to be a Sentence, not vectors.
     for batch in data_loader:
         embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
-        assert embs.shape == (3, 3, 256)
+        embs = embs["hidden_states"][-1]
+        assert embs.shape == (3, 126, 256)
         assert embs.requires_grad == True
 
 
@@ -93,7 +95,7 @@ def test_tagger(encoder, data_loader, vocab_maps):
 def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
     hidden_dim = encoder.output_dim
     emb_dim = 5
-    char_decoder = CharacterDecoder(
+    char_decoder = Lemmatizer(
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=hidden_dim,
         context_dim=hidden_dim,

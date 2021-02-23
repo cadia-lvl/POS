@@ -14,7 +14,7 @@ from pos.model import (
     ABLTagger,
     Encoder,
     ClassingWordEmbedding,
-    CharacterDecoder,
+    Lemmatizer,
     Tagger,
     Modules,
 )
@@ -115,9 +115,9 @@ def tagger_module(vocab_maps, encoder) -> Tagger:
 
 
 @fixture
-def lemmatizer_module(vocab_maps, encoder) -> CharacterDecoder:
+def lemmatizer_module(vocab_maps, encoder) -> Lemmatizer:
     """Return a Tagger."""
-    return CharacterDecoder(
+    return Lemmatizer(
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=encoder.output_dim,
         context_dim=encoder.output_dim,

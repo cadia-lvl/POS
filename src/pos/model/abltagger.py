@@ -51,7 +51,7 @@ class Embedding(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
         return self.embed(self.preprocess(batch), lengths)
 
     @abc.abstractmethod
-    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> torch.Tensor:
+    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> Any:
         """Apply the embedding."""
         raise NotImplementedError
 
@@ -83,7 +83,7 @@ class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def decode(
-        self, encoded: Dict[Modules, torch.Tensor], batch: Dict[BATCH_KEYS, Any]
+        self, encoded: Dict[Modules, Any], batch: Dict[BATCH_KEYS, Any]
     ) -> torch.Tensor:
         """Run the decoder on the batch."""
 
@@ -144,16 +144,21 @@ class Encoder(nn.Module):
         """Run a forward pass through the module. Input should be tensors."""
         # input is (batch_size=num_sentence, max_seq_len_in_batch=max(len(sentences)), max_word_len_in_batch + 1 + 1)
         # Embeddings
-        embedded = {key: emb(batch, lengths) for key, emb in self.embeddings.items()}
-        results = {Modules(key): emb for key, emb in embedded.items()}
+        embedded = {
+            Modules(key): emb(batch, lengths) for key, emb in self.embeddings.items()
+        }
 
-        to_bilstm = {key: embedded[key] for key in self.embeddings.keys()}
-        if Modules.CharactersToTokens.value in to_bilstm:
-            last_hidden = to_bilstm[Modules.CharactersToTokens.value][1]
+        to_bilstm = {
+            Modules(key): embedded[Modules(key)] for key in self.embeddings.keys()
+        }
+        if Modules.CharactersToTokens in to_bilstm:
+            last_hidden = to_bilstm[Modules.CharactersToTokens][1]
             # Reshape from (b*s, f) -> (b, s, f)
-            to_bilstm[Modules.CharactersToTokens.value] = last_hidden.reshape(
+            to_bilstm[Modules.CharactersToTokens] = last_hidden.reshape(
                 len(lengths), -1, last_hidden.shape[-1]
             )
+        if Modules.BERT in to_bilstm:
+            to_bilstm[Modules.BERT] = get_emb_by_initial_token_masks(to_bilstm)
         embs_to_bilstm = torch.cat(list(to_bilstm.values()), dim=2)
         if self.residual:
             embs_to_bilstm = self.linear(embs_to_bilstm)
@@ -177,9 +182,9 @@ class Encoder(nn.Module):
         # Use residual connections
         if self.residual:
             bilstm_out = bilstm_out + torch.cat((embs_to_bilstm, embs_to_bilstm), dim=2)
-        results[Modules.BiLSTM] = bilstm_out
+        embedded[Modules.BiLSTM] = bilstm_out
 
-        return results
+        return embedded
 
 
 class ABLTagger(nn.Module):
@@ -201,3 +206,14 @@ class ABLTagger(nn.Module):
             Modules(key): decoder(encoded, batch)
             for key, decoder in self.decoders.items()
         }
+
+
+def get_emb_by_initial_token_masks(encoded) -> torch.Tensor:
+    emb = encoded[Modules.BERT]["hidden_states"][-1]  # Only last layer
+    tokens_emb = []
+    for b in range(emb.shape[0]):
+        initial_token_mask = encoded[Modules.BERT]["initial_token_masks"][b]
+        output_sent = emb[b, :, :]
+        tokens_emb.append(output_sent[initial_token_mask, :])
+    padded = torch.nn.utils.rnn.pad_sequence(tokens_emb, batch_first=True)
+    return padded
