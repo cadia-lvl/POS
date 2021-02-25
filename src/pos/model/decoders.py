@@ -250,9 +250,11 @@ class Tagger(abltagger.Decoder):
         self._output_dim = len(vocab_map)
         self._weight = weight
         self.embedding = embedding
-
-        self.tagger = nn.Linear(input_dim, self.output_dim)
-        nn.init.xavier_uniform_(self.tagger.weight)
+        # Classification head
+        self.dense = nn.Linear(input_dim, input_dim)
+        self.activation_fn = nn.ReLU()
+        self.layer_norm = nn.LayerNorm(input_dim)
+        self.out_proj = nn.Linear(input_dim, self.output_dim)
 
     @property
     def output_dim(self) -> int:
@@ -270,13 +272,15 @@ class Tagger(abltagger.Decoder):
         """Run the decoder on the batch."""
         # Now we map the subtokens to tokens.
         if self.embedding == abltagger.Modules.BERT:
-            padded = abltagger.get_emb_by_initial_token_masks(encoded)
-            logits = self.tagger(padded)
-            return logits
+            x = abltagger.get_emb_by_initial_token_masks(encoded)
         elif self.embedding == abltagger.Modules.BiLSTM:
-            return self.tagger(encoded[abltagger.Modules.BiLSTM])
+            x = encoded[abltagger.Modules.BiLSTM]
         else:
             raise NotImplementedError(f"{self.embedding} is not implemented in Tagger")
+        x = self.dense(x)
+        x = self.layer_norm(x)
+        x = self.activation_fn(x)
+        return self.out_proj(x)
 
     def add_targets(self, batch: Dict[BATCH_KEYS, Any]):
         """Add the decoder targets to the batch dictionary. SIDE-EFFECTS!."""
