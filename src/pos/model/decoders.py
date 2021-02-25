@@ -59,6 +59,7 @@ class Lemmatizer(abltagger.Decoder):
         context_dim,
         char_emb_dim,
         num_layers=1,
+        char_rnn_input_dim=0,
         attention_dim=0,
         char_attention=False,
         dropout=0.0,
@@ -74,12 +75,18 @@ class Lemmatizer(abltagger.Decoder):
         self._output_dim = len(vocab_map)  # The number of characters, these will be interpreted as logits.
         self._weight = weight
         self.char_attention = char_attention
+        self.char_rnn_input_dim = char_rnn_input_dim
 
         self.sparse_embedding = nn.Embedding(
             len(vocab_map), char_emb_dim, sparse=True
         )  # We map the input idx to vectors.
         # last character + sentence context + character attention
-        rnn_in_dim = char_emb_dim + self.context_dim + (self.attention_dim if self.char_attention else 0)
+        rnn_in_dim = (
+            char_emb_dim
+            + self.context_dim
+            + (self.attention_dim if self.char_attention else 0)
+            + self.char_rnn_input_dim
+        )
         self.rnn = nn.LSTM(
             input_size=rnn_in_dim,
             hidden_size=self.hidden_dim,
@@ -198,29 +205,30 @@ class Lemmatizer(abltagger.Decoder):
         # (layers, b*s, f)
         hidden = torch.zeros(size=(self.num_layers, b * s, self.hidden_dim), device=tag_embeddings.device)
         cell = torch.zeros(size=(self.num_layers, b * s, self.hidden_dim), device=tag_embeddings.device)
-        if self.char_attention:
-            # (b*s, c, f)
-            characters_rnn = encoded[abltagger.Modules.CharactersToTokens][0]
-            # (b*s, f)
-            last_hidden_rnn = encoded[abltagger.Modules.CharactersToTokens][1]
         # (b*s, t, f_out)
         predictions = torch.zeros(size=(b * s, c, self.output_dim), device=tag_embeddings.device)
 
         char_idx = 0
-        # (b)
+        # (b*s)
         next_char_input = self._get_char_input_next_timestep(
             timestep=char_idx,
             previous_predictions=predictions,
             max_timestep=c,
         )
         while next_char_input is not None:
-            # (b, f)
+            # (b*s, f)
             emb_chars = self.dropout(self.sparse_embedding(next_char_input))
             rnn_in = torch.cat((emb_chars, tag_embeddings), dim=1)
+            if self.char_rnn_input_dim:
+                # (b*s, f)
+                rnn_in = torch.cat((rnn_in, encoded[abltagger.Modules.CharactersToTokens][1]), dim=1)
             if self.char_attention:
-                char_attention = self.attention(hidden.view(hidden.shape[1], -1), characters_rnn)
+                # char rnn = (b*s, c, f)
+                char_attention = self.attention(
+                    hidden.view(hidden.shape[1], -1), encoded[abltagger.Modules.CharactersToTokens][0]
+                )
                 rnn_in = torch.cat((rnn_in, char_attention), dim=1)
-            # (b, 1, f), a single timestep
+            # (b*s, 1, f), a single timestep
             rnn_in = rnn_in.unsqueeze(1)
             output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
             predictions[:, char_idx : char_idx + 1, :] = self.output_embedding(output)

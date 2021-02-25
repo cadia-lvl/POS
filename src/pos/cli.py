@@ -154,6 +154,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--tagger_embedding", default="bilstm", help="The embedding to feed to the Tagger, see pos.model.Modules.")
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option("--lemmatizer_weight", default=0.1, help="Value to multiply lemmatizer loss")
+@click.option("--lemmatizer_accept_char_rnn_last/--no_lemmatizer_accept_char_rnn_last", default=False, help="Should the Character RNN last hidden state be input to Lemmatizer")
 @click.option("--lemmatizer_hidden_dim", default=128, help="The hidden dim of the decoder RNN.")
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
 @click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
@@ -279,6 +280,9 @@ def train_and_tag(**kwargs):
             context_dim=decoders[Modules.Tagger].output_dim,
             hidden_dim=kwargs["lemmatizer_hidden_dim"],
             char_emb_dim=kwargs["lemmatizer_char_dim"],
+            char_rnn_input_dim=0
+            if not kwargs["lemmatizer_accept_char_rnn_last"]
+            else embs[Modules.CharactersToTokens].output_dim,
             attention_dim=embs[Modules.CharactersToTokens].output_dim if Modules.CharactersToTokens in embs else 0,
             char_attention=Modules.CharactersToTokens in embs and kwargs["lemmatizer_char_attention"],
             num_layers=kwargs["lemmatizer_num_layers"],

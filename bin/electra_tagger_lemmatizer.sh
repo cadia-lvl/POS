@@ -27,7 +27,8 @@ train-and-tag \
 --lemmatizer_hidden_dim 256 \
 --lemmatizer_char_dim 64 \
 --lemmatizer_num_layers 1 \
---lemmatizer_char_attention \
+--no_lemmatizer_char_attention \
+--lemmatizer_accept_char_rnn_last \
 --tagger \
 --tagger_embedding bert \
 --bert_encoder electra-base-is \
