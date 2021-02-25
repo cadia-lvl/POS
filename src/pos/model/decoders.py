@@ -1,12 +1,11 @@
 """Implmementation of some decoders."""
 
-from typing import Dict, List, Optional, Sequence, Tuple, Any
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Any
 
 import torch.nn as nn
 import torch
 from torch import Tensor, softmax
 import numpy as np
-
 from . import abltagger
 from pos.core import Sentences, VocabMap
 from pos.data import (
@@ -59,7 +58,6 @@ class Lemmatizer(abltagger.Decoder):
         hidden_dim,
         context_dim,
         char_emb_dim,
-        context_embedding=abltagger.Modules.BiLSTM,
         num_layers=1,
         attention_dim=0,
         char_attention=False,
@@ -73,7 +71,6 @@ class Lemmatizer(abltagger.Decoder):
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
         self.attention_dim = attention_dim
-        self.context_embedding = context_embedding
         self._output_dim = len(vocab_map)  # The number of characters, these will be interpreted as logits.
         self._weight = weight
         self.char_attention = char_attention
@@ -91,18 +88,25 @@ class Lemmatizer(abltagger.Decoder):
         )
 
         # Map directly to characters
-        self.fc_out = nn.Linear(self.hidden_dim, len(vocab_map))
-        self.illegal_chars_output = {
-            self.vocab_map.SOS_ID,
-            self.vocab_map.PAD_ID,
-            self.vocab_map.UNK_ID,
-        }
+        self.output_embedding = nn.Linear(self.hidden_dim, len(vocab_map))
         if self.char_attention:
             self.attention = MultiplicativeAttention(
                 encoder_dim=self.attention_dim,
                 decoder_dim=self.hidden_dim * self.num_layers,
             )
         self.dropout = nn.Dropout(dropout)  # Embedding dropout
+
+    @property
+    def illegal_chars_output(self) -> Set[int]:
+        return {self.sos_idx, self.vocab_map.UNK_ID, self.pad_idx}
+
+    @property
+    def pad_idx(self) -> int:
+        return self.vocab_map.PAD_ID
+
+    @property
+    def sos_idx(self) -> int:
+        return self.vocab_map.SOS_ID
 
     @property
     def output_dim(self) -> int:
@@ -151,23 +155,23 @@ class Lemmatizer(abltagger.Decoder):
             )
 
     @staticmethod
+    def make_sequence(device, token_idx: int, batch_size) -> Tensor:
+        """Return the SOS sequence."""
+        return Tensor([token_idx] * batch_size).long().to(device)
+
     def _get_char_input_next_timestep(
+        self,
         timestep: int,
-        vocab_map: VocabMap,
         previous_predictions: Tensor,
         max_timestep: int,
     ) -> Optional[Tensor]:
         """Get the next character (as an index for embedding) timestep to feed the model."""
         if timestep == max_timestep:
             return None
-        sos_sequence = (
-            Tensor([vocab_map.w2i[SOS]] * previous_predictions.shape[0]).long().to(previous_predictions.device)
-        )
+        sos_sequence = self.make_sequence(previous_predictions.device, self.sos_idx, previous_predictions.shape[0])
         if timestep == 0:  # First timestep
             return sos_sequence
-        pad_sequence = (
-            Tensor([vocab_map.w2i[PAD]] * previous_predictions.shape[0]).long().to(previous_predictions.device)
-        )
+        pad_sequence = self.make_sequence(previous_predictions.device, self.pad_idx, previous_predictions.shape[0])
         # Otherwise, we will feed previous predictions.
         last_timestep_idxs = previous_predictions[:, timestep - 1, :].argmax(dim=1)
         equal_sos = last_timestep_idxs == sos_sequence
@@ -181,8 +185,8 @@ class Lemmatizer(abltagger.Decoder):
         self, encoded: Dict[abltagger.Modules, Tensor], batch: Dict[BATCH_KEYS, Any], tags: Optional[Tensor]
     ) -> Tensor:
         """Run the decoder on the batch."""
-        context = encoded[self.context_embedding]
-        b, s, f = (*context.shape,)
+        tag_embeddings = tags.clone().detach()
+        b, s, f = tag_embeddings.shape
         # 1 for EOS
         c = (
             batch[BATCH_KEYS.TARGET_LEMMAS].shape[1]
@@ -190,44 +194,42 @@ class Lemmatizer(abltagger.Decoder):
             else max(batch[BATCH_KEYS.TOKEN_CHARS_LENS]) + self.MAX_SEQUENCE_ADDITIONAL
         )
         # (b*s, f) = (num_tokens, features)
-        context = context.reshape(b * s, f)
+        tag_embeddings = tag_embeddings.reshape(b * s, f)
         # (layers, b*s, f)
-        hidden = torch.zeros(size=(self.num_layers, b * s, self.hidden_dim), device=context.device)
-        cell = torch.zeros(size=(self.num_layers, b * s, self.hidden_dim), device=context.device)
+        hidden = torch.zeros(size=(self.num_layers, b * s, self.hidden_dim), device=tag_embeddings.device)
+        cell = torch.zeros(size=(self.num_layers, b * s, self.hidden_dim), device=tag_embeddings.device)
         if self.char_attention:
             # (b*s, c, f)
             characters_rnn = encoded[abltagger.Modules.CharactersToTokens][0]
             # (b*s, f)
             last_hidden_rnn = encoded[abltagger.Modules.CharactersToTokens][1]
         # (b*s, t, f_out)
-        predictions = torch.zeros(size=(b * s, c, self.output_dim), device=context.device)
+        predictions = torch.zeros(size=(b * s, c, self.output_dim), device=tag_embeddings.device)
 
         char_idx = 0
         # (b)
         next_char_input = self._get_char_input_next_timestep(
             timestep=char_idx,
-            vocab_map=self.vocab_map,
             previous_predictions=predictions,
-            max_timestep=c - 1,
+            max_timestep=c,
         )
         while next_char_input is not None:
             # (b, f)
             emb_chars = self.dropout(self.sparse_embedding(next_char_input))
-            rnn_in = torch.cat((emb_chars, context), dim=1)
+            rnn_in = torch.cat((emb_chars, tag_embeddings), dim=1)
             if self.char_attention:
                 char_attention = self.attention(hidden.view(hidden.shape[1], -1), characters_rnn)
                 rnn_in = torch.cat((rnn_in, char_attention), dim=1)
             # (b, 1, f), a single timestep
             rnn_in = rnn_in.unsqueeze(1)
             output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
-            predictions[:, char_idx : char_idx + 1, :] = self.fc_out(output)
+            predictions[:, char_idx : char_idx + 1, :] = self.output_embedding(output)
             # For next iteration
             char_idx += 1
             next_char_input = self._get_char_input_next_timestep(
                 timestep=char_idx,
-                vocab_map=self.vocab_map,
                 previous_predictions=predictions,
-                max_timestep=c - 1,
+                max_timestep=c,
             )
         return predictions
 

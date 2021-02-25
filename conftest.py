@@ -91,17 +91,41 @@ def vocab_maps(ds_lemma) -> Dict[Dicts, VocabMap]:
     return load_dicts(ds_lemma)[1]
 
 
+@fixture
+def kwargs():
+    """Return a default set of arguments."""
+    return {
+        "tagger": True,
+        "batch_size": 3,
+        "lemmatizer": True,
+        "lemmatizer_hidden_dim": 50,
+        "tagger_weight": 1,
+        "lemmatizer_weight": 1,
+        "char_emb_dim": 20,
+        "char_lstm_layers": 1,
+        "main_lstm_layers": 1,
+        "main_lstm_dim": 128,
+        "scheduler": "multiply",
+        "learning_rate": 5e-5,
+        "word_embedding_lr": 0.2,
+        "optimizer": "adam",
+        "label_smoothing": 0.1,
+        "output_dir": "debug/",
+        "epochs": 20,
+    }
+
+
 @fixture()
-def data_loader(ds_lemma):
+def data_loader(ds_lemma, kwargs):
     """Return a data loader over the unit testing data."""
-    return DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)  # type: ignore
+    return DataLoader(ds_lemma, batch_size=kwargs["batch_size"], collate_fn=collate_fn)  # type: ignore
 
 
 @fixture
-def encoder(vocab_maps) -> Encoder:
+def encoder(vocab_maps, kwargs) -> Encoder:
     """Return an Encoder."""
     wembs = ClassingWordEmbedding(vocab_map=vocab_maps[Dicts.Tokens], embedding_dim=3)
-    return Encoder({Modules.Trained: wembs}, main_lstm_layers=1)
+    return Encoder({Modules.Trained: wembs}, main_lstm_layers=1, main_lstm_dim=kwargs["main_lstm_dim"])
 
 
 @fixture
@@ -111,12 +135,12 @@ def tagger_module(vocab_maps, encoder) -> Tagger:
 
 
 @fixture
-def lemmatizer_module(vocab_maps, encoder) -> Lemmatizer:
+def lemmatizer_module(vocab_maps, tagger_module, kwargs) -> Lemmatizer:
     """Return a Tagger."""
     return Lemmatizer(
         vocab_map=vocab_maps[Dicts.Chars],
-        hidden_dim=encoder.output_dim,
-        context_dim=encoder.output_dim,
+        hidden_dim=kwargs["lemmatizer_hidden_dim"],
+        context_dim=tagger_module.output_dim,
         char_emb_dim=20,
         dropout=0.0,
     )
@@ -159,25 +183,3 @@ def lemma_evaluator(ds_lemma):
         train_vocab=ds_lemma.get_vocab(),
         train_lemmas=Vocab.from_symbols(ds_lemma.get_field(Fields.GoldLemmas)),
     ).lemma_accuracy
-
-
-@fixture
-def kwargs():
-    """Return a default set of arguments."""
-    return {
-        "tagger": True,
-        "lemmatizer": True,
-        "tagger_weight": 1,
-        "lemmatizer_weight": 1,
-        "char_emb_dim": 20,
-        "char_lstm_layers": 1,
-        "main_lstm_layers": 1,
-        "main_lstm_dim": 128,
-        "scheduler": "multiply",
-        "learning_rate": 5e-5,
-        "word_embedding_lr": 0.2,
-        "optimizer": "adam",
-        "label_smoothing": 0.1,
-        "output_dir": "debug/",
-        "epochs": 20,
-    }

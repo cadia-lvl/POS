@@ -86,34 +86,27 @@ def test_tagger(encoder, data_loader, vocab_maps):
         assert embs[Modules.BiLSTM].requires_grad == True
 
 
-def test_gru_decoder(vocab_maps, data_loader, encoder: Encoder):
-    hidden_dim = encoder.output_dim
-    emb_dim = 5
-    char_decoder = Lemmatizer(
-        vocab_map=vocab_maps[Dicts.Chars],
-        hidden_dim=hidden_dim,
-        context_dim=hidden_dim,
-        num_layers=2,
-        char_emb_dim=emb_dim,
-    )
-    for batch in data_loader:
-        embs = encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
-        tok_embs = char_decoder(embs, batch)
-        assert tok_embs.shape == (
-            9,
-            8,  # 8 + 20 - 1 if eval.
-            len(vocab_maps[Dicts.Chars]),
-        )  # 9 tokens, 8 chars at most, each char emb
-        assert tok_embs.requires_grad == True
-
-
 def test_full_run(data_loader, vocab_maps, electra_model):
     emb = TransformerEmbedding(electra_model)
     encoder = Encoder(embeddings={Modules.BERT: emb})
     tagger = Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)
-    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger)
+    emb_dim = 5
+    char_decoder = Lemmatizer(
+        vocab_map=vocab_maps[Dicts.Chars],
+        hidden_dim=70,
+        context_dim=tagger.output_dim,
+        num_layers=2,
+        char_emb_dim=emb_dim,
+    )
+    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger, lemmatizer=char_decoder)
     for batch in data_loader:
-        abl_tagger(batch)
+        preds = abl_tagger(batch)
+        assert preds[Modules.Tagger].shape == (3, 3, len(vocab_maps[Dicts.FullTag]))
+        assert preds[Modules.Lemmatizer].shape == (
+            9,
+            8,
+            len(vocab_maps[Dicts.Chars]),
+        )  # num words, max word length in chars
 
 
 def test_attention():
