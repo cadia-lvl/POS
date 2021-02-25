@@ -23,19 +23,18 @@ train-and-tag \
 "$TEST" \
 "$OUT_DIR" \
 --lemmatizer \
---lemmatizer_embedding bilstm \
 --lemmatizer_weight 0.1 \
 --lemmatizer_hidden_dim 256 \
 --lemmatizer_char_dim 64 \
+--lemmatizer_num_layers 1 \
+--lemmatizer_char_attention \
 --tagger \
---tagger_embedding bilstm \
---bert_encoder electra-small-pytorch \
---bert_layers last \
+--tagger_embedding bert \
+--bert_encoder electra-base-is \
 --known_chars_file data/extra/characters_training.txt \
 --char_lstm_layers 1 \
 --char_lstm_dim 128 \
 --char_emb_dim 64 \
---main_lstm_dim 256 \
 --label_smoothing 0.1 \
 --epochs 20 \
 --batch_size 16 \
