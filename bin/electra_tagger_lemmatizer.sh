@@ -24,8 +24,8 @@ train-and-tag \
 "$OUT_DIR" \
 --lemmatizer \
 --lemmatizer_weight 0.1 \
---lemmatizer_hidden_dim 128 \
---lemmatizer_char_dim 64 \
+--lemmatizer_hidden_dim 64 \
+--lemmatizer_char_dim 32 \
 --lemmatizer_num_layers 1 \
 --lemmatizer_char_attention \
 --tagger \
@@ -33,8 +33,8 @@ train-and-tag \
 --bert_encoder electra-base-is \
 --known_chars_file data/extra/characters_training.txt \
 --char_lstm_layers 1 \
---char_lstm_dim 128 \
---char_emb_dim 64 \
+--char_lstm_dim 64 \
+--char_emb_dim 32 \
 --label_smoothing 0.1 \
 --epochs 20 \
 --batch_size 16 \
