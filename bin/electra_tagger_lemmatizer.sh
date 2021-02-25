@@ -24,7 +24,7 @@ train-and-tag \
 "$OUT_DIR" \
 --lemmatizer \
 --lemmatizer_weight 0.1 \
---lemmatizer_hidden_dim 256 \
+--lemmatizer_hidden_dim 128 \
 --lemmatizer_char_dim 64 \
 --lemmatizer_num_layers 1 \
 --lemmatizer_char_attention \
