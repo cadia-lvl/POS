@@ -152,10 +152,8 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
 @click.option("--tagger_weight", default=1.0, help="Value to multiply tagging loss")
 @click.option("--tagger_embedding", default="bilstm", help="The embedding to feed to the Tagger, see pos.model.Modules.")
-@click.option("--tagger_transformer_layers", default=0, help="The number of transformer layers to use. 0 to disable.")
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option("--lemmatizer_weight", default=0.1, help="Value to multiply lemmatizer loss")
-@click.option("--lemmatizer_embedding", default="bilstm", help="The embedding to feed to the Lemmatizer, see pos.model.Modules.")
 @click.option("--lemmatizer_hidden_dim", default=128, help="The hidden dim of the decoder RNN.")
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
 @click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
@@ -278,12 +276,9 @@ def train_and_tag(**kwargs):
         log.info("Training Lemmatizer")
         decoders[Modules.Lemmatizer] = Lemmatizer(
             vocab_map=dicts[Dicts.Chars],
-            context_dim=embs[Modules(kwargs["lemmatizer_embedding"])].output_dim
-            if Modules(kwargs["lemmatizer_embedding"]) in embs
-            else encoder.output_dim,
+            context_dim=decoders[Modules.Tagger].output_dim,
             hidden_dim=kwargs["lemmatizer_hidden_dim"],
             char_emb_dim=kwargs["lemmatizer_char_dim"],
-            context_embedding=Modules(kwargs["lemmatizer_embedding"]),
             attention_dim=embs[Modules.CharactersToTokens].output_dim if Modules.CharactersToTokens in embs else 0,
             char_attention=Modules.CharactersToTokens in embs and kwargs["lemmatizer_char_attention"],
             num_layers=kwargs["lemmatizer_num_layers"],

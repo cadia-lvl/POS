@@ -30,7 +30,6 @@ train-and-tag \
 --tagger \
 --tagger_embedding bert \
 --bert_encoder electra-base-is \
---bert_layers last \
 --main_lstm_dim 128 \
 --main_lstm_layers 1 \
 --label_smoothing 0.1 \
