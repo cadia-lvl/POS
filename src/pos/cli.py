@@ -155,6 +155,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
 @click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
 @click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
+@click.option("--tag_embedding_dim", default=128, help="The tag embedding dimension")
 @click.option("--known_chars_file", default="./data/extra/characters_training.txt", help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
 @click.option("--known_tags_file", default="./data/extra/all_tags.txt", help="A file which contains the pos the model should know. File should be a single line, the line is split() to retrieve elements.",)
 @click.option("--char_lstm_layers", default=1, help="The number of layers in character LSTM embedding. Should not be set to 0.")
@@ -202,7 +203,7 @@ def train_lemmatizer(**kwargs):
 
     tag_embedding = ClassingWordEmbedding(
         dictionaries[Dicts.FullTag],
-        10,
+        embedding_dim=kwargs["tag_embedding_dim"],
         padding_idx=dictionaries[Dicts.FullTag].w2i[PAD],
         dropout=kwargs["emb_dropouts"],
     )
