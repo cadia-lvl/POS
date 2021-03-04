@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch
 from torch import Tensor, softmax
 import numpy as np
+from torch.nn.modules.sparse import Embedding
 from . import abltagger
 from pos.core import Sentences, VocabMap
 from pos.data import (
@@ -15,6 +16,7 @@ from pos.data import (
     SOS,
     PAD,
 )
+from .embeddings import CharacterEmbedding
 
 
 class MultiplicativeAttention(nn.Module):
@@ -57,7 +59,7 @@ class CharacterDecoder(abltagger.Decoder):
         vocab_map: VocabMap,
         hidden_dim,
         context_dim,
-        char_emb_dim,
+        character_embedding: CharacterEmbedding,
         num_layers=1,
         char_rnn_input_dim=0,
         attention_dim=0,
@@ -77,12 +79,10 @@ class CharacterDecoder(abltagger.Decoder):
         self.char_attention = char_attention
         self.char_rnn_input_dim = char_rnn_input_dim
 
-        self.sparse_embedding = nn.Embedding(
-            len(vocab_map), char_emb_dim, sparse=True
-        )  # We map the input idx to vectors.
+        self.character_embedding = character_embedding
         # last character + sentence context + character attention
         rnn_in_dim = (
-            char_emb_dim
+            self.character_embedding.output_dim
             + self.context_dim
             + (self.attention_dim if self.char_attention else 0)
             + self.char_rnn_input_dim
@@ -95,7 +95,9 @@ class CharacterDecoder(abltagger.Decoder):
         )
 
         # Map directly to characters
-        self.output_embedding = nn.Linear(self.hidden_dim, len(vocab_map))
+        self.output_embedding = Embedding.from_pretrained(
+            embeddings=self.character_embedding.weight.data.transpose(0, 1), padding_idx=0
+        )
         if self.char_attention:
             self.attention = MultiplicativeAttention(
                 encoder_dim=self.attention_dim,
@@ -217,7 +219,7 @@ class CharacterDecoder(abltagger.Decoder):
         )
         while next_char_input is not None:
             # (b*s, f)
-            emb_chars = self.dropout(self.sparse_embedding(next_char_input))
+            emb_chars = self.dropout(self.character_embedding(next_char_input))
             rnn_in = torch.cat((emb_chars, tag_embeddings), dim=1)
             if self.char_rnn_input_dim:
                 # (b*s, f)

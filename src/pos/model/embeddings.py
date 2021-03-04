@@ -40,6 +40,14 @@ class ClassingWordEmbedding(abltagger.Embedding):
         return self.sparse_embedding.weight.data.shape[1]
 
 
+class CharacterEmbedding(ClassingWordEmbedding):
+    """Character embedding. Has a distinct preprocessing step from classic."""
+
+    def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
+        """Preprocess the sentence batch."""
+        return map_to_chars_batch(batch, self.vocab_map.w2i)
+
+
 class PretrainedEmbedding(ClassingWordEmbedding):
     """The Morphological Lexicion embeddings."""
 
@@ -68,8 +76,7 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
 
     def __init__(
         self,
-        vocab_map: core.VocabMap,
-        character_embedding_dim=20,
+        character_embedding: CharacterEmbedding,
         char_lstm_dim=64,
         char_lstm_layers=1,
         padding_idx=0,
@@ -77,17 +84,10 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
     ):
         """Create one."""
         super().__init__()
-        self.vocab_map = vocab_map
-        self.sparse_embedding = nn.Embedding(
-            len(vocab_map),
-            character_embedding_dim,
-            padding_idx=padding_idx,
-            sparse=True,
-        )
-        nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
+        self.character_embedding = character_embedding
         # The character RNN
         self.rnn = nn.GRU(
-            input_size=character_embedding_dim,
+            input_size=self.character_embedding.output_dim,
             hidden_size=char_lstm_dim,
             num_layers=char_lstm_layers,
             batch_first=True,
@@ -104,12 +104,12 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
 
     def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
         """Preprocess the sentence batch."""
-        return map_to_chars_batch(batch, self.vocab_map.w2i)
+        return self.character_embedding.preprocess(batch)
 
     def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> Any:
         """Apply the embedding."""
         # (b * seq, chars)
-        char_embs = self.emb_dropout(self.sparse_embedding(batch))
+        char_embs = self.character_embedding(batch)
         # (b * seq, chars, f)
         self.rnn.flatten_parameters()
         out, hidden = self.rnn(char_embs)
