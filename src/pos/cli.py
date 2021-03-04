@@ -184,8 +184,8 @@ def train_lemmatizer(**kwargs):
     set_device(gpu_flag=kwargs["gpu"])
 
     # Read train and test data
-    train_ds = read_datasets(kwargs["training_files"], fields=[Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas])
-    test_ds = read_datasets([kwargs["test_file"]], fields=[Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas])
+    train_ds = read_datasets(kwargs["training_files"], fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
+    test_ds = read_datasets([kwargs["test_file"]], fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
     # Dicts
     dictionaries: Dict[Dicts, VocabMap] = {}
     char_vocab = Vocab.from_file(kwargs["known_chars_file"])
