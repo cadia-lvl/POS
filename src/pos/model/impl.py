@@ -6,8 +6,29 @@ from torch import nn
 
 from pos.core import Sentence
 from pos.data import BATCH_KEYS
-from pos.model.decoders import Lemmatizer, Tagger
+from pos.model.decoders import CharacterDecoder, Tagger
 from pos.model.abltagger import Modules, Embedding, get_emb_by_initial_token_masks
+from pos.model.embeddings import ClassingWordEmbedding, CharacterAsWordEmbedding
+
+
+class Lemmatizer(nn.Module):
+    def __init__(
+        self,
+        tag_embedding: ClassingWordEmbedding,
+        char_as_words: CharacterAsWordEmbedding,
+        character_decoder: CharacterDecoder,
+    ):
+        super().__init__()
+        self.tag_embedding = tag_embedding
+        self.char_as_words = char_as_words
+        self.character_decoder = character_decoder
+
+    def forward(self, batch: Dict[BATCH_KEYS, Any]) -> Dict[Modules, torch.Tensor]:
+        """Run a forward pass."""
+        tag_embs = self.tag_embedding(batch[BATCH_KEYS.FULL_TAGS], batch[BATCH_KEYS.LENGTHS])
+        chars = self.char_as_words(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
+        preds = self.character_decoder({Modules.CharactersToTokens: chars}, batch, tag_embs)
+        return {Modules.Lemmatizer: preds}
 
 
 class Encoder(nn.Module):
@@ -93,19 +114,21 @@ class Encoder(nn.Module):
 class ABLTagger(nn.Module):
     """The ABLTagger, consists of an Encoder(multipart) and a Tagger."""
 
-    def __init__(self, encoder: Encoder, tagger: Tagger, lemmatizer: Optional[Lemmatizer] = None):
+    def __init__(self, encoder: Encoder, tagger: Tagger, character_decoder: Optional[CharacterDecoder] = None):
         """Initialize the model. The Lemmatizer depends on the Tagger."""
         super().__init__()
         self.encoder = encoder
         self.tagger = tagger
-        self.lemmatizer = lemmatizer
-        if self.tagger is None and self.lemmatizer is not None:
+        self.character_decoder = character_decoder
+        if self.tagger is None and self.character_decoder is not None:
             raise ValueError("Tagger is None, but Lemmatizer is not None. We need the Tagger!")
 
     def forward(self, batch: Dict[BATCH_KEYS, Any]) -> Dict[Modules, torch.Tensor]:
         """Forward pass."""
         encoded: Dict[Modules, torch.Tensor] = self.encoder(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         decoded = {Modules.Tagger: self.tagger(encoded=encoded, batch=batch)}
-        if self.lemmatizer is not None:
-            decoded[Modules.Lemmatizer] = self.lemmatizer(tags=decoded[Modules.Tagger], encoded=encoded, batch=batch)
+        if self.character_decoder is not None:
+            decoded[Modules.Lemmatizer] = self.character_decoder(
+                tags=decoded[Modules.Tagger], encoded=encoded, batch=batch
+            )
         return decoded

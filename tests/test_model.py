@@ -12,7 +12,7 @@ from pos.model import (
     Tagger,
     Encoder,
     ABLTagger,
-    Lemmatizer,
+    CharacterDecoder,
 )
 from pos.core import Dicts
 from pos.data import BATCH_KEYS, collate_fn
@@ -91,14 +91,14 @@ def test_full_run(data_loader, vocab_maps, electra_model):
     encoder = Encoder(embeddings={Modules.BERT: emb})
     tagger = Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)
     emb_dim = 5
-    char_decoder = Lemmatizer(
+    char_decoder = CharacterDecoder(
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=70,
         context_dim=tagger.output_dim,
         num_layers=2,
         char_emb_dim=emb_dim,
     )
-    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger, lemmatizer=char_decoder)
+    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger, character_decoder=char_decoder)
     for batch in data_loader:
         preds = abl_tagger(batch)
         assert preds[Modules.Tagger].shape == (3, 3, len(vocab_maps[Dicts.FullTag]))

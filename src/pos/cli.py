@@ -27,7 +27,8 @@ from pos.data import (
     dechunk_dataset,
 )
 from pos import core
-from pos.core import Vocab, FieldedDataset, Dicts, Fields, set_device, set_seed
+from pos.core import Vocab, FieldedDataset, Dicts, Fields, VocabMap, set_device, set_seed
+from pos.data.constants import PAD
 from pos.model import (
     Decoder,
     Embedding,
@@ -38,11 +39,13 @@ from pos.model import (
     PretrainedEmbedding,
     ClassingWordEmbedding,
     CharacterAsWordEmbedding,
-    Lemmatizer,
+    CharacterDecoder,
     Modules,
 )
+from pos.model.impl import Lemmatizer
 from pos.train import (
     MODULE_TO_FIELD,
+    _cross_entropy,
     print_tagger,
     get_criterion,
     tag_data_loader,
@@ -65,15 +68,13 @@ log = logging.getLogger(__name__)
 
 @click.group()
 @click.option("--debug/--no-debug", default=False)
-@click.option("--log/--no-log", default=False)
-def cli(debug, log):  # pylint: disable=redefined-outer-name
+def cli(debug):  # pylint: disable=redefined-outer-name
     """Entrypoint to the program. --debug flag from command line is caught here."""
     log_level = logging.INFO
-    if debug or log:
+    if debug:
         log_level = logging.DEBUG
-    logging.basicConfig(format="%(asctime)s - %(message)s", level=log_level)
-    global DEBUG
-    DEBUG = debug
+        log.info("Logging set to DEBUG")
+    logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=log_level)
 
 
 @cli.command()
@@ -139,6 +140,157 @@ def filter_embedding(filepaths, embedding, output, emb_format):
             for token, value in emb_dict.items():
                 if token in tokens:  # pylint: disable=unsupported-membership-test
                     output.write(f"{token} {' '.join((str(x) for x in value))}\n")
+
+
+# fmt: off
+@cli.command()
+@click.argument("training_files", nargs=-1)
+@click.argument("test_file")
+@click.argument("output_dir")
+@click.option("--gpu/--no_gpu", default=False)
+@click.option("--save_model/--no_save_model", default=False)
+@click.option("--save_vocab/--no_save_vocab", default=False)
+@click.option("--lemmatizer_accept_char_rnn_last/--no_lemmatizer_accept_char_rnn_last", default=False, help="Should the Character RNN last hidden state be input to Lemmatizer")
+@click.option("--lemmatizer_hidden_dim", default=128, help="The hidden dim of the decoder RNN.")
+@click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
+@click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
+@click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
+@click.option("--known_chars_file", default="./data/extra/characters_training.txt", help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
+@click.option("--known_tags_file", default="./data/extra/all_tags.txt", help="A file which contains the pos the model should know. File should be a single line, the line is split() to retrieve elements.",)
+@click.option("--char_lstm_layers", default=1, help="The number of layers in character LSTM embedding. Should not be set to 0.")
+@click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
+@click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
+@click.option("--emb_dropouts", default=0.0, help="The dropout to use for Embeddings.")
+@click.option("--label_smoothing", default=0.1)
+@click.option("--learning_rate", default=5e-5)
+@click.option("--epochs", default=20)
+@click.option("--batch_size", default=16)
+@click.option("--optimizer", default="adam", type=click.Choice(["sgd", "adam"], case_sensitive=False), help="The optimizer to use.")
+@click.option("--scheduler", default="multiply", type=click.Choice(["none", "multiply", "plateau"], case_sensitive=False), help="The learning rate scheduler to use.")
+# fmt: on
+def train_lemmatizer(**kwargs):
+    """Train a lemmatizer on intpus and write out results to a test file.
+
+    training_files: Files to use for training (supports multiple files = globbing).
+    All training files should be .tsv, with two/three columns, the token, tag, lemma.
+    test_file: Same format as training_files. Used to evaluate the model.
+    output_dir: The directory to write out model and results.
+    """
+
+    log.info("Training Lemmatizer")
+    log.info(kwargs)
+    set_seed()
+    set_device(gpu_flag=kwargs["gpu"])
+
+    # Read train and test data
+    train_ds = read_datasets(kwargs["training_files"], fields=[Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas])
+    test_ds = read_datasets([kwargs["test_file"]], fields=[Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas])
+    # Dicts
+    dictionaries: Dict[Dicts, VocabMap] = {}
+    char_vocab = Vocab.from_file(kwargs["known_chars_file"])
+    c_map = VocabMap(
+        char_vocab,
+        special_tokens=VocabMap.UNK_PAD_EOS_SOS,
+    )
+    dictionaries[Dicts.Chars] = c_map
+    tag_vocab = Vocab.from_file(kwargs["known_tags_file"])
+    t_map = VocabMap(
+        tag_vocab,
+        special_tokens=VocabMap.UNK_PAD,
+    )
+    dictionaries[Dicts.FullTag] = t_map
+
+    tag_embedding = ClassingWordEmbedding(
+        dictionaries[Dicts.FullTag],
+        10,
+        padding_idx=dictionaries[Dicts.FullTag].w2i[PAD],
+        dropout=kwargs["emb_dropouts"],
+    )
+    char_as_word = CharacterAsWordEmbedding(
+        dictionaries[Dicts.Chars],
+        character_embedding_dim=kwargs["char_emb_dim"],
+        char_lstm_layers=kwargs["char_lstm_layers"],
+        char_lstm_dim=kwargs["char_lstm_dim"],
+        dropout=kwargs["emb_dropouts"],
+    )
+    char_decoder = CharacterDecoder(
+        vocab_map=dictionaries[Dicts.Chars],
+        context_dim=tag_embedding.output_dim,
+        hidden_dim=kwargs["lemmatizer_hidden_dim"],
+        char_emb_dim=kwargs["lemmatizer_char_dim"],
+        char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
+        attention_dim=char_as_word.output_dim,
+        char_attention=kwargs["lemmatizer_char_attention"],
+        num_layers=kwargs["lemmatizer_num_layers"],
+        dropout=kwargs["emb_dropouts"],
+    )
+
+    lemmatizer = Lemmatizer(tag_embedding=tag_embedding, char_as_words=char_as_word, character_decoder=char_decoder)
+    train_dl = torch.utils.data.DataLoader(
+        train_ds,
+        collate_fn=collate_fn,  # type: ignore
+        shuffle=True,
+        batch_size=kwargs["batch_size"],
+    )
+    test_dl = torch.utils.data.DataLoader(
+        test_ds,
+        collate_fn=collate_fn,  # type: ignore
+        shuffle=False,
+        batch_size=kwargs["batch_size"] * 10,
+    )
+    criterion = get_criterion({Modules.Lemmatizer: char_decoder}, label_smoothing=kwargs["label_smoothing"])
+    parameter_groups = get_parameter_groups(lemmatizer)
+    log.info(f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}")
+    optimizer = get_optimizer(parameter_groups, kwargs["optimizer"], kwargs["learning_rate"])
+    scheduler = get_scheduler(optimizer, kwargs["scheduler"])
+    evaluators = {}
+    evaluators[Modules.Lemmatizer] = evaluate.LemmatizationEvaluation(
+        test_dataset=test_ds,
+        train_vocab=train_ds.get_vocab(),
+        train_lemmas=Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)),
+    ).lemma_accuracy
+
+    # Write all configuration to disk
+    output_dir = pathlib.Path(kwargs["output_dir"])
+    write_hyperparameters(output_dir / "hyperparamters.json", (kwargs))
+
+    # Start the training
+    run_epochs(
+        model=lemmatizer,
+        optimizer=optimizer,
+        criterion=criterion,
+        scheduler=scheduler,
+        evaluators=evaluators,
+        train_data_loader=train_dl,
+        test_data_loader=test_dl,
+        epochs=kwargs["epochs"],
+        output_dir=output_dir,
+    )
+    _, values = tag_data_loader(
+        model=lemmatizer,
+        data_loader=test_dl,
+    )
+    log.info("Writing predictions, dictionaries and model")
+    for module_name, value in values.items():
+        test_ds = test_ds.add_field(value, MODULE_TO_FIELD[module_name])
+
+    test_ds.to_tsv_file(str(output_dir / "predictions.tsv"))
+
+    with output_dir.joinpath("known_toks.txt").open("w+") as f:
+        for token in Vocab.from_symbols(train_ds.get_field(Fields.Tokens)):
+            f.write(f"{token}\n")
+    if Fields.GoldLemmas in train_ds.fields:
+        with output_dir.joinpath("known_lemmas.txt").open("w+") as f:
+            for lemma in Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)):
+                f.write(f"{lemma}\n")
+    if kwargs["save_vocab"]:
+        save_location = output_dir.joinpath("dictionaries.pickle")
+        with save_location.open("wb+") as f:
+            pickle.dump(dictionaries, f)
+    if kwargs["save_model"]:
+        save_location = output_dir.joinpath("tagger.pt")
+        torch.save(lemmatizer, str(save_location))
+    log.info("Done!")
 
 
 # fmt: off
@@ -275,7 +427,7 @@ def train_and_tag(**kwargs):
         )
     if kwargs["lemmatizer"]:
         log.info("Training Lemmatizer")
-        decoders[Modules.Lemmatizer] = Lemmatizer(
+        decoders[Modules.Lemmatizer] = CharacterDecoder(
             vocab_map=dicts[Dicts.Chars],
             context_dim=decoders[Modules.Tagger].output_dim,
             hidden_dim=kwargs["lemmatizer_hidden_dim"],
@@ -357,11 +509,11 @@ def train_and_tag(**kwargs):
 
     test_ds.to_tsv_file(str(output_dir / "predictions.tsv"))
 
-    with (output_dir / "known_toks.txt").open("w+") as f:
+    with output_dir.joinpath("known_toks.txt").open("w+") as f:
         for token in Vocab.from_symbols(train_ds.get_field(Fields.Tokens)):
             f.write(f"{token}\n")
     if Fields.GoldLemmas in train_ds.fields:
-        with (output_dir / "known_lemmas.txt").open("w+") as f:
+        with output_dir.joinpath("known_lemmas.txt").open("w+") as f:
             for lemma in Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)):
                 f.write(f"{lemma}\n")
     if kwargs["save_vocab"]:

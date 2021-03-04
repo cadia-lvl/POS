@@ -20,7 +20,7 @@ class Modules(Enum):
     BiLSTM = "bilstm"
     BERT = "bert"
     Tagger = "tagger"
-    Lemmatizer = "lemmatizer"
+    Lemmatizer = "character_decoder"
 
 
 class BatchPostprocess(metaclass=abc.ABCMeta):

@@ -294,7 +294,8 @@ class FieldedDataset(Dataset):
     def from_file(filepath: str, fields: Tuple[str, ...] = None, sep="\t"):
         """Construct from a file. By default we assume first there are Tokens, GoldTags, GoldLemmas."""
         with open(filepath) as f:
-            examples = tuple(zip(*tuple(tokens_to_sentences(read_tsv(f, sep=sep)))))
+            sentences = tuple(tokens_to_sentences(read_tsv(f, sep=sep)))
+            examples = tuple(zip(*sentences))
         if not fields:
             fields = tuple()
             if len(examples) >= 1:

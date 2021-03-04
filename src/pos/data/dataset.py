@@ -24,10 +24,13 @@ def read_datasets(
         file_paths: The paths to the datasets.
         fields: The tagged fields in the dataset
     """
-    return reduce(
+    log.debug(f"Reading files={file_paths}")
+    combined = reduce(
         add,
         (FieldedDataset.from_file(training_file, fields) for training_file in file_paths),
     )
+    log.debug(f"Dataset length={len(combined)}")
+    return combined
 
 
 def get_adjusted_lengths(

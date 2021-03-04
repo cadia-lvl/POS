@@ -10,14 +10,7 @@ from pos.core import Fields, Vocab, VocabMap, Dicts, FieldedDataset
 from pos.data import collate_fn, load_dicts
 from pos import evaluate
 import pos
-from pos.model import (
-    ABLTagger,
-    Encoder,
-    ClassingWordEmbedding,
-    Lemmatizer,
-    Tagger,
-    Modules,
-)
+from pos.model import Encoder, ClassingWordEmbedding, CharacterDecoder, Tagger, Modules, ABLTagger
 
 
 def pytest_addoption(parser):
@@ -135,9 +128,9 @@ def tagger_module(vocab_maps, encoder) -> Tagger:
 
 
 @fixture
-def lemmatizer_module(vocab_maps, tagger_module, kwargs) -> Lemmatizer:
+def lemmatizer_module(vocab_maps, tagger_module, kwargs) -> CharacterDecoder:
     """Return a Tagger."""
-    return Lemmatizer(
+    return CharacterDecoder(
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=kwargs["lemmatizer_hidden_dim"],
         context_dim=tagger_module.output_dim,
@@ -158,7 +151,7 @@ def abl_tagger(encoder, tagger_module, lemmatizer_module) -> ABLTagger:
     return ABLTagger(
         encoder=encoder,
         tagger=tagger_module,
-        lemmatizer=lemmatizer_module,
+        character_decoder=lemmatizer_module,
     )
 
 

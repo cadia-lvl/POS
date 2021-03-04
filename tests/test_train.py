@@ -2,13 +2,7 @@ import pathlib
 from re import M
 
 from pos.core import Dicts
-from pos.model import (
-    ABLTagger,
-    CharacterAsWordEmbedding,
-    Encoder,
-    Lemmatizer,
-    Modules,
-)
+from pos.model import CharacterAsWordEmbedding, Encoder, CharacterDecoder, Modules, ABLTagger
 from pos.train import (
     get_criterion,
     get_optimizer,
@@ -65,7 +59,7 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps, 
         lstm_dropouts=0.0,
         input_dropouts=0.0,
     )
-    lemmatizer = Lemmatizer(
+    lemmatizer = CharacterDecoder(
         vocab_map=dicts[Dicts.Chars],
         hidden_dim=kwargs["lemmatizer_hidden_dim"],
         context_dim=tagger_module.output_dim,
@@ -74,7 +68,7 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps, 
         attention_dim=embs[Modules.CharactersToTokens].output_dim,
         char_attention=True,
     )
-    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger_module, lemmatizer=lemmatizer)
+    abl_tagger = ABLTagger(encoder=encoder, tagger=tagger_module, character_decoder=lemmatizer)
     criterion = get_criterion({Modules.Tagger: tagger_module, Modules.Lemmatizer: lemmatizer})
     parameter_groups = get_parameter_groups(abl_tagger)
     optimizer = get_optimizer(parameter_groups, optimizer=kwargs["optimizer"], lr=kwargs["learning_rate"])

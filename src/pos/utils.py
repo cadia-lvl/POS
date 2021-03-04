@@ -17,8 +17,11 @@ def tokens_to_sentences(tsv_lines: Iterable[Optional[Tuple[str, ...]]]) -> Itera
     example: List[Tuple[str, ...]] = []
     for line in tsv_lines:
         if line is None:
-            yield pack_sentence(example)
-            example.clear()
+            if len(example) != 0:
+                packed = pack_sentence(example)
+                yield packed
+                example.clear()
+            # Otherwise pass silently
         else:
             example.append(line)
 

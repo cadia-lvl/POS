@@ -19,7 +19,6 @@ from torch.nn.utils import clip_grad_norm_
 from torch import Tensor, no_grad, numel, cat, zeros_like, log_softmax, stack
 from torch.utils.data import DataLoader
 
-
 from .data import (
     PAD_ID,
     BATCH_KEYS,
@@ -40,7 +39,7 @@ MODULE_TO_FIELD = {
 }
 
 
-def get_parameter_groups(abl_tagger: ABLTagger) -> List[Dict]:
+def get_parameter_groups(model: Module) -> List[Dict]:
     """Return the parameters groups with differing learning rates."""
     sparse_name = "sparse_embedding"
     params = [
@@ -49,7 +48,7 @@ def get_parameter_groups(abl_tagger: ABLTagger) -> List[Dict]:
                 param
                 for name, param in filter(
                     lambda kv: sparse_name not in kv[0],
-                    abl_tagger.named_parameters(),
+                    model.named_parameters(),
                 )
             ),
         },
@@ -58,7 +57,7 @@ def get_parameter_groups(abl_tagger: ABLTagger) -> List[Dict]:
                 param
                 for name, param in filter(
                     lambda kv: sparse_name in kv[0],
-                    abl_tagger.named_parameters(),
+                    model.named_parameters(),
                 )
             ),
             "sparse": True,
@@ -108,11 +107,7 @@ def _cross_entropy(label_smoothing):
     log.info(f"Label smoothing={label_smoothing}")
     if not label_smoothing:
         return CrossEntropyLoss(ignore_index=PAD_ID, reduction="sum")
-    return partial(  # type: ignore
-        smooth_ce_loss,
-        pad_idx=PAD_ID,
-        smoothing=label_smoothing,
-    )
+    return smooth_ce_loss
 
 
 def get_criterion(
@@ -165,7 +160,7 @@ def print_tagger(tagger: Module):
 
 
 def run_batch(
-    model: ABLTagger,
+    model: Module,
     batch: Dict[BATCH_KEYS, Any],
     criterion: Callable[[Modules, Tensor, Dict[BATCH_KEYS, Any]], Tensor] = None,
     optimizer=None,
@@ -194,7 +189,7 @@ def run_batch(
 
 
 def tag_batch(
-    model: ABLTagger,
+    model: Module,
     batch: Dict[BATCH_KEYS, Any],
     criterion=None,
     optimizer=None,
@@ -209,7 +204,7 @@ def tag_batch(
 
 
 def tag_data_loader(
-    model: ABLTagger,
+    model: Module,
     data_loader: DataLoader,
     criterion=None,
 ) -> Tuple[Dict[Modules, float], Dict[Modules, Sentences]]:
@@ -256,7 +251,7 @@ def train_model(
 
 
 def run_epochs(
-    model: ABLTagger,
+    model: Module,
     optimizer,
     criterion,
     scheduler,
@@ -332,7 +327,7 @@ def categorical_accuracy(preds, y):
     return correct.sum().item() / len(y)
 
 
-def smooth_ce_loss(pred: Tensor, gold: Tensor, pad_idx: int, smoothing=0.1):
+def smooth_ce_loss(pred: Tensor, gold: Tensor, pad_idx=0, smoothing=0.1):
     """Calculate cross entropy loss, apply label smoothing if needed."""
     pred = pred.view(-1, pred.shape[-1])
     gold = gold.contiguous().view(-1)

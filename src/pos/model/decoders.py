@@ -47,7 +47,7 @@ class MultiplicativeAttention(nn.Module):
         return weights.unsqueeze(dim=1).bmm(values).squeeze()
 
 
-class Lemmatizer(abltagger.Decoder):
+class CharacterDecoder(abltagger.Decoder):
     """The lemmatizer."""
 
     MAX_SEQUENCE_ADDITIONAL = 20
