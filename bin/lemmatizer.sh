@@ -30,7 +30,7 @@ train-lemmatizer \
 --char_emb_dim 64 \
 --label_smoothing 0.1 \
 --epochs 20 \
---batch_size 32 \
+--batch_size 16 \
 --save_vocab \
 --save_model \
 --optimizer adam \
