@@ -227,6 +227,7 @@ def train_lemmatizer(**kwargs):
     )
 
     lemmatizer = Lemmatizer(tag_embedding=tag_embedding, char_as_words=char_as_word, character_decoder=char_decoder)
+    lemmatizer.to(core.device)
     train_dl = torch.utils.data.DataLoader(
         train_ds,
         collate_fn=collate_fn,  # type: ignore
