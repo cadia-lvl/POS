@@ -33,6 +33,6 @@ train-lemmatizer \
 --batch_size 8 \
 --save_vocab \
 --save_model \
---optimizer adam \
---learning_rate 5e-5 \
+--optimizer sgd \
+--learning_rate 5e-2 \
 $*
