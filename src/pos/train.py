@@ -223,6 +223,7 @@ def tag_data_loader(
             total_tokens += sum(batch[BATCH_KEYS.LENGTHS])
         end = datetime.now()
     log.info(f"Processed {total_tokens} tokens in {end-start} seconds")
+    log.info(f"Tokens/sec.: {total_tokens/((end-start).seconds)}")
     return dict(total_losses), dict(total_values)
 
 
