@@ -557,10 +557,7 @@ def tag(model_file, data_in, output, device, contains_tags):
     """
     tagger = api_tagger(model_file=model_file, device=device)
     log.info("Reading dataset")
-    fields = (Fields.Tokens,)
-    if contains_tags:
-        fields = fields + (Fields.GoldTags,)
-    ds = FieldedDataset.from_file(data_in, fields)
+    ds = FieldedDataset.from_file(data_in)
     predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=16)
     ds = ds.add_field(predicted_tags, Fields.Tags)
     log.info("Writing results")
