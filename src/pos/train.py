@@ -5,27 +5,23 @@ During training this module handles:
 - Epochs (iterations) and evaluation.
 - Schedulers and optimizers. 
 """
-from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import logging
+from collections import defaultdict
 from datetime import datetime
 from functools import partial
 from math import inf
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from torch import Tensor, cat, log_softmax, no_grad, numel, stack, zeros_like
 from torch.nn import CrossEntropyLoss, Module
-from torch.optim import Optimizer, SGD, Adam, SparseAdam
-from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 from torch.nn.utils import clip_grad_norm_
-from torch import Tensor, no_grad, numel, cat, zeros_like, log_softmax, stack
+from torch.optim import SGD, Adam, Optimizer, SparseAdam
+from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
-from .data import (
-    PAD_ID,
-    BATCH_KEYS,
-)
-from .model import ABLTagger, Decoder, Modules
 from .core import Fields, Sentences
-
+from .data import BATCH_KEYS, PAD_ID
+from .model import ABLTagger, Decoder, Modules
 
 log = logging.getLogger(__name__)
 
@@ -223,7 +219,7 @@ def tag_data_loader(
             total_tokens += sum(batch[BATCH_KEYS.LENGTHS])
         end = datetime.now()
     log.info(f"Processed {total_tokens} tokens in {end-start} seconds")
-    log.info(f"Tokens/sec.: {total_tokens/((end-start).seconds)}")
+    log.info(f"Tokens/sec.: {total_tokens/max(((end-start).seconds),1)}")
     return dict(total_losses), dict(total_values)
 
 

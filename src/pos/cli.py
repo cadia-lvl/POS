@@ -1,62 +1,62 @@
 #!/usr/bin/env python
 """The main entrypoint to training and running a POS-tagger."""
+import json
+import logging
+import pathlib
+import pickle
 from collections import Counter
 from functools import reduce
 from operator import add
-import pickle
-from pprint import pprint, pformat
-import logging
-import json
-import pathlib
+from pprint import pformat, pprint
 from typing import Dict
 
 import click
 import torch
 from torch import nn
 
+from pos import core, evaluate
+from pos.api import Tagger as api_tagger
+from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap, set_device, set_seed
 from pos.data import (
+    bin_str_to_emb_pair,
+    chunk_dataset,
+    collate_fn,
+    dechunk_dataset,
+    emb_pairs_to_dict,
     load_dicts,
     read_datasets,
-    emb_pairs_to_dict,
-    bin_str_to_emb_pair,
     read_morphlex,
     read_pretrained_word_embeddings,
     wemb_str_to_emb_pair,
-    collate_fn,
-    chunk_dataset,
-    dechunk_dataset,
 )
-from pos import core
-from pos.core import Vocab, FieldedDataset, Dicts, Fields, VocabMap, set_device, set_seed
 from pos.data.constants import PAD
 from pos.model import (
+    ABLTagger,
+    CharacterAsWordEmbedding,
+    CharacterDecoder,
+    ClassingWordEmbedding,
     Decoder,
     Embedding,
     Encoder,
-    Tagger,
-    ABLTagger,
-    TransformerEmbedding,
-    PretrainedEmbedding,
-    ClassingWordEmbedding,
-    CharacterAsWordEmbedding,
-    CharacterDecoder,
     Modules,
+    PretrainedEmbedding,
+    Tagger,
+    TransformerEmbedding,
 )
+from pos.model.embeddings import CharacterEmbedding
 from pos.model.impl import Lemmatizer
 from pos.train import (
     MODULE_TO_FIELD,
     _cross_entropy,
-    print_tagger,
     get_criterion,
-    tag_data_loader,
-    get_parameter_groups,
     get_optimizer,
+    get_parameter_groups,
     get_scheduler,
+    print_tagger,
     run_epochs,
+    tag_data_loader,
 )
-from pos.api import Tagger as api_tagger
 from pos.utils import write_tsv
-from pos import evaluate
 
 DEBUG = False
 
@@ -207,18 +207,22 @@ def train_lemmatizer(**kwargs):
         padding_idx=dictionaries[Dicts.FullTag].w2i[PAD],
         dropout=kwargs["emb_dropouts"],
     )
-    char_as_word = CharacterAsWordEmbedding(
+    character_embedding = CharacterEmbedding(
         dictionaries[Dicts.Chars],
-        character_embedding_dim=kwargs["char_emb_dim"],
+        embedding_dim=kwargs["char_emb_dim"],
+        dropout=kwargs["emb_dropouts"],
+    )
+    char_as_word = CharacterAsWordEmbedding(
+        character_embedding=character_embedding,
         char_lstm_layers=kwargs["char_lstm_layers"],
         char_lstm_dim=kwargs["char_lstm_dim"],
         dropout=kwargs["emb_dropouts"],
     )
     char_decoder = CharacterDecoder(
+        character_embedding=character_embedding,
         vocab_map=dictionaries[Dicts.Chars],
         context_dim=tag_embedding.output_dim,
         hidden_dim=kwargs["lemmatizer_hidden_dim"],
-        char_emb_dim=kwargs["lemmatizer_char_dim"],
         char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
         attention_dim=char_as_word.output_dim,
         char_attention=kwargs["lemmatizer_char_attention"],

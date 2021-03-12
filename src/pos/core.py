@@ -1,22 +1,14 @@
 """The main abstractions in the project."""
-from enum import Enum
-from typing import (
-    Iterator,
-    Tuple,
-    Iterable,
-    List,
-    Dict,
-    Optional,
-    Sequence,
-    Union,
-)
 import logging
 import random
+from enum import Enum
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 
-import torch
-from torch.utils.data import Dataset
-from torch import device as t_device, set_num_threads
 import numpy as np
+import torch
+from torch import device as t_device
+from torch import set_num_threads
+from torch.utils.data import Dataset
 
 from pos.utils import read_tsv, tokens_to_sentences, write_tsv
 

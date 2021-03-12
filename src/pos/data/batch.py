@@ -1,20 +1,15 @@
 """Batch processing."""
 
-from typing import Tuple, Dict, Sequence, Any
+from typing import Any, Dict, Sequence, Tuple
 
-from torch import (
-    Tensor,
-    zeros_like,
-)
+from torch import Tensor, zeros_like
 from torch.nn.utils.rnn import pad_sequence
 
 from pos import core
-from pos.core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset
-from .constants import UNK, SOS, EOS, PAD, BATCH_KEYS
-from .pretrained import (
-    read_morphlex,
-    read_pretrained_word_embeddings,
-)
+from pos.core import Dicts, FieldedDataset, Sentence, Vocab, VocabMap
+
+from .constants import BATCH_KEYS, EOS, PAD, SOS, UNK
+from .pretrained import read_morphlex, read_pretrained_word_embeddings
 
 
 def map_to_index(sentence: Sentence, w2i: Dict[str, int]) -> Tensor:

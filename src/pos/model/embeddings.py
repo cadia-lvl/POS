@@ -1,13 +1,14 @@
 """Implementation of several embeddings."""
 from typing import Any, Dict, Sequence
 
-from torch import nn
 import torch
-from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerFast, AutoConfig
+from torch import nn
+from transformers import AutoConfig, AutoModel, AutoTokenizer, PreTrainedTokenizerFast
 
 from pos import core
-from pos.data import map_to_index, get_initial_token_mask
+from pos.data import get_initial_token_mask, map_to_index
 from pos.data.batch import map_to_chars_batch
+
 from . import abltagger
 
 
@@ -79,7 +80,6 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
         character_embedding: CharacterEmbedding,
         char_lstm_dim=64,
         char_lstm_layers=1,
-        padding_idx=0,
         dropout=0.0,
     ):
         """Create one."""
@@ -104,12 +104,12 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
 
     def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
         """Preprocess the sentence batch."""
-        return self.character_embedding.preprocess(batch)
+        return batch  # type: ignore
 
     def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> Any:
         """Apply the embedding."""
         # (b * seq, chars)
-        char_embs = self.character_embedding(batch)
+        char_embs = self.character_embedding(batch, lengths)
         # (b * seq, chars, f)
         self.rnn.flatten_parameters()
         out, hidden = self.rnn(char_embs)

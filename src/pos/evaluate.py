@@ -1,12 +1,12 @@
 """A collection of types and function used to evaluate the performance of a tagger."""
-from dataclasses import Field
-from typing import Iterable, Optional, Tuple, List, Dict, Set, Any, Union
 import logging
 from collections import Counter
+from dataclasses import Field
 from pathlib import Path
 from statistics import stdev
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
-from .core import Sentences, Vocab, FieldedDataset, Fields
+from .core import FieldedDataset, Fields, Sentences, Vocab
 
 log = logging.getLogger(__name__)
 

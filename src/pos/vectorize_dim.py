@@ -1,7 +1,8 @@
 """Create embeddings for the morphological lexicon, to be read by the POS tagger."""
-import numpy
 import argparse
 import sys
+
+import numpy
 
 # fmt: off
 tag_matrix = {"no":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],

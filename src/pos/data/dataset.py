@@ -1,15 +1,15 @@
 """Dataset manipulation."""
 
 
+import logging
 from functools import reduce
 from operator import add
 from typing import List, Tuple
-import logging
 
 from transformers.tokenization_utils import PreTrainedTokenizer
 
-from pos.data.tokenizer import get_initial_token_mask
 from pos.core import FieldedDataset, Sentences
+from pos.data.tokenizer import get_initial_token_mask
 
 log = logging.getLogger(__name__)
 

@@ -1,21 +1,22 @@
 """To test parts of the model."""
-from torch import zeros
 import torch
+from torch import zeros
 
-from pos.model import (
-    CharacterAsWordEmbedding,
-    ClassingWordEmbedding,
-    MultiplicativeAttention,
-    Modules,
-    PretrainedEmbedding,
-    TransformerEmbedding,
-    Tagger,
-    Encoder,
-    ABLTagger,
-    CharacterDecoder,
-)
 from pos.core import Dicts
 from pos.data import BATCH_KEYS, collate_fn
+from pos.model import (
+    ABLTagger,
+    CharacterAsWordEmbedding,
+    CharacterDecoder,
+    ClassingWordEmbedding,
+    Encoder,
+    Modules,
+    MultiplicativeAttention,
+    PretrainedEmbedding,
+    Tagger,
+    TransformerEmbedding,
+)
+from pos.model.embeddings import CharacterEmbedding
 
 
 def test_classic_wemb(vocab_maps, data_loader):
@@ -42,7 +43,8 @@ def test_pretrained_wemb(vocab_maps, data_loader):
 
 
 def test_chars_as_words(vocab_maps, data_loader):
-    wemb = CharacterAsWordEmbedding(vocab_map=vocab_maps[Dicts.Chars])
+    character_embedding = CharacterEmbedding(vocab_maps[Dicts.Chars], embedding_dim=10)
+    wemb = CharacterAsWordEmbedding(character_embedding=character_embedding)
     # The TransformerEmbedding expects the input to be a Sentence, not vectors.
     for batch in data_loader:
         embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])[0]  # Only take the chars

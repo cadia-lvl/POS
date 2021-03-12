@@ -1,14 +1,14 @@
 """The API for the tagging model."""
-from typing import Union, cast
 import logging
+from typing import Union, cast
 
 import torch
 
 import pos.core as core
-from pos.model import ABLTagger, Modules
 from pos.core import FieldedDataset, Fields, Sentence, Sentences, set_device
+from pos.data import chunk_dataset, collate_fn, dechunk_dataset
+from pos.model import ABLTagger, Modules
 from pos.train import tag_data_loader
-from pos.data import collate_fn, chunk_dataset, dechunk_dataset
 
 log = logging.getLogger(__name__)
 

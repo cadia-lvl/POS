@@ -1,16 +1,17 @@
 """Fixtures for tests."""
-from pytest import fixture
 from typing import Dict
+
 import pytest
-
+from pytest import fixture
 from torch.utils.data.dataloader import DataLoader
-from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
 
-from pos.core import Fields, Vocab, VocabMap, Dicts, FieldedDataset
-from pos.data import collate_fn, load_dicts
-from pos import evaluate
 import pos
-from pos.model import Encoder, ClassingWordEmbedding, CharacterDecoder, Tagger, Modules, ABLTagger
+from pos import evaluate
+from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
+from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap
+from pos.data import collate_fn, load_dicts
+from pos.model import ABLTagger, CharacterDecoder, ClassingWordEmbedding, Encoder, Modules, Tagger
+from pos.model.embeddings import CharacterEmbedding
 
 
 def pytest_addoption(parser):
@@ -130,11 +131,15 @@ def tagger_module(vocab_maps, encoder) -> Tagger:
 @fixture
 def lemmatizer_module(vocab_maps, tagger_module, kwargs) -> CharacterDecoder:
     """Return a Tagger."""
+    character_embedding = CharacterEmbedding(
+        vocab_map=vocab_maps[Dicts.Chars],
+        embedding_dim=20,
+    )
     return CharacterDecoder(
         vocab_map=vocab_maps[Dicts.Chars],
+        character_embedding=character_embedding,
         hidden_dim=kwargs["lemmatizer_hidden_dim"],
         context_dim=tagger_module.output_dim,
-        char_emb_dim=20,
         dropout=0.0,
     )
 
