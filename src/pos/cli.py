@@ -147,7 +147,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.argument("output")
 def prepare_bin_lemma_data(sh_snid, output):
     """Prepare the BÍN data, extract form, pos (translated) and lemma."""
-    with open(sh_snid) as f, open(output) as f_out:
+    with open(sh_snid) as f, open(output, "w") as f_out:
         for line in f:
             lemma, auðkenni, kyn_orðflokkur, hluti, orðmynd, mörk = line.strip().split(";")
             mim_mark = bin_to_ifd.parse_bin_str(
