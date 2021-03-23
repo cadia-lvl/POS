@@ -161,7 +161,7 @@ def prepare_bin_lemma_data(sh_snid, output):
             # fjölyrtar segðir
             if mim_mark is None:
                 continue
-            f_out.write(f"{orðmynd}\t{mim_mark}\{lemma}\n")
+            f_out.write(f"{orðmynd}\t{mim_mark}\t{lemma}\n")
 
 
 # fmt: off
