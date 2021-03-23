@@ -4,6 +4,7 @@ import json
 import logging
 import pathlib
 import pickle
+import random
 from collections import Counter
 from functools import reduce
 from operator import add
@@ -147,7 +148,8 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.argument("output")
 def prepare_bin_lemma_data(sh_snid, output):
     """Prepare the BÍN data, extract form, pos (translated) and lemma."""
-    with open(sh_snid) as f, open(output, "w") as f_out:
+    bin_data = []
+    with open(sh_snid) as f:
         for line in f:
             lemma, auðkenni, kyn_orðflokkur, hluti, orðmynd, mörk = line.strip().split(";")
             mim_mark = bin_to_ifd.parse_bin_str(
@@ -161,7 +163,14 @@ def prepare_bin_lemma_data(sh_snid, output):
             # fjölyrtar segðir
             if mim_mark is None:
                 continue
-            f_out.write(f"{orðmynd}\t{mim_mark}\t{lemma}\n")
+            bin_data.append((orðmynd, mim_mark, lemma))
+    random.shuffle(bin_data)
+    with open(output, "w") as f:
+        for idx, values in enumerate(bin_data):
+            f.write("\t".join(values) + "\n")
+            # we "prebatch"
+            if idx % 128 == 127:
+                f.write("\n")
 
 
 # fmt: off
@@ -216,7 +225,8 @@ def train_lemmatizer(**kwargs):
         special_tokens=VocabMap.UNK_PAD_EOS_SOS,
     )
     dictionaries[Dicts.Chars] = c_map
-    tag_vocab = Vocab.from_file(kwargs["known_tags_file"])
+    tag_vocab = bin_to_ifd.öll_mörk(strip=True)
+    tag_vocab = {tag for tag in tag_vocab if tag is not None}
     t_map = VocabMap(
         tag_vocab,
         special_tokens=VocabMap.UNK_PAD,

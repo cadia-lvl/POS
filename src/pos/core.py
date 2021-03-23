@@ -2,7 +2,7 @@
 import logging
 import random
 from enum import Enum
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
 import torch
@@ -95,7 +95,7 @@ class VocabMap:
     w2i: Dict[str, int]
     i2w: Dict[int, str]
 
-    def __init__(self, vocab: Vocab, special_tokens: Optional[List[Tuple[str, int]]] = None):
+    def __init__(self, vocab: Set[str], special_tokens: Optional[List[Tuple[str, int]]] = None):
         """Build a vocabulary mapping from the provided vocabulary, needs to start at index=0.
 
         If special_tokens is given, will add these tokens first and start from the next index of the highest index provided.
