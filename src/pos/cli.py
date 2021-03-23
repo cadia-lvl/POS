@@ -14,7 +14,7 @@ import click
 import torch
 from torch import nn
 
-from pos import core, evaluate
+from pos import bin_to_ifd, core, evaluate
 from pos.api import Tagger as api_tagger
 from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap, set_device, set_seed
 from pos.data import (
@@ -140,6 +140,28 @@ def filter_embedding(filepaths, embedding, output, emb_format):
             for token, value in emb_dict.items():
                 if token in tokens:  # pylint: disable=unsupported-membership-test
                     output.write(f"{token} {' '.join((str(x) for x in value))}\n")
+
+
+@cli.command()
+@click.argument("sh_snid")
+@click.argument("output")
+def prepare_bin_lemma_data(sh_snid, output):
+    """Prepare the BÍN data, extract form, pos (translated) and lemma."""
+    with open(sh_snid) as f, open(output) as f_out:
+        for line in f:
+            lemma, auðkenni, kyn_orðflokkur, hluti, orðmynd, mörk = line.strip().split(";")
+            mim_mark = bin_to_ifd.parse_bin_str(
+                orðmynd=orðmynd,
+                lemma=lemma,
+                kyn_orðflokkur=kyn_orðflokkur,
+                mörk=mörk,
+                samtengingar="c",
+                afturbeygð_fn="fp",
+            )
+            # fjölyrtar segðir
+            if mim_mark is None:
+                continue
+            f_out.write(f"{orðmynd}\t{mim_mark}\{lemma}\n")
 
 
 # fmt: off
