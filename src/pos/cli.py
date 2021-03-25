@@ -179,8 +179,8 @@ def prepare_bin_lemma_data(sh_snid, output):
 @click.argument("test_file")
 @click.argument("output_dir")
 @click.option("--gpu/--no_gpu", default=False)
-@click.option("--save_model/--no_save_model", default=False)
-@click.option("--save_vocab/--no_save_vocab", default=False)
+@click.option("--save_model/--no_save_model", default=True)
+@click.option("--save_vocab/--no_save_vocab", default=True)
 @click.option("--lemmatizer_accept_char_rnn_last/--no_lemmatizer_accept_char_rnn_last", default=False, help="Should the Character RNN last hidden state be input to Lemmatizer")
 @click.option("--lemmatizer_hidden_dim", default=128, help="The hidden dim of the decoder RNN.")
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
@@ -193,6 +193,7 @@ def prepare_bin_lemma_data(sh_snid, output):
 @click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
 @click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
 @click.option("--emb_dropouts", default=0.0, help="The dropout to use for Embeddings.")
+@click.option("--from_trained", default=None, help="The path to a model.pt which will be used as a starting point.")
 @click.option("--label_smoothing", default=0.1)
 @click.option("--learning_rate", default=5e-5)
 @click.option("--epochs", default=20)
@@ -218,51 +219,11 @@ def train_lemmatizer(**kwargs):
     train_ds = read_datasets(kwargs["training_files"], fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
     test_ds = read_datasets([kwargs["test_file"]], fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
     # Dicts
-    dictionaries: Dict[Dicts, VocabMap] = {}
-    char_vocab = Vocab.from_file(kwargs["known_chars_file"])
-    c_map = VocabMap(
-        char_vocab,
-        special_tokens=VocabMap.UNK_PAD_EOS_SOS,
-    )
-    dictionaries[Dicts.Chars] = c_map
-    tag_vocab = bin_to_ifd.öll_mörk(strip=True)
-    tag_vocab = {tag for tag in tag_vocab if tag is not None}
-    t_map = VocabMap(
-        tag_vocab,
-        special_tokens=VocabMap.UNK_PAD,
-    )
-    dictionaries[Dicts.FullTag] = t_map
-
-    tag_embedding = ClassingWordEmbedding(
-        dictionaries[Dicts.FullTag],
-        embedding_dim=kwargs["tag_embedding_dim"],
-        padding_idx=dictionaries[Dicts.FullTag].w2i[PAD],
-        dropout=kwargs["emb_dropouts"],
-    )
-    character_embedding = CharacterEmbedding(
-        dictionaries[Dicts.Chars],
-        embedding_dim=kwargs["char_emb_dim"],
-        dropout=kwargs["emb_dropouts"],
-    )
-    char_as_word = CharacterAsWordEmbedding(
-        character_embedding=character_embedding,
-        char_lstm_layers=kwargs["char_lstm_layers"],
-        char_lstm_dim=kwargs["char_lstm_dim"],
-        dropout=kwargs["emb_dropouts"],
-    )
-    char_decoder = CharacterDecoder(
-        character_embedding=character_embedding,
-        vocab_map=dictionaries[Dicts.Chars],
-        context_dim=tag_embedding.output_dim,
-        hidden_dim=kwargs["lemmatizer_hidden_dim"],
-        char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
-        attention_dim=char_as_word.output_dim,
-        char_attention=kwargs["lemmatizer_char_attention"],
-        num_layers=kwargs["lemmatizer_num_layers"],
-        dropout=kwargs["emb_dropouts"],
-    )
-
-    lemmatizer = Lemmatizer(tag_embedding=tag_embedding, char_as_words=char_as_word, character_decoder=char_decoder)
+    dictionaries = build_dictionaries(kwargs)
+    if not kwargs["from_trained"]:
+        lemmatizer = build_lemmatizer_model(kwargs, dictionaries)
+    else:
+        lemmatizer = load_lemmatizer_model(kwargs["from_trained"])
     lemmatizer.to(core.device)
     train_dl = torch.utils.data.DataLoader(
         train_ds,
@@ -276,7 +237,7 @@ def train_lemmatizer(**kwargs):
         shuffle=False,
         batch_size=kwargs["batch_size"] * 10,
     )
-    criterion = get_criterion({Modules.Lemmatizer: char_decoder}, label_smoothing=kwargs["label_smoothing"])
+    criterion = get_criterion({Modules.Lemmatizer: lemmatizer.char_decoder}, label_smoothing=kwargs["label_smoothing"])
     parameter_groups = get_parameter_groups(lemmatizer)
     log.info(f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}")
     optimizer = get_optimizer(parameter_groups, kwargs["optimizer"], kwargs["learning_rate"])
@@ -329,6 +290,62 @@ def train_lemmatizer(**kwargs):
         save_location = output_dir.joinpath("lemmatizer.pt")
         torch.save(lemmatizer, str(save_location))
     log.info("Done!")
+
+
+def load_lemmatizer_model(path):
+    lemmatizer: Lemmatizer = torch.load(path)
+    return lemmatizer
+
+
+def build_dictionaries(kwargs):
+    dictionaries: Dict[Dicts, VocabMap] = {}
+    char_vocab = Vocab.from_file(kwargs["known_chars_file"])
+    c_map = VocabMap(
+        char_vocab,
+        special_tokens=VocabMap.UNK_PAD_EOS_SOS,
+    )
+    dictionaries[Dicts.Chars] = c_map
+    tag_vocab = bin_to_ifd.öll_mörk(strip=True)
+    tag_vocab = {tag for tag in tag_vocab if tag is not None}
+    t_map = VocabMap(
+        tag_vocab,
+        special_tokens=VocabMap.UNK_PAD,
+    )
+    dictionaries[Dicts.FullTag] = t_map
+    return dictionaries
+
+
+def build_lemmatizer_model(kwargs, dictionaries):
+    tag_embedding = ClassingWordEmbedding(
+        dictionaries[Dicts.FullTag],
+        embedding_dim=kwargs["tag_embedding_dim"],
+        padding_idx=dictionaries[Dicts.FullTag].w2i[PAD],
+        dropout=kwargs["emb_dropouts"],
+    )
+    character_embedding = CharacterEmbedding(
+        dictionaries[Dicts.Chars],
+        embedding_dim=kwargs["char_emb_dim"],
+        dropout=kwargs["emb_dropouts"],
+    )
+    char_as_word = CharacterAsWordEmbedding(
+        character_embedding=character_embedding,
+        char_lstm_layers=kwargs["char_lstm_layers"],
+        char_lstm_dim=kwargs["char_lstm_dim"],
+        dropout=kwargs["emb_dropouts"],
+    )
+    char_decoder = CharacterDecoder(
+        character_embedding=character_embedding,
+        vocab_map=dictionaries[Dicts.Chars],
+        context_dim=tag_embedding.output_dim,
+        hidden_dim=kwargs["lemmatizer_hidden_dim"],
+        char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
+        attention_dim=char_as_word.output_dim,
+        char_attention=kwargs["lemmatizer_char_attention"],
+        num_layers=kwargs["lemmatizer_num_layers"],
+        dropout=kwargs["emb_dropouts"],
+    )
+    lemmatizer = Lemmatizer(tag_embedding=tag_embedding, char_as_words=char_as_word, character_decoder=char_decoder)
+    return lemmatizer
 
 
 # fmt: off
