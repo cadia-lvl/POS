@@ -294,7 +294,7 @@ def train_lemmatizer(**kwargs):
 
 
 def load_lemmatizer_model(path):
-    lemmatizer: Lemmatizer = torch.load(path)
+    lemmatizer: Lemmatizer = torch.load(path, map_location=torch.device("cpu"))
     return lemmatizer
 
 
