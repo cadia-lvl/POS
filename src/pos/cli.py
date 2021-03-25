@@ -238,7 +238,9 @@ def train_lemmatizer(**kwargs):
         shuffle=False,
         batch_size=kwargs["batch_size"] * 10,
     )
-    criterion = get_criterion({Modules.Lemmatizer: lemmatizer.char_decoder}, label_smoothing=kwargs["label_smoothing"])
+    criterion = get_criterion(
+        {Modules.Lemmatizer: lemmatizer.character_decoder}, label_smoothing=kwargs["label_smoothing"]
+    )
     parameter_groups = get_parameter_groups(lemmatizer)
     log.info(f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}")
     optimizer = get_optimizer(parameter_groups, kwargs["optimizer"], kwargs["learning_rate"])
