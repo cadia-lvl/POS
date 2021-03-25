@@ -223,6 +223,7 @@ def train_lemmatizer(**kwargs):
     if not kwargs["from_trained"]:
         lemmatizer = build_lemmatizer_model(kwargs, dictionaries)
     else:
+        log.info(f"Loading model={path}")
         lemmatizer = load_lemmatizer_model(kwargs["from_trained"])
     lemmatizer.to(core.device)
     train_dl = torch.utils.data.DataLoader(
