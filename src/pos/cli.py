@@ -441,6 +441,7 @@ def train_and_tag(**kwargs):
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
         train_ds=unchunked_train_ds,
+        ignore_e_x=True,
         pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
         morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
         known_chars_file=kwargs["known_chars_file"],
