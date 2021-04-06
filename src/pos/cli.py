@@ -146,6 +146,35 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @cli.command()
 @click.argument("sh_snid")
 @click.argument("output")
+def prepare_bin_lemma_data_bart(sh_snid, output):
+    """Prepare the BÍN data, extract form, pos (translated) and lemma."""
+    bin_data = []
+    with open(sh_snid) as f:
+        for line in f:
+            lemma, auðkenni, kyn_orðflokkur, hluti, orðmynd, mörk = line.strip().split(";")
+            mim_mark = bin_to_ifd.parse_bin_str(
+                orðmynd=orðmynd,
+                lemma=lemma,
+                kyn_orðflokkur=kyn_orðflokkur,
+                mörk=mörk,
+                samtengingar="c",
+                afturbeygð_fn="fp",
+            )
+            # fjölyrtar segðir
+            if mim_mark is None:
+                continue
+            bin_data.append((orðmynd, mim_mark, lemma))
+    random.shuffle(bin_data)
+    with open(output, "w") as f_mynd, open(f"{output}.lemma", "w") as f_lemma:
+        for idx, values in enumerate(bin_data):
+            orðmynd, mim_mark, lemma = values
+            f_mynd.write(" ".join(mim_mark + "|" + orðmynd) + "\n")
+            f_lemma.write(" ".join(lemma) + "\n")
+
+
+@cli.command()
+@click.argument("sh_snid")
+@click.argument("output")
 def prepare_bin_lemma_data(sh_snid, output):
     """Prepare the BÍN data, extract form, pos (translated) and lemma."""
     bin_data = []
