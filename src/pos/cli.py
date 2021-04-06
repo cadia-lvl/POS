@@ -14,6 +14,7 @@ from typing import Dict
 import click
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 
 from pos import bin_to_ifd, core, evaluate
 from pos.api import Tagger as api_tagger
@@ -447,20 +448,21 @@ def train_and_tag(**kwargs):
 
     embs: Dict[Modules, Embedding] = {}
     if kwargs["bert_encoder"]:
-        embs[Modules.BERT] = TransformerEmbedding(
+        emb = TransformerEmbedding(
             kwargs["bert_encoder"],
             dropout=kwargs["emb_dropouts"],
         )
         train_ds = chunk_dataset(
             unchunked_train_ds,
-            embs[Modules.BERT].tokenizer,
-            embs[Modules.BERT].max_length,
+            emb.tokenizer,
+            emb.max_length,
         )
         test_ds = chunk_dataset(
             unchunked_test_ds,
-            embs[Modules.BERT].tokenizer,
-            embs[Modules.BERT].max_length,
+            emb.tokenizer,
+            emb.max_length,
         )
+        embs[Modules.BERT] = emb
     else:
         train_ds = unchunked_train_ds
         test_ds = unchunked_test_ds
@@ -486,11 +488,16 @@ def train_and_tag(**kwargs):
             dropout=kwargs["emb_dropouts"],
         )
     if kwargs["char_lstm_layers"]:
-        embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(
+        embs[Modules.CharactersToTokens] = char_as_word
+        character_embedding = CharacterEmbedding(
             dicts[Dicts.Chars],
-            character_embedding_dim=kwargs["char_emb_dim"],
+            embedding_dim=kwargs["char_emb_dim"],
+            dropout=kwargs["emb_dropouts"],
+        )
+        char_as_word = CharacterAsWordEmbedding(
+            character_embedding=character_embedding,
             char_lstm_layers=kwargs["char_lstm_layers"],
-            char_lstm_dim=kwargs["char_lstm_dim"],  # we use the same dimension
+            char_lstm_dim=kwargs["char_lstm_dim"],
             dropout=kwargs["emb_dropouts"],
         )
     encoder = Encoder(
@@ -514,32 +521,30 @@ def train_and_tag(**kwargs):
         )
     if kwargs["lemmatizer"]:
         log.info("Training Lemmatizer")
-        decoders[Modules.Lemmatizer] = CharacterDecoder(
+        char_decoder = CharacterDecoder(
+            character_embedding=character_embedding,
             vocab_map=dicts[Dicts.Chars],
             context_dim=decoders[Modules.Tagger].output_dim,
             hidden_dim=kwargs["lemmatizer_hidden_dim"],
-            char_emb_dim=kwargs["lemmatizer_char_dim"],
-            char_rnn_input_dim=0
-            if not kwargs["lemmatizer_accept_char_rnn_last"]
-            else embs[Modules.CharactersToTokens].output_dim,
-            attention_dim=embs[Modules.CharactersToTokens].output_dim if Modules.CharactersToTokens in embs else 0,
-            char_attention=Modules.CharactersToTokens in embs and kwargs["lemmatizer_char_attention"],
+            char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
+            attention_dim=char_as_word.output_dim,
+            char_attention=kwargs["lemmatizer_char_attention"],
             num_layers=kwargs["lemmatizer_num_layers"],
             dropout=kwargs["emb_dropouts"],
-            weight=kwargs["lemmatizer_weight"],
         )
+        decoders[Modules.Lemmatizer] = char_decoder
     abl_tagger = ABLTagger(encoder=encoder, **{key.value: value for key, value in decoders.items()}).to(core.device)
 
     # Train a model
     print_tagger(abl_tagger)
 
-    train_dl = torch.utils.data.DataLoader(
+    train_dl = DataLoader(
         train_ds,
         collate_fn=collate_fn,  # type: ignore
         shuffle=True,
         batch_size=kwargs["batch_size"],
     )
-    test_dl = torch.utils.data.DataLoader(
+    test_dl = DataLoader(
         test_ds,
         collate_fn=collate_fn,  # type: ignore
         shuffle=False,
