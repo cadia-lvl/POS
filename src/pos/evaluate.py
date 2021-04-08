@@ -120,7 +120,7 @@ class Evaluation:
                 predictions.get_field(pred_field),
             )
             for gold, predicted in zip(gold_tags, predicted_tags)
-            if gold != predicted and filter_gold(gold)
+            if gold != predicted and not filter_gold(gold)
         )
 
 
