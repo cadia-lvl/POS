@@ -27,11 +27,7 @@ def test_loss():
     assert loss2.item() == expected_loss2
 
     # self-made sum
-    assert (
-        expected_loss + expected_loss2 - 0.01
-        <= (loss + loss2).item()
-        <= expected_loss + expected_loss2
-    )
+    assert expected_loss + expected_loss2 - 0.01 <= (loss + loss2).item() <= expected_loss + expected_loss2
     # pytorch sum
     test_score_combined = torch.cat((test_score, test_score2))
     test_idx_combined = torch.cat((test_idx, test_idx2))

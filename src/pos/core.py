@@ -1,22 +1,14 @@
 """The main abstractions in the project."""
-from enum import Enum
-from typing import (
-    Iterator,
-    Tuple,
-    Iterable,
-    List,
-    Dict,
-    Optional,
-    Sequence,
-    Union,
-)
 import logging
 import random
+from enum import Enum
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
-import torch
-from torch.utils.data import Dataset
-from torch import device as t_device, set_num_threads
 import numpy as np
+import torch
+from torch import device as t_device
+from torch import set_num_threads
+from torch.utils.data import Dataset
 
 from pos.utils import read_tsv, tokens_to_sentences, write_tsv
 
@@ -103,7 +95,7 @@ class VocabMap:
     w2i: Dict[str, int]
     i2w: Dict[int, str]
 
-    def __init__(self, vocab: Vocab, special_tokens: Optional[List[Tuple[str, int]]] = None):
+    def __init__(self, vocab: Set[str], special_tokens: Optional[List[Tuple[str, int]]] = None):
         """Build a vocabulary mapping from the provided vocabulary, needs to start at index=0.
 
         If special_tokens is given, will add these tokens first and start from the next index of the highest index provided.

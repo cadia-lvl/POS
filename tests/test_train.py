@@ -1,16 +1,9 @@
 import pathlib
-from re import M
 
 from pos.core import Dicts
-from pos.model import CharacterAsWordEmbedding, Encoder, CharacterDecoder, Modules, ABLTagger
-from pos.train import (
-    get_criterion,
-    get_optimizer,
-    get_parameter_groups,
-    get_scheduler,
-    run_epochs,
-    tag_data_loader,
-)
+from pos.model import ABLTagger, CharacterAsWordEmbedding, CharacterDecoder, Encoder, Modules
+from pos.model.embeddings import CharacterEmbedding
+from pos.train import get_criterion, get_optimizer, get_parameter_groups, get_scheduler, run_epochs, tag_data_loader
 
 
 def test_train_tagger(decoders, encoder, data_loader, kwargs, tagger_evaluator, lemma_evaluator):
@@ -19,10 +12,8 @@ def test_train_tagger(decoders, encoder, data_loader, kwargs, tagger_evaluator, 
     parameter_groups = get_parameter_groups(abl_tagger)
     optimizer = get_optimizer(parameter_groups, optimizer=kwargs["optimizer"], lr=kwargs["learning_rate"])
     scheduler = get_scheduler(optimizer, scheduler=kwargs["scheduler"])
-    # TODO: Add evaluator for Lemmas
     evaluators = {Modules.Tagger: tagger_evaluator, Modules.Lemmatizer: lemma_evaluator}
 
-    # Write all configuration to disk
     output_dir = pathlib.Path(kwargs["output_dir"])
 
     # Start the training
@@ -46,9 +37,12 @@ def test_train_tagger(decoders, encoder, data_loader, kwargs, tagger_evaluator, 
 def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps, tagger_module):
     dicts = vocab_maps
     embs = {}
+    character_embedding = CharacterEmbedding(
+        vocab_map=vocab_maps[Dicts.Chars],
+        embedding_dim=20,
+    )
     embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(
-        dicts[Dicts.Chars],
-        character_embedding_dim=kwargs["char_emb_dim"],
+        character_embedding=character_embedding,
         char_lstm_layers=kwargs["char_lstm_layers"],
         char_lstm_dim=10,
     )
@@ -59,11 +53,12 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps, 
         lstm_dropouts=0.0,
         input_dropouts=0.0,
     )
+
     lemmatizer = CharacterDecoder(
         vocab_map=dicts[Dicts.Chars],
+        character_embedding=character_embedding,
         hidden_dim=kwargs["lemmatizer_hidden_dim"],
         context_dim=tagger_module.output_dim,
-        char_emb_dim=64,
         num_layers=2,
         attention_dim=embs[Modules.CharactersToTokens].output_dim,
         char_attention=True,
@@ -73,7 +68,6 @@ def test_character_lemmatizer(data_loader, kwargs, lemma_evaluator, vocab_maps, 
     parameter_groups = get_parameter_groups(abl_tagger)
     optimizer = get_optimizer(parameter_groups, optimizer=kwargs["optimizer"], lr=kwargs["learning_rate"])
     scheduler = get_scheduler(optimizer, scheduler=kwargs["scheduler"])
-    # TODO: Add evaluator for Lemmas
     evaluators = {Modules.Lemmatizer: lemma_evaluator}
 
     # Write all configuration to disk

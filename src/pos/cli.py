@@ -1,62 +1,62 @@
 #!/usr/bin/env python
 """The main entrypoint to training and running a POS-tagger."""
-from collections import Counter
-from functools import reduce
-from operator import add
-import pickle
-from pprint import pprint, pformat
-import logging
 import json
+import logging
 import pathlib
+import pickle
+import random
+import re
+from collections import Counter
+from pprint import pprint
 from typing import Dict
 
 import click
 import torch
-from torch import nn
+from torch.utils.data import DataLoader
 
+from pos import bin_to_ifd, core, evaluate
+from pos.api import Tagger as api_tagger
+from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap, set_device, set_seed
 from pos.data import (
+    bin_str_to_emb_pair,
+    chunk_dataset,
+    collate_fn,
+    dechunk_dataset,
+    emb_pairs_to_dict,
     load_dicts,
     read_datasets,
-    emb_pairs_to_dict,
-    bin_str_to_emb_pair,
     read_morphlex,
     read_pretrained_word_embeddings,
     wemb_str_to_emb_pair,
-    collate_fn,
-    chunk_dataset,
-    dechunk_dataset,
 )
-from pos import core
-from pos.core import Vocab, FieldedDataset, Dicts, Fields, VocabMap, set_device, set_seed
 from pos.data.constants import PAD
 from pos.model import (
+    ABLTagger,
+    CharacterAsWordEmbedding,
+    CharacterDecoder,
+    ClassingWordEmbedding,
     Decoder,
     Embedding,
     Encoder,
-    Tagger,
-    ABLTagger,
-    TransformerEmbedding,
-    PretrainedEmbedding,
-    ClassingWordEmbedding,
-    CharacterAsWordEmbedding,
-    CharacterDecoder,
     Modules,
+    PretrainedEmbedding,
+    Tagger,
+    TransformerEmbedding,
 )
+from pos.model.embeddings import CharacterEmbedding
 from pos.model.impl import Lemmatizer
 from pos.train import (
     MODULE_TO_FIELD,
     _cross_entropy,
-    print_tagger,
     get_criterion,
-    tag_data_loader,
-    get_parameter_groups,
     get_optimizer,
+    get_parameter_groups,
     get_scheduler,
+    print_tagger,
     run_epochs,
+    tag_data_loader,
 )
-from pos.api import Tagger as api_tagger
 from pos.utils import write_tsv
-from pos import evaluate
 
 DEBUG = False
 
@@ -142,14 +142,73 @@ def filter_embedding(filepaths, embedding, output, emb_format):
                     output.write(f"{token} {' '.join((str(x) for x in value))}\n")
 
 
+@cli.command()
+@click.argument("sh_snid")
+@click.argument("output")
+def prepare_bin_lemma_data_bart(sh_snid, output):
+    """Prepare the BÍN data, extract form, pos (translated) and lemma."""
+    bin_data = []
+    with open(sh_snid) as f:
+        for line in f:
+            lemma, auðkenni, kyn_orðflokkur, hluti, orðmynd, mörk = line.strip().split(";")
+            mim_mark = bin_to_ifd.parse_bin_str(
+                orðmynd=orðmynd,
+                lemma=lemma,
+                kyn_orðflokkur=kyn_orðflokkur,
+                mörk=mörk,
+                samtengingar="c",
+                afturbeygð_fn="fp",
+            )
+            # fjölyrtar segðir
+            if mim_mark is None:
+                continue
+            bin_data.append((orðmynd, mim_mark, lemma))
+    random.shuffle(bin_data)
+    with open(output, "w") as f_mynd, open(f"{output}.lemma", "w") as f_lemma:
+        for idx, values in enumerate(bin_data):
+            orðmynd, mim_mark, lemma = values
+            f_mynd.write(" ".join(mim_mark + "|" + orðmynd) + "\n")
+            f_lemma.write(" ".join(lemma) + "\n")
+
+
+@cli.command()
+@click.argument("sh_snid")
+@click.argument("output")
+def prepare_bin_lemma_data(sh_snid, output):
+    """Prepare the BÍN data, extract form, pos (translated) and lemma."""
+    bin_data = []
+    with open(sh_snid) as f:
+        for line in f:
+            lemma, auðkenni, kyn_orðflokkur, hluti, orðmynd, mörk = line.strip().split(";")
+            mim_mark = bin_to_ifd.parse_bin_str(
+                orðmynd=orðmynd,
+                lemma=lemma,
+                kyn_orðflokkur=kyn_orðflokkur,
+                mörk=mörk,
+                samtengingar="c",
+                afturbeygð_fn="fp",
+            )
+            # fjölyrtar segðir
+            if mim_mark is None:
+                continue
+            bin_data.append((orðmynd, mim_mark, lemma))
+    random.shuffle(bin_data)
+    with open(output, "w") as f:
+        for idx, values in enumerate(bin_data):
+            f.write("\t".join(values) + "\n")
+            # we "prebatch"
+            if idx % 128 == 127:
+                f.write("\n")
+
+
 # fmt: off
 @cli.command()
 @click.argument("training_files", nargs=-1)
 @click.argument("test_file")
 @click.argument("output_dir")
 @click.option("--gpu/--no_gpu", default=False)
-@click.option("--save_model/--no_save_model", default=False)
-@click.option("--save_vocab/--no_save_vocab", default=False)
+@click.option("--save_model/--no_save_model", default=True)
+@click.option("--save_vocab/--no_save_vocab", default=True)
 @click.option("--lemmatizer_accept_char_rnn_last/--no_lemmatizer_accept_char_rnn_last", default=False, help="Should the Character RNN last hidden state be input to Lemmatizer")
 @click.option("--lemmatizer_hidden_dim", default=128, help="The hidden dim of the decoder RNN.")
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
@@ -162,6 +221,7 @@ def filter_embedding(filepaths, embedding, output, emb_format):
 @click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
 @click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
 @click.option("--emb_dropouts", default=0.0, help="The dropout to use for Embeddings.")
+@click.option("--from_trained", default=None, help="The path to a model.pt which will be used as a starting point.")
 @click.option("--label_smoothing", default=0.1)
 @click.option("--learning_rate", default=5e-5)
 @click.option("--epochs", default=20)
@@ -187,46 +247,12 @@ def train_lemmatizer(**kwargs):
     train_ds = read_datasets(kwargs["training_files"], fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
     test_ds = read_datasets([kwargs["test_file"]], fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
     # Dicts
-    dictionaries: Dict[Dicts, VocabMap] = {}
-    char_vocab = Vocab.from_file(kwargs["known_chars_file"])
-    c_map = VocabMap(
-        char_vocab,
-        special_tokens=VocabMap.UNK_PAD_EOS_SOS,
-    )
-    dictionaries[Dicts.Chars] = c_map
-    tag_vocab = Vocab.from_file(kwargs["known_tags_file"])
-    t_map = VocabMap(
-        tag_vocab,
-        special_tokens=VocabMap.UNK_PAD,
-    )
-    dictionaries[Dicts.FullTag] = t_map
-
-    tag_embedding = ClassingWordEmbedding(
-        dictionaries[Dicts.FullTag],
-        embedding_dim=kwargs["tag_embedding_dim"],
-        padding_idx=dictionaries[Dicts.FullTag].w2i[PAD],
-        dropout=kwargs["emb_dropouts"],
-    )
-    char_as_word = CharacterAsWordEmbedding(
-        dictionaries[Dicts.Chars],
-        character_embedding_dim=kwargs["char_emb_dim"],
-        char_lstm_layers=kwargs["char_lstm_layers"],
-        char_lstm_dim=kwargs["char_lstm_dim"],
-        dropout=kwargs["emb_dropouts"],
-    )
-    char_decoder = CharacterDecoder(
-        vocab_map=dictionaries[Dicts.Chars],
-        context_dim=tag_embedding.output_dim,
-        hidden_dim=kwargs["lemmatizer_hidden_dim"],
-        char_emb_dim=kwargs["lemmatizer_char_dim"],
-        char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
-        attention_dim=char_as_word.output_dim,
-        char_attention=kwargs["lemmatizer_char_attention"],
-        num_layers=kwargs["lemmatizer_num_layers"],
-        dropout=kwargs["emb_dropouts"],
-    )
-
-    lemmatizer = Lemmatizer(tag_embedding=tag_embedding, char_as_words=char_as_word, character_decoder=char_decoder)
+    dictionaries = build_dictionaries(kwargs)
+    if not kwargs["from_trained"]:
+        lemmatizer = build_lemmatizer_model(kwargs, dictionaries)
+    else:
+        log.info(f"Loading model={kwargs['from_trained']}")
+        lemmatizer = load_lemmatizer_model(kwargs["from_trained"])
     lemmatizer.to(core.device)
     train_dl = torch.utils.data.DataLoader(
         train_ds,
@@ -240,7 +266,9 @@ def train_lemmatizer(**kwargs):
         shuffle=False,
         batch_size=kwargs["batch_size"] * 10,
     )
-    criterion = get_criterion({Modules.Lemmatizer: char_decoder}, label_smoothing=kwargs["label_smoothing"])
+    criterion = get_criterion(
+        {Modules.Lemmatizer: lemmatizer.character_decoder}, label_smoothing=kwargs["label_smoothing"]
+    )
     parameter_groups = get_parameter_groups(lemmatizer)
     log.info(f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}")
     optimizer = get_optimizer(parameter_groups, kwargs["optimizer"], kwargs["learning_rate"])
@@ -295,6 +323,62 @@ def train_lemmatizer(**kwargs):
     log.info("Done!")
 
 
+def load_lemmatizer_model(path):
+    lemmatizer: Lemmatizer = torch.load(path, map_location=torch.device("cpu"))
+    return lemmatizer
+
+
+def build_dictionaries(kwargs):
+    dictionaries: Dict[Dicts, VocabMap] = {}
+    char_vocab = Vocab.from_file(kwargs["known_chars_file"])
+    c_map = VocabMap(
+        char_vocab,
+        special_tokens=VocabMap.UNK_PAD_EOS_SOS,
+    )
+    dictionaries[Dicts.Chars] = c_map
+    tag_vocab = bin_to_ifd.öll_mörk(strip=True)
+    tag_vocab = {tag for tag in tag_vocab if tag is not None}
+    t_map = VocabMap(
+        tag_vocab,
+        special_tokens=VocabMap.UNK_PAD,
+    )
+    dictionaries[Dicts.FullTag] = t_map
+    return dictionaries
+
+
+def build_lemmatizer_model(kwargs, dictionaries):
+    tag_embedding = ClassingWordEmbedding(
+        dictionaries[Dicts.FullTag],
+        embedding_dim=kwargs["tag_embedding_dim"],
+        padding_idx=dictionaries[Dicts.FullTag].w2i[PAD],
+        dropout=kwargs["emb_dropouts"],
+    )
+    character_embedding = CharacterEmbedding(
+        dictionaries[Dicts.Chars],
+        embedding_dim=kwargs["char_emb_dim"],
+        dropout=kwargs["emb_dropouts"],
+    )
+    char_as_word = CharacterAsWordEmbedding(
+        character_embedding=character_embedding,
+        char_lstm_layers=kwargs["char_lstm_layers"],
+        char_lstm_dim=kwargs["char_lstm_dim"],
+        dropout=kwargs["emb_dropouts"],
+    )
+    char_decoder = CharacterDecoder(
+        character_embedding=character_embedding,
+        vocab_map=dictionaries[Dicts.Chars],
+        context_dim=tag_embedding.output_dim,
+        hidden_dim=kwargs["lemmatizer_hidden_dim"],
+        char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
+        attention_dim=char_as_word.output_dim,
+        char_attention=kwargs["lemmatizer_char_attention"],
+        num_layers=kwargs["lemmatizer_num_layers"],
+        dropout=kwargs["emb_dropouts"],
+    )
+    lemmatizer = Lemmatizer(tag_embedding=tag_embedding, char_as_words=char_as_word, character_decoder=char_decoder)
+    return lemmatizer
+
+
 # fmt: off
 @cli.command()
 @click.argument("training_files", nargs=-1)
@@ -306,6 +390,7 @@ def train_lemmatizer(**kwargs):
 @click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
 @click.option("--tagger_weight", default=1.0, help="Value to multiply tagging loss")
 @click.option("--tagger_embedding", default="bilstm", help="The embedding to feed to the Tagger, see pos.model.Modules.")
+@click.option("--tagger_ignore_e_x/--no_tagger_ignore_e_x", is_flag=True, default=True)
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option("--lemmatizer_weight", default=0.1, help="Value to multiply lemmatizer loss")
 @click.option("--lemmatizer_accept_char_rnn_last/--no_lemmatizer_accept_char_rnn_last", default=False, help="Should the Character RNN last hidden state be input to Lemmatizer")
@@ -355,6 +440,7 @@ def train_and_tag(**kwargs):
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
         train_ds=unchunked_train_ds,
+        ignore_e_x=kwargs["tagger_ignore_e_x"],
         pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
         morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
         known_chars_file=kwargs["known_chars_file"],
@@ -362,20 +448,21 @@ def train_and_tag(**kwargs):
 
     embs: Dict[Modules, Embedding] = {}
     if kwargs["bert_encoder"]:
-        embs[Modules.BERT] = TransformerEmbedding(
+        emb = TransformerEmbedding(
             kwargs["bert_encoder"],
             dropout=kwargs["emb_dropouts"],
         )
         train_ds = chunk_dataset(
             unchunked_train_ds,
-            embs[Modules.BERT].tokenizer,
-            embs[Modules.BERT].max_length,
+            emb.tokenizer,
+            emb.max_length,
         )
         test_ds = chunk_dataset(
             unchunked_test_ds,
-            embs[Modules.BERT].tokenizer,
-            embs[Modules.BERT].max_length,
+            emb.tokenizer,
+            emb.max_length,
         )
+        embs[Modules.BERT] = emb
     else:
         train_ds = unchunked_train_ds
         test_ds = unchunked_test_ds
@@ -401,11 +488,16 @@ def train_and_tag(**kwargs):
             dropout=kwargs["emb_dropouts"],
         )
     if kwargs["char_lstm_layers"]:
-        embs[Modules.CharactersToTokens] = CharacterAsWordEmbedding(
+        embs[Modules.CharactersToTokens] = char_as_word
+        character_embedding = CharacterEmbedding(
             dicts[Dicts.Chars],
-            character_embedding_dim=kwargs["char_emb_dim"],
+            embedding_dim=kwargs["char_emb_dim"],
+            dropout=kwargs["emb_dropouts"],
+        )
+        char_as_word = CharacterAsWordEmbedding(
+            character_embedding=character_embedding,
             char_lstm_layers=kwargs["char_lstm_layers"],
-            char_lstm_dim=kwargs["char_lstm_dim"],  # we use the same dimension
+            char_lstm_dim=kwargs["char_lstm_dim"],
             dropout=kwargs["emb_dropouts"],
         )
     encoder = Encoder(
@@ -429,32 +521,30 @@ def train_and_tag(**kwargs):
         )
     if kwargs["lemmatizer"]:
         log.info("Training Lemmatizer")
-        decoders[Modules.Lemmatizer] = CharacterDecoder(
+        char_decoder = CharacterDecoder(
+            character_embedding=character_embedding,
             vocab_map=dicts[Dicts.Chars],
             context_dim=decoders[Modules.Tagger].output_dim,
             hidden_dim=kwargs["lemmatizer_hidden_dim"],
-            char_emb_dim=kwargs["lemmatizer_char_dim"],
-            char_rnn_input_dim=0
-            if not kwargs["lemmatizer_accept_char_rnn_last"]
-            else embs[Modules.CharactersToTokens].output_dim,
-            attention_dim=embs[Modules.CharactersToTokens].output_dim if Modules.CharactersToTokens in embs else 0,
-            char_attention=Modules.CharactersToTokens in embs and kwargs["lemmatizer_char_attention"],
+            char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
+            attention_dim=char_as_word.output_dim,
+            char_attention=kwargs["lemmatizer_char_attention"],
             num_layers=kwargs["lemmatizer_num_layers"],
             dropout=kwargs["emb_dropouts"],
-            weight=kwargs["lemmatizer_weight"],
         )
+        decoders[Modules.Lemmatizer] = char_decoder
     abl_tagger = ABLTagger(encoder=encoder, **{key.value: value for key, value in decoders.items()}).to(core.device)
 
     # Train a model
     print_tagger(abl_tagger)
 
-    train_dl = torch.utils.data.DataLoader(
+    train_dl = DataLoader(
         train_ds,
         collate_fn=collate_fn,  # type: ignore
         shuffle=True,
         batch_size=kwargs["batch_size"],
     )
-    test_dl = torch.utils.data.DataLoader(
+    test_dl = DataLoader(
         test_ds,
         collate_fn=collate_fn,  # type: ignore
         shuffle=False,
@@ -647,7 +737,7 @@ def evaluate_predictions(
 @click.option("--criteria", type=click.Choice(["accuracy", "profile"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
 @click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
 @click.option("--up_to", help="For --criteria profile, the number of errors to report", default=30)
-@click.option("--skip_gold_ex/--no_skip_gold_ex", is_flag=True, default=False, help="When evaluating accurcy, should we ignore 'e' and 'x' gold tags?")
+@click.option("--skip_gold_ex/--no_skip_gold_ex", is_flag=True, default=True, help="When evaluating accurcy, should we ignore 'e' and 'x' gold tags?")
 # fmt: on
 def evaluate_experiments(
     directories,
@@ -688,8 +778,14 @@ def evaluate_experiments(
                 train_lemmas=train_lemmas,
                 morphlex_vocab=morphlex_vocab,
                 pretrained_vocab=pretrained_vocab,
+                skip_gold_ex=skip_gold_ex,
             )
     if criteria == "accuracy":
         click.echo(evaluate.format_results(evaluate.all_accuracy_average(accuracy_results)))
     elif criteria == "profile":
+        click.echo(f"Total errors: {sum(profile.values())}")
+        pred_x_e_pattern = re.compile("^[ex] >")
+        click.echo(
+            f"Errors caused by model predicting 'x' and 'e': {sum(value for key, value in profile.items() if pred_x_e_pattern.search(key) is not None)}"
+        )
         click.echo(evaluate.format_profile(profile, up_to=up_to))

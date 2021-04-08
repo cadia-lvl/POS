@@ -1,10 +1,8 @@
 """Tokenizer."""
 
 from typing import List, Tuple
-from transformers import (
-    AutoTokenizer,
-    PreTrainedTokenizerFast,
-)
+
+from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 
 def load_tokenizer(directory: str) -> PreTrainedTokenizerFast:

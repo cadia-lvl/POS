@@ -1,20 +1,14 @@
 """Batch processing."""
 
-from typing import Tuple, Dict, Sequence, Any
-
-from torch import (
-    Tensor,
-    zeros_like,
-)
-from torch.nn.utils.rnn import pad_sequence
+from typing import Any, Dict, Sequence, Tuple
 
 from pos import core
-from pos.core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset
-from .constants import UNK, SOS, EOS, PAD, BATCH_KEYS
-from .pretrained import (
-    read_morphlex,
-    read_pretrained_word_embeddings,
-)
+from pos.core import Dicts, FieldedDataset, Fields, Sentence, Vocab, VocabMap
+from torch import Tensor, zeros_like
+from torch.nn.utils.rnn import pad_sequence
+
+from .constants import BATCH_KEYS, EOS, PAD, PAD_ID, SOS, UNK
+from .pretrained import read_morphlex, read_pretrained_word_embeddings
 
 
 def map_to_index(sentence: Sentence, w2i: Dict[str, int]) -> Tensor:
@@ -88,6 +82,7 @@ def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[BATCH_KEYS, Any]:
 
 def load_dicts(
     train_ds: FieldedDataset,
+    ignore_e_x=False,
     pretrained_word_embeddings_file=None,
     morphlex_embeddings_file=None,
     known_chars_file=None,
@@ -123,5 +118,12 @@ def load_dicts(
     dictionaries[Dicts.Chars] = c_map
 
     # TAGS (POS)
-    dictionaries[Dicts.FullTag] = train_ds.get_tag_vocab_map(special_tokens=VocabMap.UNK_PAD)
+    special_tokens = VocabMap.UNK_PAD
+    tags = train_ds.get_vocab(field=Fields.GoldTags)
+    if ignore_e_x:
+        special_tokens.append(("e", PAD_ID))
+        tags.remove("e")
+        special_tokens.append(("x", PAD_ID))
+        tags.remove("x")
+    dictionaries[Dicts.FullTag] = VocabMap(tags, special_tokens=VocabMap.UNK_PAD)
     return embeddings, dictionaries

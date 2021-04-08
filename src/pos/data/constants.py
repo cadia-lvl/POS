@@ -1,7 +1,6 @@
 """Constants used in data processing."""
 from enum import Enum
 
-
 # To pad in batches
 PAD = "<pad>"
 PAD_ID = 0

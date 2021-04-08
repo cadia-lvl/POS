@@ -19,6 +19,9 @@ ignored-modules = "torch"
 testpaths = [
     "tests"
 ]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
 # addopts = "--electra_model electra-small-pytorch --tagger /home/haukur/Resources/Models/POS/tagger-v2.0.0.pt"
 
 [tool.poetry]

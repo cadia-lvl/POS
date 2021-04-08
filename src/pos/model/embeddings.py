@@ -1,13 +1,14 @@
 """Implementation of several embeddings."""
 from typing import Any, Dict, Sequence
 
-from torch import nn
 import torch
-from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerFast, AutoConfig
-
 from pos import core
-from pos.data import map_to_index, get_initial_token_mask
+from pos.data import get_initial_token_mask, map_to_index
 from pos.data.batch import map_to_chars_batch
+from torch import nn
+from transformers import AutoConfig, AutoModel, AutoTokenizer
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
+
 from . import abltagger
 
 
@@ -79,7 +80,6 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
         character_embedding: CharacterEmbedding,
         char_lstm_dim=64,
         char_lstm_layers=1,
-        padding_idx=0,
         dropout=0.0,
     ):
         """Create one."""
@@ -104,12 +104,12 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
 
     def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
         """Preprocess the sentence batch."""
-        return self.character_embedding.preprocess(batch)
+        return batch  # type: ignore
 
     def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> Any:
         """Apply the embedding."""
         # (b * seq, chars)
-        char_embs = self.character_embedding(batch)
+        char_embs = self.character_embedding(batch, lengths)
         # (b * seq, chars, f)
         self.rnn.flatten_parameters()
         out, hidden = self.rnn(char_embs)
@@ -141,11 +141,11 @@ class TransformerEmbedding(abltagger.Embedding):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
         self.model = AutoModel.from_pretrained(model_path, config=self.config)
-        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_path)
+        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_path)  # type: ignore
         # ELECTRA property
-        self.num_layers = self.config.num_hidden_layers
-        self.hidden_dim = self.config.hidden_size
-        self.max_length = self.tokenizer.max_len_single_sentence
+        self.num_layers = self.config.num_hidden_layers  # type: ignore
+        self.hidden_dim = self.config.hidden_size  # type: ignore
+        self.max_length = self.tokenizer.max_len_single_sentence  # type: ignore
         self.dropout = nn.Dropout(p=dropout)
 
     def preprocess(self, batch: Sequence[core.Sentence]) -> Dict[str, torch.Tensor]:
@@ -157,7 +157,7 @@ class TransformerEmbedding(abltagger.Embedding):
         }
         for sentence in batch:
             encoded = self.tokenizer.encode_plus(
-                text=sentence,
+                text=list(sentence),
                 is_split_into_words=True,
                 padding="max_length",
                 max_length=self.max_length,

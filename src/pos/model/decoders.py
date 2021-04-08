@@ -1,21 +1,17 @@
 """Implmementation of some decoders."""
 
-from typing import Dict, List, Optional, Sequence, Set, Tuple, Any
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-import torch.nn as nn
-import torch
-from torch import Tensor, softmax
 import numpy as np
+import torch
+import torch.nn as nn
+from torch import Tensor, softmax
 from torch.nn.modules.sparse import Embedding
-from . import abltagger
+
 from pos.core import Sentences, VocabMap
-from pos.data import (
-    map_to_chars_batch,
-    BATCH_KEYS,
-    map_to_index_batch,
-    SOS,
-    PAD,
-)
+from pos.data import BATCH_KEYS, PAD, SOS, map_to_chars_batch, map_to_index_batch
+
+from . import abltagger
 from .embeddings import CharacterEmbedding
 
 
@@ -93,11 +89,15 @@ class CharacterDecoder(abltagger.Decoder):
             num_layers=self.num_layers,
             batch_first=True,
         )
+        char_emb_weights_tensors = self.character_embedding.sparse_embedding.weight.data
+        num_chars, char_emb_dim = char_emb_weights_tensors.shape
+        assert num_chars == len(vocab_map)
 
+        self.dense = nn.Linear(self.hidden_dim, char_emb_dim)
         # Map directly to characters
-        self.output_embedding = Embedding.from_pretrained(
-            embeddings=self.character_embedding.weight.data.transpose(0, 1), padding_idx=0
-        )
+
+        self.output_embedding = nn.Linear(char_emb_dim, num_chars)
+        self.output_embedding.weight.data = char_emb_weights_tensors
         if self.char_attention:
             self.attention = MultiplicativeAttention(
                 encoder_dim=self.attention_dim,
@@ -219,7 +219,7 @@ class CharacterDecoder(abltagger.Decoder):
         )
         while next_char_input is not None:
             # (b*s, f)
-            emb_chars = self.dropout(self.character_embedding(next_char_input))
+            emb_chars = self.dropout(self.character_embedding.embed(next_char_input, batch[BATCH_KEYS.LENGTHS]))
             rnn_in = torch.cat((emb_chars, tag_embeddings), dim=1)
             if self.char_rnn_input_dim:
                 # (b*s, f)
@@ -233,6 +233,8 @@ class CharacterDecoder(abltagger.Decoder):
             # (b*s, 1, f), a single timestep
             rnn_in = rnn_in.unsqueeze(1)
             output, (hidden, cell) = self.rnn(rnn_in, (hidden, cell))
+            output = self.dense(output)
+            output = torch.relu(output)
             predictions[:, char_idx : char_idx + 1, :] = self.output_embedding(output)
             # For next iteration
             char_idx += 1

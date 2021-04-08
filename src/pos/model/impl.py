@@ -6,9 +6,9 @@ from torch import nn
 
 from pos.core import Sentence
 from pos.data import BATCH_KEYS
+from pos.model.abltagger import Embedding, Modules, get_emb_by_initial_token_masks
 from pos.model.decoders import CharacterDecoder, Tagger
-from pos.model.abltagger import Modules, Embedding, get_emb_by_initial_token_masks
-from pos.model.embeddings import ClassingWordEmbedding, CharacterAsWordEmbedding
+from pos.model.embeddings import CharacterAsWordEmbedding, ClassingWordEmbedding
 
 
 class Lemmatizer(nn.Module):

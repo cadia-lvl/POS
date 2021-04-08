@@ -1,15 +1,14 @@
 """Dataset manipulation."""
 
 
+import logging
 from functools import reduce
 from operator import add
 from typing import List, Tuple
-import logging
 
-from transformers.tokenization_utils import PreTrainedTokenizer
-
-from pos.data.tokenizer import get_initial_token_mask
 from pos.core import FieldedDataset, Sentences
+from pos.data.tokenizer import get_initial_token_mask
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
 log = logging.getLogger(__name__)
 
@@ -35,12 +34,13 @@ def read_datasets(
 
 def get_adjusted_lengths(
     sentences: Sentences,
-    tokenizer: PreTrainedTokenizer,
+    tokenizer: PreTrainedTokenizerFast,
     max_sequence_length,
-) -> Tuple[int]:
+) -> Tuple[int, ...]:
     """Return adjusted lengths based on a tokenizer and model max length."""
     encodings = [
-        tokenizer.encode_plus(sentence, is_split_into_words=True, return_offsets_mapping=True) for sentence in sentences
+        tokenizer.encode_plus(list(sentence), is_split_into_words=True, return_offsets_mapping=True)
+        for sentence in sentences
     ]
     # Create end-token masks: [CLS] Hauk ur er [SEP] -> [dropped, 0, 1, 1, dropped]
     # By getting  initial token masks and shifting them:
@@ -65,7 +65,7 @@ def get_adjusted_lengths(
     return tuple(int(length) for length in lengths)
 
 
-def chunk_dataset(ds: FieldedDataset, tokenizer: PreTrainedTokenizer, max_sequence_length) -> FieldedDataset:
+def chunk_dataset(ds: FieldedDataset, tokenizer: PreTrainedTokenizerFast, max_sequence_length) -> FieldedDataset:
     """Split up sentences which are too long."""
     log.info("Splitting sentences in order to fit BERT-like model")
     tokens = ds.get_field()

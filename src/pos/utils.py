@@ -1,6 +1,6 @@
 """Utilities."""
-from typing import List, Tuple, Sequence, Iterable, Optional
 import logging
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 log = logging.getLogger(__name__)
 

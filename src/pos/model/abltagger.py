@@ -1,6 +1,6 @@
 """The main classes used for creating models."""
-from enum import Enum
 import abc
+from enum import Enum
 from typing import Any, Dict, Optional, Sequence, cast
 
 import torch
