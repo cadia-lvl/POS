@@ -5,15 +5,13 @@ import logging
 import pathlib
 import pickle
 import random
+import re
 from collections import Counter
-from functools import reduce
-from operator import add
-from pprint import pformat, pprint
+from pprint import pprint
 from typing import Dict
 
 import click
 import torch
-from torch import nn
 from torch.utils.data import DataLoader
 
 from pos import bin_to_ifd, core, evaluate
@@ -785,7 +783,8 @@ def evaluate_experiments(
         click.echo(evaluate.format_results(evaluate.all_accuracy_average(accuracy_results)))
     elif criteria == "profile":
         click.echo(f"Total errors: {sum(profile.values())}")
+        pred_x_e_pattern = re.compile("^[ex] >")
         click.echo(
-            f"Errors caused by model predicting 'x' and 'e': {sum(value for key, value in profile.items() if ('e >' in key or 'x >' in key))}"
+            f"Errors caused by model predicting 'x' and 'e': {sum(value for key, value in profile.items() if pred_x_e_pattern.search(key) is not None)}"
         )
         click.echo(evaluate.format_profile(profile, up_to=up_to))
