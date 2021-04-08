@@ -784,4 +784,5 @@ def evaluate_experiments(
     if criteria == "accuracy":
         click.echo(evaluate.format_results(evaluate.all_accuracy_average(accuracy_results)))
     elif criteria == "profile":
+        click.echo(f"Total errors: {sum(profile.values())}")
         click.echo(evaluate.format_profile(profile, up_to=up_to))
