@@ -779,6 +779,7 @@ def evaluate_experiments(
                 train_lemmas=train_lemmas,
                 morphlex_vocab=morphlex_vocab,
                 pretrained_vocab=pretrained_vocab,
+                skip_gold_ex=skip_gold_ex,
             )
     if criteria == "accuracy":
         click.echo(evaluate.format_results(evaluate.all_accuracy_average(accuracy_results)))

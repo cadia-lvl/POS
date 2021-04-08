@@ -106,7 +106,7 @@ class Evaluation:
     def error_profile(predictions: FieldedDataset, gold_field: Fields, pred_field: Field, skip_gold_ex=False):
         """Return an error profile with counts of errors (pred > correct/gold)."""
 
-        def filter_gold(gold: str) -> bool:
+        def should_skip_gold(gold: str) -> bool:
             """Return True if gold tag should be skipped."""
             if skip_gold_ex:
                 return gold == "e" or gold == "x"
@@ -120,7 +120,7 @@ class Evaluation:
                 predictions.get_field(pred_field),
             )
             for gold, predicted in zip(gold_tags, predicted_tags)
-            if gold != predicted and not filter_gold(gold)
+            if gold != predicted and not should_skip_gold(gold)
         )
 
 
@@ -440,6 +440,7 @@ def get_profile_from_files(
     train_lemmas: str,
     morphlex_vocab: str,
     pretrained_vocab: str,
+    skip_gold_ex=False,
 ) -> Counter:
     """Get the error profiles based on the feature and files."""
     train_vocab = Vocab.from_file(train_tokens)
@@ -450,6 +451,7 @@ def get_profile_from_files(
             test_dataset=ds,
             train_vocab=train_vocab,
             external_vocabs=ExternalVocabularies(morphlex_vocab, pretrained_vocab),
+            skip_gold_ex=skip_gold_ex,
         )
         return evaluation.tagging_profile(ds)
     else:  # lemmas
