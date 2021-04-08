@@ -390,6 +390,7 @@ def build_lemmatizer_model(kwargs, dictionaries):
 @click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
 @click.option("--tagger_weight", default=1.0, help="Value to multiply tagging loss")
 @click.option("--tagger_embedding", default="bilstm", help="The embedding to feed to the Tagger, see pos.model.Modules.")
+@click.option("--tagger_ignore_e_x/--no_tagger_ignore_e_x", is_flag=True, default=True)
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option("--lemmatizer_weight", default=0.1, help="Value to multiply lemmatizer loss")
 @click.option("--lemmatizer_accept_char_rnn_last/--no_lemmatizer_accept_char_rnn_last", default=False, help="Should the Character RNN last hidden state be input to Lemmatizer")
@@ -439,7 +440,7 @@ def train_and_tag(**kwargs):
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
         train_ds=unchunked_train_ds,
-        ignore_e_x=True,
+        ignore_e_x=kwargs["tagger_ignore_e_x"],
         pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
         morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
         known_chars_file=kwargs["known_chars_file"],
@@ -736,7 +737,7 @@ def evaluate_predictions(
 @click.option("--criteria", type=click.Choice(["accuracy", "profile"], case_sensitive=False), help="Which criteria to evaluate.", default="accuracy")
 @click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
 @click.option("--up_to", help="For --criteria profile, the number of errors to report", default=30)
-@click.option("--skip_gold_ex/--no_skip_gold_ex", is_flag=True, default=False, help="When evaluating accurcy, should we ignore 'e' and 'x' gold tags?")
+@click.option("--skip_gold_ex/--no_skip_gold_ex", is_flag=True, default=True, help="When evaluating accurcy, should we ignore 'e' and 'x' gold tags?")
 # fmt: on
 def evaluate_experiments(
     directories,
