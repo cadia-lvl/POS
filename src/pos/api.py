@@ -39,7 +39,7 @@ class Tagger:
 
         Returns: The POS tags a Tuple[str, ...] where the first element in the tuple corresponds to the first token in the input sentence.
         """
-        return self.tag_bulk((sent,), batch_size=1)[0]
+        return self.tag_bulk((tuple(sent),), batch_size=1)[0]
 
     def tag_bulk(
         self,
@@ -154,5 +154,4 @@ def cast_types(sentences: Union[Sentences, FieldedDataset]) -> FieldedDataset:
         return cast(FieldedDataset, sentences)
     else:
         sentences = cast(Sentences, sentences)
-        sentences = (sentences,)  # type: ignore
-        return FieldedDataset(sentences, fields=(Fields.Tokens,))  # type: ignore
+        return FieldedDataset((sentences,), fields=(Fields.Tokens,))
