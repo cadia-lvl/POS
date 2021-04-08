@@ -103,8 +103,16 @@ class Evaluation:
         return (correct / total, total)
 
     @staticmethod
-    def error_profile(predictions: FieldedDataset, gold_field: Fields, pred_field: Field):
+    def error_profile(predictions: FieldedDataset, gold_field: Fields, pred_field: Field, skip_gold_ex=False):
         """Return an error profile with counts of errors (pred > correct/gold)."""
+
+        def filter_gold(gold: str) -> bool:
+            """Return True if gold tag should be skipped."""
+            if skip_gold_ex:
+                return gold == "e" or gold == "x"
+            else:
+                return False
+
         return Counter(
             f"{predicted} > {gold}"
             for gold_tags, predicted_tags in zip(
@@ -112,7 +120,7 @@ class Evaluation:
                 predictions.get_field(pred_field),
             )
             for gold, predicted in zip(gold_tags, predicted_tags)
-            if gold != predicted
+            if gold != predicted and filter_gold(gold)
         )
 
 
@@ -248,7 +256,9 @@ class TaggingEvaluation(Evaluation):
 
     def tagging_profile(self, predictions: FieldedDataset):
         """Error profile for tagging."""
-        return self.error_profile(predictions, gold_field=Fields.GoldTags, pred_field=Fields.Tags)
+        return self.error_profile(
+            predictions, gold_field=Fields.GoldTags, pred_field=Fields.Tags, skip_gold_ex=self.skip_gold_ex
+        )
 
 
 class LemmatizationEvaluation(Evaluation):
