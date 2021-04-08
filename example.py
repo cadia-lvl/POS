@@ -2,10 +2,7 @@
 import pos
 
 # Initialize the tagger
-tagger = pos.Tagger(
-    model_file="tagger.pt",
-    device="cpu",
-)
+tagger = pos.Tagger(model_file="tagger.pt", device="cpu")
 
 # Tag a single sentence
 tags = tagger.tag_sent(["Þetta", "er", "setning", "."])
@@ -14,9 +11,7 @@ print(tags)
 # Tuple[str, ...]
 
 # Tag multiple sentences at the same time (faster).
-tags = tagger.tag_bulk(
-    [["Þetta", "er", "setning", "."], ["Og", "önnur", "!"]], batch_size=2
-)
+tags = tagger.tag_bulk([["Þetta", "er", "setning", "."], ["Og", "önnur", "!"]], batch_size=2)
 print(tags)
 # (('fahen', 'sfg3en', 'nven', 'pl'), ('c', 'foven', 'pl'))
 # Tuple[Tuple[str, ...], ...]

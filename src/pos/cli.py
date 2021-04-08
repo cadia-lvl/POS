@@ -255,16 +255,10 @@ def train_lemmatizer(**kwargs):
         lemmatizer = load_lemmatizer_model(kwargs["from_trained"])
     lemmatizer.to(core.device)
     train_dl = torch.utils.data.DataLoader(
-        train_ds,
-        collate_fn=collate_fn,  # type: ignore
-        shuffle=True,
-        batch_size=kwargs["batch_size"],
+        train_ds, collate_fn=collate_fn, shuffle=True, batch_size=kwargs["batch_size"]  # type: ignore
     )
     test_dl = torch.utils.data.DataLoader(
-        test_ds,
-        collate_fn=collate_fn,  # type: ignore
-        shuffle=False,
-        batch_size=kwargs["batch_size"] * 10,
+        test_ds, collate_fn=collate_fn, shuffle=False, batch_size=kwargs["batch_size"] * 10  # type: ignore
     )
     criterion = get_criterion(
         {Modules.Lemmatizer: lemmatizer.character_decoder}, label_smoothing=kwargs["label_smoothing"]
@@ -296,10 +290,7 @@ def train_lemmatizer(**kwargs):
         epochs=kwargs["epochs"],
         output_dir=output_dir,
     )
-    _, values = tag_data_loader(
-        model=lemmatizer,
-        data_loader=test_dl,
-    )
+    _, values = tag_data_loader(model=lemmatizer, data_loader=test_dl)
     log.info("Writing predictions, dictionaries and model")
     for module_name, value in values.items():
         test_ds = test_ds.add_field(value, MODULE_TO_FIELD[module_name])
@@ -331,17 +322,11 @@ def load_lemmatizer_model(path):
 def build_dictionaries(kwargs):
     dictionaries: Dict[Dicts, VocabMap] = {}
     char_vocab = Vocab.from_file(kwargs["known_chars_file"])
-    c_map = VocabMap(
-        char_vocab,
-        special_tokens=VocabMap.UNK_PAD_EOS_SOS,
-    )
+    c_map = VocabMap(char_vocab, special_tokens=VocabMap.UNK_PAD_EOS_SOS)
     dictionaries[Dicts.Chars] = c_map
     tag_vocab = bin_to_ifd.öll_mörk(strip=True)
     tag_vocab = {tag for tag in tag_vocab if tag is not None}
-    t_map = VocabMap(
-        tag_vocab,
-        special_tokens=VocabMap.UNK_PAD,
-    )
+    t_map = VocabMap(tag_vocab, special_tokens=VocabMap.UNK_PAD)
     dictionaries[Dicts.FullTag] = t_map
     return dictionaries
 
@@ -354,9 +339,7 @@ def build_lemmatizer_model(kwargs, dictionaries):
         dropout=kwargs["emb_dropouts"],
     )
     character_embedding = CharacterEmbedding(
-        dictionaries[Dicts.Chars],
-        embedding_dim=kwargs["char_emb_dim"],
-        dropout=kwargs["emb_dropouts"],
+        dictionaries[Dicts.Chars], embedding_dim=kwargs["char_emb_dim"], dropout=kwargs["emb_dropouts"]
     )
     char_as_word = CharacterAsWordEmbedding(
         character_embedding=character_embedding,
@@ -431,12 +414,8 @@ def train_and_tag(**kwargs):
 
     # Read train and test data
 
-    unchunked_train_ds = read_datasets(
-        kwargs["training_files"],
-    )
-    unchunked_test_ds = read_datasets(
-        [kwargs["test_file"]],
-    )
+    unchunked_train_ds = read_datasets(kwargs["training_files"])
+    unchunked_test_ds = read_datasets([kwargs["test_file"]])
     # Set configuration values and create mappers
     embeddings, dicts = load_dicts(
         train_ds=unchunked_train_ds,
@@ -448,20 +427,9 @@ def train_and_tag(**kwargs):
 
     embs: Dict[Modules, Embedding] = {}
     if kwargs["bert_encoder"]:
-        emb = TransformerEmbedding(
-            kwargs["bert_encoder"],
-            dropout=kwargs["emb_dropouts"],
-        )
-        train_ds = chunk_dataset(
-            unchunked_train_ds,
-            emb.tokenizer,
-            emb.max_length,
-        )
-        test_ds = chunk_dataset(
-            unchunked_test_ds,
-            emb.tokenizer,
-            emb.max_length,
-        )
+        emb = TransformerEmbedding(kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"])
+        train_ds = chunk_dataset(unchunked_train_ds, emb.tokenizer, emb.max_length)
+        test_ds = chunk_dataset(unchunked_test_ds, emb.tokenizer, emb.max_length)
         embs[Modules.BERT] = emb
     else:
         train_ds = unchunked_train_ds
@@ -667,15 +635,7 @@ def tag(model_file, data_in, output, device, batch_size):
 @click.option("--up_to", help="For --criteria profile, the number of errors to report", default=30)
 # fmt: on
 def evaluate_predictions(
-    predictions,
-    fields,
-    morphlex_vocab,
-    pretrained_vocab,
-    train_tokens,
-    train_lemmas,
-    criteria,
-    feature,
-    up_to,
+    predictions, fields, morphlex_vocab, pretrained_vocab, train_tokens, train_lemmas, criteria, feature, up_to
 ):
     """Evaluate predictions.
 
