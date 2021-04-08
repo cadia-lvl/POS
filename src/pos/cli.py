@@ -630,12 +630,11 @@ def write_hyperparameters(path, hyperparameters):
 @click.argument("output", type=str)
 @click.option("--device", default="cpu", help="The device to use, 'cpu' or 'cuda:0' for GPU.")
 @click.option(
-    "--contains_tags",
-    is_flag=True,
-    default=False,
-    help="Does input data contain tags? Useful when predicting tags on a dataset which is already tagged (gold tags). All are written out: token\tgold\tpredicted",
+    "--batch_size",
+    default=16,
+    help="The number of sentences to process at once. Works best to have this high for a GPU.",
 )
-def tag(model_file, data_in, output, device, contains_tags):
+def tag(model_file, data_in, output, device, batch_size):
     """Tag tokens in a file.
 
     Args:
@@ -648,7 +647,7 @@ def tag(model_file, data_in, output, device, contains_tags):
     tagger = api_tagger(model_file=model_file, device=device)
     log.info("Reading dataset")
     ds = FieldedDataset.from_file(data_in)
-    predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=16)
+    predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=batch_size)
     ds = ds.add_field(predicted_tags, Fields.Tags)
     log.info("Writing results")
     ds.to_tsv_file(output)
