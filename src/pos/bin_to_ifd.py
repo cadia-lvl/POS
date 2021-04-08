@@ -275,7 +275,7 @@ def pfn_kyn(lemma: str) -> str:
     elif lemma == "það":
         return "h"
     else:
-        raise ValueError(f"Unknown {lemma=}")
+        raise ValueError(f"Unknown lemma={lemma}")
 
 
 def pfn_persóna(lemma: str) -> str:
@@ -395,47 +395,19 @@ def parse_bin_str(
             return "aa"
         return "aa" + stig(mörk)
     elif kyn_orðflokkur == "fn":
-        return (
-            "f"
-            + fn_flokkur(lemma, mörk)
-            + kyn(mörk)
-            + pers(mörk)
-            + tala(mörk)
-            + fall(mörk)
-        )
+        return "f" + fn_flokkur(lemma, mörk) + kyn(mörk) + pers(mörk) + tala(mörk) + fall(mörk)
     elif kyn_orðflokkur == "fs":
         return "af"
     elif kyn_orðflokkur == "gr":
         return "g" + kyn(mörk) + tala(mörk) + fall(mörk)
     elif kyn_orðflokkur == "hk":
-        return (
-            "nh"
-            + tala(mörk)
-            + fall(mörk)
-            + greinir_sérnafn(greinir(mörk), sérnafn(orðmynd))
-        )
+        return "nh" + tala(mörk) + fall(mörk) + greinir_sérnafn(greinir(mörk), sérnafn(orðmynd))
     elif kyn_orðflokkur == "kk":
-        return (
-            "nk"
-            + tala(mörk)
-            + fall(mörk)
-            + greinir_sérnafn(greinir(mörk), sérnafn(orðmynd))
-        )
+        return "nk" + tala(mörk) + fall(mörk) + greinir_sérnafn(greinir(mörk), sérnafn(orðmynd))
     elif kyn_orðflokkur == "kvk":
-        return (
-            "nv"
-            + tala(mörk)
-            + fall(mörk)
-            + greinir_sérnafn(greinir(mörk), sérnafn(orðmynd))
-        )
+        return "nv" + tala(mörk) + fall(mörk) + greinir_sérnafn(greinir(mörk), sérnafn(orðmynd))
     elif kyn_orðflokkur == "lo":
-        return (
-            "l"
-            + kyn(mörk)
-            + tala(mörk)
-            + fall(mörk)
-            + beyging_stig(beyging(mörk), stig(mörk))
-        )
+        return "l" + kyn(mörk) + tala(mörk) + fall(mörk) + beyging_stig(beyging(mörk), stig(mörk))
     elif kyn_orðflokkur == "nhm":
         return "cn"
     elif kyn_orðflokkur == "pfn":
@@ -453,14 +425,7 @@ def parse_bin_str(
             # Stýfður boðháttur.
             return "sbg2en"
         else:
-            return (
-                "s"
-                + háttur(mörk)
-                + mynd(mörk)
-                + (pers(mörk) + kyn(mörk))
-                + (tala(mörk) + tíð(mörk))
-                + fall(mörk)
-            )
+            return "s" + háttur(mörk) + mynd(mörk) + (pers(mörk) + kyn(mörk)) + (tala(mörk) + tíð(mörk)) + fall(mörk)
     elif kyn_orðflokkur == "st":
         # MÍM markamengið skilgreinir semtengingu og tilvísunarsamtengingu og við getum því ekki greint á milli.
         return samtengingar
@@ -472,4 +437,4 @@ def parse_bin_str(
     elif kyn_orðflokkur == "uh":
         return "au"
     else:
-        raise ValueError(f"Unknown {kyn_orðflokkur=}")
+        raise ValueError(f"Unknown kyn_orðflokkur={kyn_orðflokkur}")
