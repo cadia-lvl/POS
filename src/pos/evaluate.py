@@ -130,7 +130,7 @@ class TaggingEvaluation(Evaluation):
     def __init__(
         self,
         external_vocabs: ExternalVocabularies,
-        skip_gold_ex=False,
+        skip_gold_ex=True,
         **kw,
     ):
         """Initialize."""
@@ -409,7 +409,7 @@ def get_accuracy_from_files(
     train_lemmas: str,
     morphlex_vocab: str,
     pretrained_vocab: str,
-    skip_gold_ex=False,
+    skip_gold_ex=True,
 ) -> Tuple[Measures, Measures]:
     """Get the accuracy results based on the feature and files."""
     train_vocab = Vocab.from_file(train_tokens)
@@ -440,7 +440,7 @@ def get_profile_from_files(
     train_lemmas: str,
     morphlex_vocab: str,
     pretrained_vocab: str,
-    skip_gold_ex=False,
+    skip_gold_ex=True,
 ) -> Counter:
     """Get the error profiles based on the feature and files."""
     train_vocab = Vocab.from_file(train_tokens)
