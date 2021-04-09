@@ -141,7 +141,7 @@ class TransformerEmbedding(abltagger.Embedding):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
         self.model = AutoModel.from_pretrained(model_path, config=self.config)
-        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_path)  # type: ignore
+        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_path, add_prefix_space=True)  # type: ignore
         # ELECTRA property
         self.num_layers = self.config.num_hidden_layers  # type: ignore
         self.hidden_dim = self.config.hidden_size  # type: ignore
@@ -163,7 +163,6 @@ class TransformerEmbedding(abltagger.Embedding):
                 max_length=self.max_length,
                 return_tensors="pt",
                 return_offsets_mapping=True,
-                add_prefix_space=True,
             )
             preprocessed["input_ids"].append(encoded["input_ids"][0])
             preprocessed["attention_mask"].append(encoded["attention_mask"][0])
