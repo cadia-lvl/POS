@@ -39,7 +39,9 @@ def get_adjusted_lengths(
 ) -> Tuple[int, ...]:
     """Return adjusted lengths based on a tokenizer and model max length."""
     encodings = [
-        tokenizer.encode_plus(list(sentence), is_split_into_words=True, return_offsets_mapping=True)
+        tokenizer.encode_plus(
+            list(sentence), is_split_into_words=True, return_offsets_mapping=True, add_prefix_space=True
+        )
         for sentence in sentences
     ]
     # Create end-token masks: [CLS] Hauk ur er [SEP] -> [dropped, 0, 1, 1, dropped]

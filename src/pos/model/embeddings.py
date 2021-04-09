@@ -163,6 +163,7 @@ class TransformerEmbedding(abltagger.Embedding):
                 max_length=self.max_length,
                 return_tensors="pt",
                 return_offsets_mapping=True,
+                add_prefix_space=True,
             )
             preprocessed["input_ids"].append(encoded["input_ids"][0])
             preprocessed["attention_mask"].append(encoded["attention_mask"][0])
