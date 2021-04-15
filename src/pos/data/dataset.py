@@ -48,17 +48,10 @@ def get_adjusted_lengths(
     # -> drop [mid shifted to left] + [1] drop
     # -> [_, 0, 1, 1, _]
     space_added = tok_space_added(tokenizer)
-    try:
-
-        end_token_masks = [
-            get_initial_token_mask(encoded["offset_mapping"], space_added=space_added)[2:-1] + [1]
-            for encoded in encodings
-        ]
-    except AssertionError as e:
-        log.error(sentences)
-        log.error(encodings)
-        raise e
-    # We need to account for SEP and CLS when finding the cuts
+    end_token_masks = [
+        get_initial_token_mask(encoded["offset_mapping"], space_added=space_added)[2:-1] + [1] for encoded in encodings
+    ]
+    # We need to account for two special tokens (SEP and CLS) or (<s> and </s>) when finding the cuts
     max_sequence_length -= 2
     # And some extra, because of errors
     max_sequence_length -= 6

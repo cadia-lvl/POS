@@ -14,15 +14,13 @@ def is_initial(offset_mapping: Tuple[int, int], space_added: bool) -> bool:
     """Return True if offset mapping represents start of token."""
     char_start, char_end = offset_mapping
     # start of a new token
-    assert char_start != 1 and char_end != 1
     if char_start == 0 or (space_added and char_start == 1):
-        # ends at same place = special added token -> not initial
-        # We should never have an offset (1,1)
+        # ends at zero = special added token -> not initial
         if char_end == 0:
             return False
-        # does not end in same place -> Initial
+        # Ends at something else than 0 -> initial
         return True
-    # represents characters inside a token
+    # represents characters inside a token -> not initial
     return False
 
 
