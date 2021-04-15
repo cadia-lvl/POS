@@ -161,15 +161,15 @@ class FieldedDataset(Dataset):
         new_data = tuple(data + other_data for data, other_data in zip(self.data, other.data))
         return self.__class__(new_data, self.fields)
 
-    def _get_field_length(self, field: str) -> Tuple[int]:
+    def _get_field_length(self, field: str) -> Tuple[int, ...]:
         """Return the field length."""
         return tuple(len(sentence) for sentence in self.data[self.fields.index(field)])
 
-    def get_lengths(self) -> Tuple[int]:
+    def get_lengths(self) -> Tuple[int, ...]:
         """Return the sentence lengths."""
         return self._get_field_length(self.fields[0])
 
-    def _shorten_field_length(self, field, lengths: Tuple[int]) -> Sentences:
+    def _shorten_field_length(self, field, lengths: Tuple[int, ...]) -> Sentences:
         """Shorten the field based on lengths."""
         elements = self.get_field(field)
         # lengths, x
@@ -198,7 +198,7 @@ class FieldedDataset(Dataset):
                 raise ValueError("Bad lengths")
         return tuple(adjusted_sentences)
 
-    def _lengthen_field_length(self, field, lengths: Tuple[int]) -> Sentences:
+    def _lengthen_field_length(self, field, lengths: Tuple[int, ...]) -> Sentences:
         """Lengthen field length back to original."""
         elements = self.get_field(field)
         # lengths, x
@@ -225,13 +225,13 @@ class FieldedDataset(Dataset):
                 index += 1
         return tuple(adjusted_sentences)
 
-    def _adjust_field_length(self, field, lengths: Tuple[int], shorten=True) -> Sentences:
+    def _adjust_field_length(self, field, lengths: Tuple[int, ...], shorten=True) -> Sentences:
         if shorten:
             return self._shorten_field_length(field, lengths)
         else:
             return self._lengthen_field_length(field, lengths)
 
-    def adjust_lengths(self, lengths: Tuple[int], shorten):
+    def adjust_lengths(self, lengths: Tuple[int, ...], shorten):
         """Adjust the lengths of the dataset according to the given lengths."""
         adjusted_data = []
         for field in self.fields:

@@ -13,6 +13,7 @@ from typing import Dict
 import click
 import torch
 from torch.utils.data import DataLoader
+from transformers import PreTrainedTokenizerFast
 
 from pos import bin_to_ifd, core, evaluate
 from pos.api import Tagger as api_tagger
@@ -47,7 +48,6 @@ from pos.model.embeddings import CharacterEmbedding
 from pos.model.impl import Lemmatizer
 from pos.train import (
     MODULE_TO_FIELD,
-    _cross_entropy,
     get_criterion,
     get_optimizer,
     get_parameter_groups,
@@ -56,9 +56,6 @@ from pos.train import (
     run_epochs,
     tag_data_loader,
 )
-from pos.utils import write_tsv
-
-DEBUG = False
 
 MORPHLEX_VOCAB_PATH = "./data/extra/morphlex_vocab.txt"
 PRETRAINED_VOCAB_PATH = "./data/extra/pretrained_vocab.txt"
@@ -254,10 +251,10 @@ def train_lemmatizer(**kwargs):
         log.info(f"Loading model={kwargs['from_trained']}")
         lemmatizer = load_lemmatizer_model(kwargs["from_trained"])
     lemmatizer.to(core.device)
-    train_dl = torch.utils.data.DataLoader(
+    train_dl = DataLoader(
         train_ds, collate_fn=collate_fn, shuffle=True, batch_size=kwargs["batch_size"]  # type: ignore
     )
-    test_dl = torch.utils.data.DataLoader(
+    test_dl = DataLoader(
         test_ds, collate_fn=collate_fn, shuffle=False, batch_size=kwargs["batch_size"] * 10  # type: ignore
     )
     criterion = get_criterion(
@@ -456,7 +453,6 @@ def train_and_tag(**kwargs):
             dropout=kwargs["emb_dropouts"],
         )
     if kwargs["char_lstm_layers"]:
-        embs[Modules.CharactersToTokens] = char_as_word
         character_embedding = CharacterEmbedding(
             dicts[Dicts.Chars],
             embedding_dim=kwargs["char_emb_dim"],
@@ -468,6 +464,7 @@ def train_and_tag(**kwargs):
             char_lstm_dim=kwargs["char_lstm_dim"],
             dropout=kwargs["emb_dropouts"],
         )
+        embs[Modules.CharactersToTokens] = char_as_word
     encoder = Encoder(
         embeddings=embs,
         main_lstm_dim=kwargs["main_lstm_dim"],

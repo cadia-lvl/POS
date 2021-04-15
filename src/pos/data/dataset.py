@@ -7,8 +7,8 @@ from operator import add
 from typing import List, Tuple
 
 from pos.core import FieldedDataset, Sentences
-from pos.data.tokenizer import get_initial_token_mask
-from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
+from pos.data.tokenizer import get_initial_token_mask, tok_space_added
+from transformers import PreTrainedTokenizerFast
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +47,10 @@ def get_adjusted_lengths(
     # [CLS] Hauk ur er [SEP] -> [0, 1, 0, 1, 0] ->
     # -> drop [mid shifted to left] + [1] drop
     # -> [_, 0, 1, 1, _]
-    end_token_masks = [get_initial_token_mask(encoded["offset_mapping"])[2:-1] + [1] for encoded in encodings]
+    space_added = tok_space_added(tokenizer)
+    end_token_masks = [
+        get_initial_token_mask(encoded["offset_mapping"], space_added=space_added)[2:-1] + [1] for encoded in encodings
+    ]
     # We need to account for SEP and CLS when finding the cuts
     max_sequence_length -= 2
     # And some extra, because of errors

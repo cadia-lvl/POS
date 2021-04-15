@@ -1,4 +1,5 @@
 """Implementation of several embeddings."""
+from logging import getLogger
 from typing import Any, Dict, Sequence
 
 import torch
@@ -6,10 +7,11 @@ from pos import core
 from pos.data import get_initial_token_mask, map_to_index
 from pos.data.batch import map_to_chars_batch
 from torch import nn
-from transformers import AutoConfig, AutoModel, AutoTokenizer
-from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
+from transformers import AutoConfig, AutoModel, AutoTokenizer, PreTrainedTokenizerFast
 
 from . import abltagger
+
+log = getLogger(__name__)
 
 
 class ClassingWordEmbedding(abltagger.Embedding):
@@ -141,7 +143,11 @@ class TransformerEmbedding(abltagger.Embedding):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
         self.model = AutoModel.from_pretrained(model_path, config=self.config)
-        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_path, add_prefix_space=True)  # type: ignore
+        self.add_prefix_space = False
+        if "roberta" in str(self.model.__class__).lower():  # type: ignore
+            log.debug("Using prefix space")
+            self.add_prefix_space = True
+        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_path, add_prefix_space=self.add_prefix_space)  # type: ignore
         # ELECTRA property
         self.num_layers = self.config.num_hidden_layers  # type: ignore
         self.hidden_dim = self.config.hidden_size  # type: ignore
@@ -167,7 +173,9 @@ class TransformerEmbedding(abltagger.Embedding):
             preprocessed["input_ids"].append(encoded["input_ids"][0])
             preprocessed["attention_mask"].append(encoded["attention_mask"][0])
             preprocessed["initial_token_masks"].append(
-                torch.Tensor(get_initial_token_mask(encoded["offset_mapping"][0].tolist())).bool()
+                torch.Tensor(
+                    get_initial_token_mask(encoded["offset_mapping"][0].tolist(), space_added=self.add_prefix_space)
+                ).bool()
             )
         return {key: torch.stack(value).to(core.device) for key, value in preprocessed.items()}
 
