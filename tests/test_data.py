@@ -284,3 +284,12 @@ def test_more_tokenization(electra_model):
     assert sum(lengts) == len(test[0])
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
     chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
+    test = [("Síðan", "kom", "Gern", "hab", "'", "ich", "die", "Frau", "'", "n", "geküßt", "úr")]
+    lengts = get_adjusted_lengths(
+        tuple(test),
+        tok,
+        max_sequence_length=max_sequence_length,
+    )
+    assert sum(lengts) == len(test[0])
+    ds = FieldedDataset((tuple(test),), fields=("tokens",))
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)

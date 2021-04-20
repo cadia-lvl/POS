@@ -24,6 +24,8 @@ def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]]):
             initial_token_masks.append(1)
         elif last_end == start:
             initial_token_masks.append(0)
+        elif start == end:
+            initial_token_masks.append(0)
         else:
             initial_token_masks.append(1)
         last_end = end
