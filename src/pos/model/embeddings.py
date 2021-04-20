@@ -151,7 +151,7 @@ class TransformerEmbedding(abltagger.Embedding):
         # ELECTRA property
         self.num_layers = self.config.num_hidden_layers  # type: ignore
         self.hidden_dim = self.config.hidden_size  # type: ignore
-        self.max_length = self.tokenizer.max_len_single_sentence  # type: ignore
+        self.max_length = self.config.max_position_embeddings  # type: ignore
         self.dropout = nn.Dropout(p=dropout)
 
     def preprocess(self, batch: Sequence[core.Sentence]) -> Dict[str, torch.Tensor]:
