@@ -38,19 +38,14 @@ def get_adjusted_lengths(
     max_sequence_length,
 ) -> Tuple[int, ...]:
     """Return adjusted lengths based on a tokenizer and model max length."""
-    encodings = [
-        tokenizer.encode_plus(list(sentence), is_split_into_words=True, return_offsets_mapping=True)
-        for sentence in sentences
-    ]
+    encodings = [tokenizer.encode_plus(" ".join(sentence), return_offsets_mapping=True) for sentence in sentences]
     # Create end-token masks: [CLS] Hauk ur er [SEP] -> [dropped, 0, 1, 1, dropped]
     # By getting  initial token masks and shifting them:
     # [CLS] Hauk ur er [SEP] -> [0, 1, 0, 1, 0] ->
     # -> drop [mid shifted to left] + [1] drop
     # -> [_, 0, 1, 1, _]
     space_added = tok_space_added(tokenizer)
-    end_token_masks = [
-        get_initial_token_mask(encoded["offset_mapping"], space_added=space_added)[2:-1] + [1] for encoded in encodings
-    ]
+    end_token_masks = [get_initial_token_mask(encoded["offset_mapping"])[2:-1] + [1] for encoded in encodings]
     # We need to account for two special tokens (SEP and CLS) or (<s> and </s>) when finding the cuts
     max_sequence_length -= 2
     # And some extra, because of errors

@@ -163,8 +163,7 @@ class TransformerEmbedding(abltagger.Embedding):
         }
         for sentence in batch:
             encoded = self.tokenizer.encode_plus(
-                text=list(sentence),
-                is_split_into_words=True,
+                text=" ".join(sentence),
                 padding="max_length",
                 max_length=self.max_length,
                 return_tensors="pt",
@@ -173,9 +172,7 @@ class TransformerEmbedding(abltagger.Embedding):
             preprocessed["input_ids"].append(encoded["input_ids"][0])
             preprocessed["attention_mask"].append(encoded["attention_mask"][0])
             preprocessed["initial_token_masks"].append(
-                torch.Tensor(
-                    get_initial_token_mask(encoded["offset_mapping"][0].tolist(), space_added=self.add_prefix_space)
-                ).bool()
+                torch.Tensor(get_initial_token_mask(encoded["offset_mapping"][0].tolist())).bool()
             )
         return {key: torch.stack(value).to(core.device) for key, value in preprocessed.items()}
 

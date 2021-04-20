@@ -1,7 +1,5 @@
 """To test parts of the model."""
 import torch
-from torch import zeros
-
 from pos.core import Dicts
 from pos.data import BATCH_KEYS, collate_fn
 from pos.model import (
@@ -17,6 +15,7 @@ from pos.model import (
     TransformerEmbedding,
 )
 from pos.model.embeddings import CharacterEmbedding
+from torch import zeros
 
 
 def test_classic_wemb(vocab_maps, data_loader):
@@ -92,13 +91,14 @@ def test_full_run(data_loader, vocab_maps, electra_model):
     emb = TransformerEmbedding(electra_model)
     encoder = Encoder(embeddings={Modules.BERT: emb})
     tagger = Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)
+    character_embedding = CharacterEmbedding(vocab_maps[Dicts.Chars], embedding_dim=10)
     emb_dim = 5
     char_decoder = CharacterDecoder(
+        character_embedding=character_embedding,
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=70,
         context_dim=tagger.output_dim,
         num_layers=2,
-        char_emb_dim=emb_dim,
     )
     abl_tagger = ABLTagger(encoder=encoder, tagger=tagger, character_decoder=char_decoder)
     for batch in data_loader:

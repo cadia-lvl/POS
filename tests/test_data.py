@@ -1,24 +1,12 @@
 import torch
-from torch import Tensor
-from torch.utils.data.dataloader import DataLoader
-
 from pos.core import Dicts, FieldedDataset, Fields, VocabMap
 from pos.data import (
     BATCH_KEYS,
-    EOS,
-    EOS_ID,
-    PAD,
-    PAD_ID,
-    SOS,
-    SOS_ID,
-    UNK,
-    UNK_ID,
     bin_str_to_emb_pair,
     chunk_dataset,
     collate_fn,
     emb_pairs_to_dict,
     load_dicts,
-    load_tokenizer,
     map_to_chars_and_index,
     map_to_chars_batch,
     map_to_index,
@@ -26,7 +14,10 @@ from pos.data import (
     wemb_str_to_emb_pair,
 )
 from pos.data.dataset import dechunk_dataset, get_adjusted_lengths
+from pos.model.embeddings import TransformerEmbedding
 from pos.utils import read_tsv, tokens_to_sentences
+from torch import Tensor
+from torch.utils.data.dataloader import DataLoader
 
 
 def test_parse_bin_embedding():
@@ -221,7 +212,9 @@ def test_tokenizer_preprocessing_and_postprocessing(ds_lemma: FieldedDataset, el
     # be sure that there are too long sentences
     assert any(len(field) > 2 for sentence_fields in ds_lemma for field in sentence_fields)
     max_sequence_length = 2 + 2 + 6  # 2 extra for [SEP] and [CLS] and extra defined in function
-    chunked_ds = chunk_dataset(ds_lemma, load_tokenizer(electra_model), max_sequence_length=max_sequence_length)
+
+    wemb = TransformerEmbedding(electra_model)
+    chunked_ds = chunk_dataset(ds_lemma, wemb.tokenizer, max_sequence_length=max_sequence_length)
     assert len(chunked_ds) == 4
     chunked_lengths = chunked_ds.get_lengths()
     assert chunked_lengths == (1, 2, 1, 2)
@@ -234,51 +227,60 @@ def test_tokenizer_preprocessing_and_postprocessing(ds_lemma: FieldedDataset, el
 
 def test_more_tokenization(electra_model):
     max_sequence_length = 512
-    tok = load_tokenizer(electra_model)
+    wemb = TransformerEmbedding(electra_model)
+    tok = wemb.tokenizer
     # fmt: off
     test = [('Báðar', 'segjast', 'þær', 'hafa', 'verið', 'látnar', 'matast', 'í', 'eldhúsinu', ',', 'eins', 'og', 'hjúum', 'var', 'gjarnan', 'skipað', 'erlendis', ',', 'og', 'ekki', 'líkað', 'það', 'par', 'vel', 'enda', 'vanar', 'meiri', 'virðingu', 'að', 'heiman', '.')]
     # fmt: on
     lengts = get_adjusted_lengths(
         tuple(test),
-        load_tokenizer(electra_model),
+        tok,
         max_sequence_length=max_sequence_length,
     )
     assert lengts == (len(test[0]),)
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
-    chunked_ds = chunk_dataset(ds, load_tokenizer(electra_model), max_sequence_length=max_sequence_length)
-
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
+    # fmt: off
+    test = [('Fræðslu-', 'og', 'kynningarfundur', 'kl.', '14', '.')]
+    # fmt: on
+    lengts = get_adjusted_lengths(
+        tuple(test),
+        tok,
+        max_sequence_length=max_sequence_length,
+    )
+    ds = FieldedDataset((tuple(test),), fields=("tokens",))
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
     # fmt: off
     test = [("9,754", "kl.")]
     # fmt: on
     lengts = get_adjusted_lengths(
         tuple(test),
-        load_tokenizer(electra_model),
+        tok,
         max_sequence_length=max_sequence_length,
     )
     assert lengts == (len(test[0]),)
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
-    chunked_ds = chunk_dataset(ds, load_tokenizer(electra_model), max_sequence_length=max_sequence_length)
-
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
     # fmt: off
     test = [('Kl.', '9', 'handavinna', ',', 'útskurður', ',', 'fótaaðgerð', 'og', 'hárgreiðsla', '.')]
     # fmt: on
     lengts = get_adjusted_lengths(
         tuple(test),
-        load_tokenizer(electra_model),
+        tok,
         max_sequence_length=max_sequence_length,
     )
     assert lengts == (len(test[0]),)
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
-    chunked_ds = chunk_dataset(ds, load_tokenizer(electra_model), max_sequence_length=max_sequence_length)
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
 
     # fmt: off
     test = [('ýsa', '36', '36', '36', '257', '9,252', 'Und.', 'þorskur', '62', '62', '62', '276', '17,112', 'Ýsa', '169', '34', '129', '5,967', '767,608', 'Þorskur', '204', '160', '174', '460', '79,831', 'Þykkvalúra', '214', '214', '214', '1,070', 'Samtals', '143', '11,129', '1,592,544', 'FISKMARKAÐUR', 'VESTMANNAEYJA', 'Blálanga', '31', '31', '31', '76', '2,356', 'Grálúða', '180', '177', '178', '44', '7,833', 'Gullkarfi', '87', '87', '87', '124', '10,788', 'Hlýri', '76', '76', '76', '899', '68,325', 'Keila', '32', '32', '32', '41', '1,312', 'Keilubróðir', '4', 'Langa', '74', '67', '72', '1,111', '79,799', 'Lúða', '204', '181', '192', '83', '15,917', 'Skarkoli', '21', '21', '21', '5', '105', 'Skata', '97', '17', '68', '25', '1,705', 'Skötuselur', '181', '140', '165', '576', '94,846', 'Steinbítur', '76', '69', '75', '454', '34,203', 'Stórkjafta', '12', '12', '12', '283', '3,396', 'Ufsi', '35', '25', '34', '5,384', '181,863', 'Und.', 'ufsi', '6', '6', '6', '30', '180', 'Ósundurliðað', '3', 'Ýsa', '55', '67', '89', '6,005', 'Þorskur', '186', '76', '141', '236', '33,375', 'Þykkvalúra', '190', '7', '160', '133', '21,244', 'Samtals', '59', '9,600', '563,252', 'FISKMARKAÐUR', 'ÞÓRSHAFNAR', 'Hlýri', '81', '81', '81', '770', '62,371', 'Langa', '59', '59', '59', '43', '2,537', 'Náskata', '15', '15', '15', '103', '1,545', 'Steinbítur', '70', '70', '70', '131', '9,170', 'Ufsi', '22', '22', '22', '777', '17,094', 'Und.', 'ýsa', '29', '29', '29', '192', '5,568', 'Ýsa', '36', '36', '36', '120', '4,320', 'Samtals', '48', '2,136', '102,605', 'FISKMARKAÐURINN', 'Á', 'SKAGASTRÖND', 'Lúða', '459', '151', '298', '21', '6,251', 'Skata', '47', '47', '47', '12', '564', 'Ufsi', '15', '15', '15', '117', '1,755', 'Und.', 'þorskur', '63', '63', '63', '31,500', 'Ýsa', '172', '69', '133', '800', '106,700', 'Þorskur', '229', '90', '129', '6,690', '862,380', 'Samtals', '124', '8,140', '1,009,150', 'FM', 'PATREKSFJARÐAR', 'Lúða', '161', '161', '161', '24', '3,864', 'Skarkoli', '100', '100', '100', '129', '12,900', 'Steinbítur', '68', '68', '68', '75', '5,100', 'Ufsi', '22', '22', '22', '1,042', '22,924', 'Und.', 'þorskur', '64', '64', '64', '1,258', '80,512', 'Ýsa', '122', '41', '86', '370', '31,937', 'Þorskur', '128', '72', '101', '14,733', '1,493,633', 'Samtals', '94', '17,631')]
     # fmt: on
     lengts = get_adjusted_lengths(
         tuple(test),
-        load_tokenizer(electra_model),
+        tok,
         max_sequence_length=max_sequence_length,
     )
     assert sum(lengts) == len(test[0])
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
-    chunked_ds = chunk_dataset(ds, load_tokenizer(electra_model), max_sequence_length=max_sequence_length)
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)

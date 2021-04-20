@@ -2,26 +2,7 @@
 
 from typing import List, Tuple
 
-from transformers import AutoTokenizer, PreTrainedTokenizerFast
-
-
-def load_tokenizer(directory: str) -> PreTrainedTokenizerFast:
-    """Load a subword tokenizer from a directory."""
-    return AutoTokenizer.from_pretrained(directory)  # type: ignore
-
-
-def is_initial(offset_mapping: Tuple[int, int], space_added: bool) -> bool:
-    """Return True if offset mapping represents start of token."""
-    char_start, char_end = offset_mapping
-    # start of a new token
-    if char_start == 0 or (space_added and char_start == 1):
-        # ends at zero = special added token -> not initial
-        if char_end == 0:
-            return False
-        # Ends at something else than 0 -> initial
-        return True
-    # represents characters inside a token -> not initial
-    return False
+from transformers import PreTrainedTokenizerFast
 
 
 def tok_space_added(tokenizer: PreTrainedTokenizerFast) -> bool:
@@ -31,6 +12,19 @@ def tok_space_added(tokenizer: PreTrainedTokenizerFast) -> bool:
     return False
 
 
-def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]], space_added: bool):
-    """Return the inital token masks for subtokenized tokens. Special tokens are not considered inital."""
-    return [1 if is_initial(offset_mapping, space_added=space_added) else 0 for offset_mapping in offsets_mapping]
+def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]]):
+    """Return the inital token masks for subword tokens. Special tokens are not considered inital."""
+    initial_token_masks = []
+    last_end = 0
+    for start, end in offsets_mapping:
+        if end == start == 0:
+            # Special token
+            initial_token_masks.append(0)
+        elif start == 0 != end:
+            initial_token_masks.append(1)
+        elif last_end == start:
+            initial_token_masks.append(0)
+        else:
+            initial_token_masks.append(1)
+        last_end = end
+    return initial_token_masks
