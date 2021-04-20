@@ -12,16 +12,16 @@ def tok_space_added(tokenizer: PreTrainedTokenizerFast) -> bool:
     return False
 
 
-def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]]):
+def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]], contains_bos_eos=True):
     """Return the inital token masks for subword tokens. Special tokens are not considered inital."""
     initial_token_masks = []
-    last_start, last_end = 0, 0
+    if contains_bos_eos:
+        offsets_mapping = offsets_mapping[1:-1]
+        initial_token_masks.append(0)
+    last_start, last_end = None, None
     for start, end in offsets_mapping:
-        if end == start == 0:
-            # Special token
-            initial_token_masks.append(0)
-        elif start == 0 != end:
-            # From 0 and onward -> initial
+        if last_start is None:
+            # First token
             initial_token_masks.append(1)
         elif last_end == start:
             # Continuation of previous token
@@ -34,4 +34,6 @@ def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]]):
             initial_token_masks.append(1)
         last_end = end
         last_start = start
+    if contains_bos_eos:
+        initial_token_masks.append(0)
     return initial_token_masks
