@@ -7,7 +7,7 @@ from transformers import PreTrainedTokenizerFast
 
 def tok_space_added(tokenizer: PreTrainedTokenizerFast) -> bool:
     """Return True if tokenizer is set to add_prefix_space."""
-    if tokenizer.__getattribute__("add_prefix_space") is not None:
+    if hasattr(tokenizer, "add_prefix_space"):
         return tokenizer.__getattribute__("add_prefix_space")
     return False
 
@@ -25,6 +25,9 @@ def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]], contains_bos_
             initial_token_masks.append(1)
         elif last_end == start:
             # Continuation of previous token
+            initial_token_masks.append(0)
+        elif start == end == 0:
+            # When padding to maximum length, most offsets are (0,0)
             initial_token_masks.append(0)
         elif last_end == end and last_start == start:
             # RoBERTa special, sometimes we get two subword tokens from a single character.
