@@ -32,8 +32,8 @@ See [releases](https://github.com/cadia-lvl/POS/releases)
 To use a pretrained model follow the instructions below.
 
 ```
-# Using v2.0.3 - consider using the latest version: [releases](https://github.com/cadia-lvl/POS/releases)
-pip install git+https://github.com/cadia-lvl/POS.git@v2.0.3
+# Using v2.0.4 - consider using the latest version: [releases](https://github.com/cadia-lvl/POS/releases)
+pip install git+https://github.com/cadia-lvl/POS.git@v2.0.4
 # Download the model
 wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/98/tagger-v2.0.0.pt
 # Test the installation

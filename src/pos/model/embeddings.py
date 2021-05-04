@@ -1,13 +1,13 @@
 """Implementation of several embeddings."""
 from typing import Dict, Sequence
 
-from torch import nn
 import torch
-from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerFast, AutoConfig
-
 from pos import core
-from pos.data import map_to_index, get_initial_token_mask
+from pos.data import get_initial_token_mask, map_to_index
 from pos.data.batch import map_to_chars_batch
+from torch import nn
+from transformers import AutoConfig, AutoModel, AutoTokenizer, PreTrainedTokenizerFast
+
 from . import abltagger
 
 
@@ -145,13 +145,16 @@ class TransformerEmbedding(abltagger.Embedding):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
         self.model = AutoModel.from_pretrained(model_path, config=self.config)
+        self.add_prefix_space = False
         self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(
-            model_path
+            model_path, add_prefix_space=self.add_prefix_space
         )
         # ELECTRA property
         self.num_layers = self.config.num_hidden_layers
         self.hidden_dim = self.config.hidden_size
-        self.max_length = self.tokenizer.max_len_single_sentence
+        self.max_length = min(
+            self.config.max_position_embeddings, self.tokenizer.model_max_length
+        )
         self.dropout = nn.Dropout(p=dropout)
         self.layers = layers
         if self.layers == "weights":
@@ -166,8 +169,7 @@ class TransformerEmbedding(abltagger.Embedding):
         }
         for sentence in batch:
             encoded = self.tokenizer.encode_plus(
-                text=sentence,
-                is_split_into_words=True,
+                text=" ".join(sentence),
                 padding="max_length",
                 max_length=self.max_length,
                 return_tensors="pt",
