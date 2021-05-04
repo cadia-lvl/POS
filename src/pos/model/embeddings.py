@@ -169,6 +169,7 @@ class TransformerEmbedding(abltagger.Embedding):
                 return_tensors="pt",
                 return_offsets_mapping=True,
             )
+            assert encoded["input_ids"].shape[1] == self.max_length, "The should be exactly the max_length defined."
             preprocessed["input_ids"].append(encoded["input_ids"][0])
             preprocessed["attention_mask"].append(encoded["attention_mask"][0])
             preprocessed["initial_token_masks"].append(

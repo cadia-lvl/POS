@@ -57,7 +57,7 @@ def test_transformer_embedding_electra_small(electra_model, data_loader):
     for batch in data_loader:
         embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         embs = embs["hidden_states"][-1]
-        assert embs.shape == (3, 128, 256)
+        assert embs.shape == (3, wemb.max_length, wemb.hidden_dim)
         assert embs.requires_grad == True
 
 
@@ -67,7 +67,7 @@ def test_transformer_embedding_electra_small_only_last(electra_model, data_loade
     for batch in data_loader:
         embs = wemb(batch[BATCH_KEYS.TOKENS], batch[BATCH_KEYS.LENGTHS])
         embs = embs["hidden_states"][-1]
-        assert embs.shape == (3, 128, 256)
+        assert embs.shape == (3, wemb.max_length, wemb.hidden_dim)
         assert embs.requires_grad == True
 
 
