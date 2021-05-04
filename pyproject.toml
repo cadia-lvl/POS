@@ -19,14 +19,11 @@ ignored-modules = "torch"
 testpaths = [
     "tests"
 ]
-filterwarnings = [
-    "ignore::DeprecationWarning",
-]
-# addopts = "--electra_model electra-small-pytorch --tagger /home/haukur/Resources/Models/POS/tagger-v2.0.0.pt"
+# addopts = "--electra_model=/home/haukurpj/Resources/Models/LM/electra-small-pytorch --tagger=/home/haukurpj/Resources/Models/POS/tagger-v2.0.0.pt"
 
 [tool.poetry]
 name = "pos"
-version = "2.0.3"
+version = "2.0.4"
 description = "A Part-of-Speech tagger for Icelandic"
 authors = ["Haukur <haukurpalljonsson@gmail.com>"]
 license = "Apache-2.0"
@@ -40,7 +37,7 @@ pos = "pos.cli:cli"
 
 [tool.poetry.dependencies]
 python = "^3.6.2"
-torch = "^1.7.0"
+torch = "~1.7.0"
 tqdm = "^4.48.2"
 click = "^7.1.2"
 transformers = "~4.1.1"
