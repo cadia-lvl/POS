@@ -25,7 +25,7 @@ def set_device(gpu_flag=False):
     if gpu_flag and torch.cuda.is_available():
         device_set = t_device("cuda")  # type: ignore
         # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
-        log.info(f"Using {torch.cuda.device_count()} GPUs")
+        log.info(f"Using {torch.cuda.device_count()} GPUs {torch.cuda.get_device_name()}")
     else:
         device_set = t_device("cpu")  # type: ignore
         threads = 1
