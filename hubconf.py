@@ -1,9 +1,4 @@
-# pip install git... POS
-# repo = 'pytorch/vision'
-# >>> model = torch.hub.load(repo, 'resnet50', pretrained=True)
-# repo_owner/repo_name[:tag_name]
-
-dependencies = ["torch", "transformers"]
+dependencies = ["pos"]
 
 import tarfile
 from logging import getLogger
