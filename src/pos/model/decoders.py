@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 from pos.core import Sentences, VocabMap
 from pos.data import BATCH_KEYS, map_to_chars_batch, map_to_index_batch
-from pos.data.constants import Modules
 from torch import Tensor, softmax
 
 from . import interface

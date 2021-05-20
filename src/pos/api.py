@@ -8,7 +8,8 @@ from torch.utils.data import DataLoader
 import pos.core as core
 from pos.core import FieldedDataset, Fields, Sentence, Sentences, set_device
 from pos.data import chunk_dataset, collate_fn, dechunk_dataset
-from pos.model import EncodersDecoders, Modules
+from pos.data.constants import Modules
+from pos.model import EncodersDecoders
 from pos.train import tag_data_loader
 
 log = logging.getLogger(__name__)

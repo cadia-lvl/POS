@@ -1,8 +1,7 @@
 import pathlib
 
-from pos.core import Dicts
-from pos.model import CharacterAsWordEmbedding, CharacterDecoder, Encoder, EncodersDecoders, Modules
-from pos.model.embeddings import CharacterEmbedding
+from pos.data.constants import Modules
+from pos.model.interface import EncodersDecoders
 from pos.train import get_criterion, get_optimizer, get_scheduler, run_epochs, tag_data_loader
 
 

@@ -1,12 +1,12 @@
 """To test parts of the model."""
 import torch
 from pos.core import Dicts
+from pos.data.constants import Modules
 from pos.model import (
     CharacterAsWordEmbedding,
     CharacterDecoder,
     ClassicWordEmbedding,
     EncodersDecoders,
-    Modules,
     MultiplicativeAttention,
     PretrainedEmbedding,
     Tagger,
@@ -103,3 +103,4 @@ def test_attention():
     hiddens_encoder = torch.rand(size=(4, 3, 2))
     attention = MultiplicativeAttention(encoder_dim=2, decoder_dim=2)
     result = attention(hidden_decoder, hiddens_encoder)
+    assert result is not None

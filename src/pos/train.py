@@ -21,7 +21,8 @@ from pos.model.interface import EncodersDecoders
 
 from .core import Fields, Sentences
 from .data import BATCH_KEYS, PAD_ID
-from .model import Decoder, Modules
+from .data.constants import Modules
+from .model import Decoder
 
 log = logging.getLogger(__name__)
 

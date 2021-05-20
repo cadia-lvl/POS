@@ -10,7 +10,8 @@ from pos import evaluate
 from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
 from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap
 from pos.data import collate_fn, load_dicts
-from pos.model import CharacterDecoder, ClassicWordEmbedding, Encoder, EncodersDecoders, Modules, Tagger
+from pos.data.constants import Modules
+from pos.model import CharacterDecoder, ClassicWordEmbedding, EncodersDecoders, Tagger
 from pos.model.embeddings import CharacterAsWordEmbedding, CharacterEmbedding
 from pos.model.interface import Decoder
 

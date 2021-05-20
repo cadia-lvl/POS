@@ -17,19 +17,40 @@ from transformers import PreTrainedTokenizerFast
 
 from pos import bin_to_ifd, core, evaluate
 from pos.api import Tagger as api_tagger
-from pos.core import (Dicts, FieldedDataset, Fields, Vocab, VocabMap,
-                      set_device, set_seed)
-from pos.data import (bin_str_to_emb_pair, chunk_dataset, collate_fn,
-                      dechunk_dataset, emb_pairs_to_dict, load_dicts,
-                      read_datasets, read_morphlex,
-                      read_pretrained_word_embeddings, wemb_str_to_emb_pair)
-from pos.data.constants import PAD
-from pos.model import (CharacterAsWordEmbedding, CharacterDecoder,
-                       ClassicWordEmbedding, Decoder, Encoder,
-                       EncodersDecoders, Modules, Tagger, TransformerEmbedding)
+from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap, set_device, set_seed
+from pos.data import (
+    bin_str_to_emb_pair,
+    chunk_dataset,
+    collate_fn,
+    dechunk_dataset,
+    emb_pairs_to_dict,
+    load_dicts,
+    read_datasets,
+    read_morphlex,
+    read_pretrained_word_embeddings,
+    wemb_str_to_emb_pair,
+)
+from pos.data.constants import PAD, Modules
+from pos.model import (
+    CharacterAsWordEmbedding,
+    CharacterDecoder,
+    ClassicWordEmbedding,
+    Decoder,
+    Encoder,
+    EncodersDecoders,
+    Tagger,
+    TransformerEmbedding,
+)
 from pos.model.embeddings import CharacterEmbedding
-from pos.train import (MODULE_TO_FIELD, get_criterion, get_optimizer,
-                       get_scheduler, print_model, run_epochs, tag_data_loader)
+from pos.train import (
+    MODULE_TO_FIELD,
+    get_criterion,
+    get_optimizer,
+    get_scheduler,
+    print_model,
+    run_epochs,
+    tag_data_loader,
+)
 
 MORPHLEX_VOCAB_PATH = "./data/extra/morphlex_vocab.txt"
 PRETRAINED_VOCAB_PATH = "./data/extra/pretrained_vocab.txt"
@@ -519,6 +540,8 @@ def train_and_tag(**kwargs):
         with output_dir.joinpath("known_lemmas.txt").open("w+") as f:
             for lemma in Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)):
                 f.write(f"{lemma}\n")
+    if kwargs["bert_encoder"]:
+        write_bert_config(pathlib.Path(kwargs["bert_encoder"]), output_dir)
     if kwargs["save_vocab"]:
         save_location = output_dir.joinpath("dictionaries.pickle")
         with save_location.open("wb+") as f:
@@ -527,6 +550,13 @@ def train_and_tag(**kwargs):
         save_location = output_dir.joinpath("tagger.pt")
         torch.save(model, str(save_location))
     log.info("Done!")
+
+
+def write_bert_config(in_dir: pathlib.Path, out_dir: pathlib.Path):
+    import shutil
+
+    for file_name in ("config.json", "special_tokens_map.json", "tokenizer_config.json", "vocab.txt"):
+        shutil.copy(in_dir.joinpath(file_name), out_dir.joinpath(file_name))
 
 
 def write_hyperparameters(path, hyperparameters):

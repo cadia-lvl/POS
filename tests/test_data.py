@@ -159,6 +159,7 @@ def test_map_to_idx():
 
 def test_map_to_chars(ds):
     c_map = ds.get_char_vocab_map(special_tokens=VocabMap.UNK_PAD_EOS_SOS)
+    idx = -1
     for idx, (sent, _) in enumerate(ds):
         if idx == 0:
             mapped = map_to_chars_and_index(sent, c_map.w2i)
@@ -187,7 +188,7 @@ def test_map_to_chars_batch(ds):
 
 def test_collate_fn(ds_lemma):
     _, dicts = load_dicts(ds_lemma)
-    dl = DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)
+    dl = DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)  # type: ignore
     assert len(dl) == 1
     for batch in dl:
         assert len(batch) == 5  # The keys
@@ -305,3 +306,4 @@ def test_more_tokenization(electra_model):
     assert sum(lengts) == len(test[0])
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
     chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
+    assert chunked_ds is not None
