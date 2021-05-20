@@ -27,16 +27,12 @@ class BatchPreprocess(metaclass=abc.ABCMeta):
 class Encoder(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
     """A module which accepts string inputs and embeds them to tensors."""
 
-    def __init__(self) -> None:
+    def __init__(self, key: str) -> None:
         super().__init__()
+        self.key = key
 
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Run a generic forward pass for the Embeddings."""
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def embed(self, batch: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply the embedding."""
         raise NotImplementedError
 
     @property
@@ -49,8 +45,9 @@ class Encoder(BatchPreprocess, nn.Module, metaclass=abc.ABCMeta):
 class Decoder(BatchPostprocess, nn.Module, metaclass=abc.ABCMeta):
     """A module which accepts an sentence embedding and outputs another tensor."""
 
-    def __init__(self) -> None:
+    def __init__(self, key: str) -> None:
         super().__init__()
+        self.key = key
 
     @property
     @abc.abstractmethod
@@ -81,9 +78,10 @@ class EncodersDecoders(nn.Module):
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Forward pass."""
         for encoder in self.encoders.values():
-            batch = encoder.preprocess(batch)
+            batch = encoder.preprocess(batch)  # type: ignore
             batch = encoder(batch)
         for decoder in self.decoders.values():
-            batch = decoder.add_targets(batch)
+            batch = decoder.add_targets(batch)  # type: ignore
             batch = decoder(batch)
-        return batch
+        results = {key: batch[key] for key in self.decoders.keys()}  # type: ignore
+        return results

@@ -17,45 +17,19 @@ from transformers import PreTrainedTokenizerFast
 
 from pos import bin_to_ifd, core, evaluate
 from pos.api import Tagger as api_tagger
-from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap, set_device, set_seed
-from pos.data import (
-    bin_str_to_emb_pair,
-    chunk_dataset,
-    collate_fn,
-    dechunk_dataset,
-    emb_pairs_to_dict,
-    load_dicts,
-    read_datasets,
-    read_morphlex,
-    read_pretrained_word_embeddings,
-    wemb_str_to_emb_pair,
-)
+from pos.core import (Dicts, FieldedDataset, Fields, Vocab, VocabMap,
+                      set_device, set_seed)
+from pos.data import (bin_str_to_emb_pair, chunk_dataset, collate_fn,
+                      dechunk_dataset, emb_pairs_to_dict, load_dicts,
+                      read_datasets, read_morphlex,
+                      read_pretrained_word_embeddings, wemb_str_to_emb_pair)
 from pos.data.constants import PAD
-from pos.model import (
-    ABLTagger,
-    CharacterAsWordEmbedding,
-    CharacterDecoder,
-    ClassingWordEmbedding,
-    Decoder,
-    Embedding,
-    Encoder,
-    Modules,
-    PretrainedEmbedding,
-    Tagger,
-    TransformerEmbedding,
-)
+from pos.model import (CharacterAsWordEmbedding, CharacterDecoder,
+                       ClassicWordEmbedding, Decoder, Encoder,
+                       EncodersDecoders, Modules, Tagger, TransformerEmbedding)
 from pos.model.embeddings import CharacterEmbedding
-from pos.model.impl import Lemmatizer
-from pos.train import (
-    MODULE_TO_FIELD,
-    get_criterion,
-    get_optimizer,
-    get_parameter_groups,
-    get_scheduler,
-    print_tagger,
-    run_epochs,
-    tag_data_loader,
-)
+from pos.train import (MODULE_TO_FIELD, get_criterion, get_optimizer,
+                       get_scheduler, print_model, run_epochs, tag_data_loader)
 
 MORPHLEX_VOCAB_PATH = "./data/extra/morphlex_vocab.txt"
 PRETRAINED_VOCAB_PATH = "./data/extra/pretrained_vocab.txt"
@@ -246,7 +220,7 @@ def train_lemmatizer(**kwargs):
     # Dicts
     dictionaries = build_dictionaries(kwargs)
     if not kwargs["from_trained"]:
-        lemmatizer = build_lemmatizer_model(kwargs, dictionaries)
+        lemmatizer = build_model(kwargs, dictionaries)
     else:
         log.info(f"Loading model={kwargs['from_trained']}")
         lemmatizer = load_lemmatizer_model(kwargs["from_trained"])
@@ -257,12 +231,8 @@ def train_lemmatizer(**kwargs):
     test_dl = DataLoader(
         test_ds, collate_fn=collate_fn, shuffle=False, batch_size=kwargs["batch_size"] * 10  # type: ignore
     )
-    criterion = get_criterion(
-        {Modules.Lemmatizer: lemmatizer.character_decoder}, label_smoothing=kwargs["label_smoothing"]
-    )
-    parameter_groups = get_parameter_groups(lemmatizer)
-    log.info(f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}")
-    optimizer = get_optimizer(parameter_groups, kwargs["optimizer"], kwargs["learning_rate"])
+    criterion = get_criterion(lemmatizer.decoders, label_smoothing=kwargs["label_smoothing"])  # type: ignore
+    optimizer = get_optimizer(lemmatizer.named_parameters(), kwargs["optimizer"], kwargs["learning_rate"])
     scheduler = get_scheduler(optimizer, kwargs["scheduler"])
     evaluators = {}
     evaluators[Modules.Lemmatizer] = evaluate.LemmatizationEvaluation(
@@ -312,7 +282,7 @@ def train_lemmatizer(**kwargs):
 
 
 def load_lemmatizer_model(path):
-    lemmatizer: Lemmatizer = torch.load(path, map_location=torch.device("cpu"))
+    lemmatizer = torch.load(path, map_location=torch.device("cpu"))
     return lemmatizer
 
 
@@ -328,35 +298,83 @@ def build_dictionaries(kwargs):
     return dictionaries
 
 
-def build_lemmatizer_model(kwargs, dictionaries):
-    tag_embedding = ClassingWordEmbedding(
-        dictionaries[Dicts.FullTag],
-        embedding_dim=kwargs["tag_embedding_dim"],
-        padding_idx=dictionaries[Dicts.FullTag].w2i[PAD],
+def build_model(kwargs, dicts) -> EncodersDecoders:
+    embs: Dict[str, Encoder] = {}
+    if kwargs["bert_encoder"]:
+        emb = TransformerEmbedding(Modules.BERT, kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"])
+        embs[Modules.BERT] = emb
+
+    # if kwargs["morphlex_embeddings_file"]:
+    #     embs[Modules.MorphLex] = PretrainedEmbedding(
+    #         vocab_map=dicts[Dicts.MorphLex],
+    #         embeddings=embeddings[Dicts.MorphLex],
+    #         freeze=kwargs["morphlex_freeze"],
+    #         dropout=kwargs["emb_dropouts"],
+    #     )
+    # if kwargs["pretrained_word_embeddings_file"]:
+    #     embs[Modules.Pretrained] = PretrainedEmbedding(
+    #         vocab_map=dicts[Dicts.Pretrained],
+    #         embeddings=embeddings[Dicts.Pretrained],
+    #         freeze=True,
+    #         dropout=kwargs["emb_dropouts"],
+    #     )
+    if kwargs["word_embedding_dim"]:
+        embs[Modules.Trained] = ClassicWordEmbedding(
+            Modules.Trained,
+            dicts[Dicts.Tokens],
+            kwargs["word_embedding_dim"],
+            dropout=kwargs["emb_dropouts"],
+        )
+    character_embedding = CharacterEmbedding(
+        Modules.Characters,
+        dicts[Dicts.Chars],
+        embedding_dim=kwargs["char_emb_dim"],
         dropout=kwargs["emb_dropouts"],
     )
-    character_embedding = CharacterEmbedding(
-        dictionaries[Dicts.Chars], embedding_dim=kwargs["char_emb_dim"], dropout=kwargs["emb_dropouts"]
-    )
     char_as_word = CharacterAsWordEmbedding(
+        Modules.CharactersToTokens,
         character_embedding=character_embedding,
         char_lstm_layers=kwargs["char_lstm_layers"],
         char_lstm_dim=kwargs["char_lstm_dim"],
         dropout=kwargs["emb_dropouts"],
     )
-    char_decoder = CharacterDecoder(
-        character_embedding=character_embedding,
-        vocab_map=dictionaries[Dicts.Chars],
-        context_dim=tag_embedding.output_dim,
-        hidden_dim=kwargs["lemmatizer_hidden_dim"],
-        char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
-        attention_dim=char_as_word.output_dim,
-        char_attention=kwargs["lemmatizer_char_attention"],
-        num_layers=kwargs["lemmatizer_num_layers"],
-        dropout=kwargs["emb_dropouts"],
-    )
-    lemmatizer = Lemmatizer(tag_embedding=tag_embedding, char_as_words=char_as_word, character_decoder=char_decoder)
-    return lemmatizer
+    if kwargs["char_lstm_layers"]:
+        embs[Modules.CharactersToTokens] = char_as_word
+    decoders: Dict[str, Decoder] = {}
+    if kwargs["tagger"]:
+        log.info("Training Tagger")
+        decoders[Modules.Tagger] = Tagger(
+            key=Modules.Tagger,
+            vocab_map=dicts[Dicts.FullTag],
+            # TODO: Fix so that we define the Encoder the Tagger accepts
+            encoder=embs[Modules.BERT],
+            encoder_key=Modules.BERT,
+            weight=kwargs["tagger_weight"],
+        )
+    if kwargs["lemmatizer"]:
+        tag_embedding = ClassicWordEmbedding(
+            key=Modules.TagEmbedding,
+            vocab_map=dicts[Dicts.FullTag],
+            embedding_dim=kwargs["tag_embedding_dim"],
+            padding_idx=dicts[Dicts.FullTag].w2i[PAD],
+            dropout=kwargs["emb_dropouts"],
+        )
+        log.info("Training Lemmatizer")
+        char_decoder = CharacterDecoder(
+            key=Modules.Lemmatizer,
+            tag_encoder=tag_embedding,
+            characters_to_tokens_encoder=char_as_word,
+            vocab_map=dicts[Dicts.Chars],
+            hidden_dim=kwargs["lemmatizer_hidden_dim"],
+            char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
+            attention_dim=char_as_word.output_dim,
+            char_attention=kwargs["lemmatizer_char_attention"],
+            num_layers=kwargs["lemmatizer_num_layers"],
+            dropout=kwargs["emb_dropouts"],
+        )
+        decoders[Modules.Lemmatizer] = char_decoder
+    model = EncodersDecoders(encoders=embs, decoders=decoders).to(core.device)
+    return model
 
 
 # fmt: off
@@ -410,7 +428,6 @@ def train_and_tag(**kwargs):
     set_device(gpu_flag=kwargs["gpu"])
 
     # Read train and test data
-
     unchunked_train_ds = read_datasets(kwargs["training_files"])
     unchunked_test_ds = read_datasets([kwargs["test_file"]])
     # Set configuration values and create mappers
@@ -421,87 +438,18 @@ def train_and_tag(**kwargs):
         morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
         known_chars_file=kwargs["known_chars_file"],
     )
-
-    embs: Dict[Modules, Embedding] = {}
-    if kwargs["bert_encoder"]:
-        emb = TransformerEmbedding(kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"])
-        train_ds = chunk_dataset(unchunked_train_ds, emb.tokenizer, emb.max_length)
-        test_ds = chunk_dataset(unchunked_test_ds, emb.tokenizer, emb.max_length)
-        embs[Modules.BERT] = emb
+    model = build_model(kwargs=kwargs, dicts=dicts)
+    if Modules.BERT in model.encoders.keys():
+        tok: PreTrainedTokenizerFast = model.encoders[Modules.BERT].tokenizer  # type: ignore
+        max_length = model.encoders[Modules.BERT].max_length
+        train_ds = chunk_dataset(unchunked_train_ds, tok, max_length)
+        test_ds = chunk_dataset(unchunked_test_ds, tok, max_length)
     else:
         train_ds = unchunked_train_ds
         test_ds = unchunked_test_ds
 
-    if kwargs["morphlex_embeddings_file"]:
-        embs[Modules.MorphLex] = PretrainedEmbedding(
-            vocab_map=dicts[Dicts.MorphLex],
-            embeddings=embeddings[Dicts.MorphLex],
-            freeze=kwargs["morphlex_freeze"],
-            dropout=kwargs["emb_dropouts"],
-        )
-    if kwargs["pretrained_word_embeddings_file"]:
-        embs[Modules.Pretrained] = PretrainedEmbedding(
-            vocab_map=dicts[Dicts.Pretrained],
-            embeddings=embeddings[Dicts.Pretrained],
-            freeze=True,
-            dropout=kwargs["emb_dropouts"],
-        )
-    if kwargs["word_embedding_dim"]:
-        embs[Modules.Trained] = ClassingWordEmbedding(
-            dicts[Dicts.Tokens],
-            kwargs["word_embedding_dim"],
-            dropout=kwargs["emb_dropouts"],
-        )
-    if kwargs["char_lstm_layers"]:
-        character_embedding = CharacterEmbedding(
-            dicts[Dicts.Chars],
-            embedding_dim=kwargs["char_emb_dim"],
-            dropout=kwargs["emb_dropouts"],
-        )
-        char_as_word = CharacterAsWordEmbedding(
-            character_embedding=character_embedding,
-            char_lstm_layers=kwargs["char_lstm_layers"],
-            char_lstm_dim=kwargs["char_lstm_dim"],
-            dropout=kwargs["emb_dropouts"],
-        )
-        embs[Modules.CharactersToTokens] = char_as_word
-    encoder = Encoder(
-        embeddings=embs,
-        main_lstm_dim=kwargs["main_lstm_dim"],
-        main_lstm_layers=kwargs["main_lstm_layers"],
-        lstm_dropouts=0.0,
-        input_dropouts=kwargs["emb_dropouts"],
-        residual=True,
-    )
-    decoders: Dict[Modules, Decoder] = {}
-    if kwargs["tagger"]:
-        log.info("Training Tagger")
-        decoders[Modules.Tagger] = Tagger(
-            vocab_map=dicts[Dicts.FullTag],
-            input_dim=embs[Modules(kwargs["tagger_embedding"])].output_dim
-            if Modules(kwargs["tagger_embedding"]) in embs
-            else encoder.output_dim,
-            embedding=Modules(kwargs["tagger_embedding"]),
-            weight=kwargs["tagger_weight"],
-        )
-    if kwargs["lemmatizer"]:
-        log.info("Training Lemmatizer")
-        char_decoder = CharacterDecoder(
-            character_embedding=character_embedding,
-            vocab_map=dicts[Dicts.Chars],
-            context_dim=decoders[Modules.Tagger].output_dim,
-            hidden_dim=kwargs["lemmatizer_hidden_dim"],
-            char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
-            attention_dim=char_as_word.output_dim,
-            char_attention=kwargs["lemmatizer_char_attention"],
-            num_layers=kwargs["lemmatizer_num_layers"],
-            dropout=kwargs["emb_dropouts"],
-        )
-        decoders[Modules.Lemmatizer] = char_decoder
-    abl_tagger = ABLTagger(encoder=encoder, **{key.value: value for key, value in decoders.items()}).to(core.device)
-
     # Train a model
-    print_tagger(abl_tagger)
+    print_model(model)
 
     train_dl = DataLoader(
         train_ds,
@@ -515,13 +463,11 @@ def train_and_tag(**kwargs):
         shuffle=False,
         batch_size=kwargs["batch_size"] * 10,
     )
-    criterion = get_criterion(decoders=decoders, label_smoothing=kwargs["label_smoothing"])
-    parameter_groups = get_parameter_groups(abl_tagger)
-    log.info(f"Parameter groups: {tuple(len(group['params']) for group in parameter_groups)}")
-    optimizer = get_optimizer(parameter_groups, kwargs["optimizer"], kwargs["learning_rate"])
+    criterion = get_criterion(decoders=model.decoders, label_smoothing=kwargs["label_smoothing"])  # type: ignore
+    optimizer = get_optimizer(model.parameters(), kwargs["optimizer"], kwargs["learning_rate"])
     scheduler = get_scheduler(optimizer, kwargs["scheduler"])
     evaluators = {}
-    if Modules.Tagger in decoders:
+    if Modules.Tagger in model.decoders:
         evaluators[Modules.Tagger] = evaluate.TaggingEvaluation(
             test_dataset=test_ds,
             train_vocab=train_ds.get_vocab(),
@@ -530,7 +476,7 @@ def train_and_tag(**kwargs):
                 pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
             ),
         ).tagging_accuracy
-    if Modules.Lemmatizer in decoders:
+    if Modules.Lemmatizer in model.decoders:
         evaluators[Modules.Lemmatizer] = evaluate.LemmatizationEvaluation(
             test_dataset=test_ds,
             train_vocab=train_ds.get_vocab(),
@@ -543,7 +489,7 @@ def train_and_tag(**kwargs):
 
     # Start the training
     run_epochs(
-        model=abl_tagger,
+        model=model,
         optimizer=optimizer,
         criterion=criterion,
         scheduler=scheduler,
@@ -554,7 +500,7 @@ def train_and_tag(**kwargs):
         output_dir=output_dir,
     )
     _, values = tag_data_loader(
-        model=abl_tagger,
+        model=model,
         data_loader=test_dl,
     )
     log.info("Writing predictions, dictionaries and model")
@@ -579,7 +525,7 @@ def train_and_tag(**kwargs):
             pickle.dump(dicts, f)
     if kwargs["save_model"]:
         save_location = output_dir.joinpath("tagger.pt")
-        torch.save(abl_tagger, str(save_location))
+        torch.save(model, str(save_location))
     log.info("Done!")
 
 

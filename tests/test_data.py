@@ -13,6 +13,7 @@ from pos.data import (
     read_datasets,
     wemb_str_to_emb_pair,
 )
+from pos.data.constants import Modules
 from pos.data.dataset import dechunk_dataset, get_adjusted_lengths
 from pos.model.embeddings import TransformerEmbedding
 from pos.utils import read_tsv, tokens_to_sentences
@@ -213,7 +214,7 @@ def test_tokenizer_preprocessing_and_postprocessing(ds_lemma: FieldedDataset, el
     assert any(len(field) > 2 for sentence_fields in ds_lemma for field in sentence_fields)
     max_sequence_length = 2 + 2 + 6  # 2 extra for [SEP] and [CLS] and extra defined in function
 
-    wemb = TransformerEmbedding(electra_model)
+    wemb = TransformerEmbedding(Modules.BERT, electra_model)
     chunked_ds = chunk_dataset(ds_lemma, wemb.tokenizer, max_sequence_length=max_sequence_length)
     assert len(chunked_ds) == 4
     chunked_lengths = chunked_ds.get_lengths()
@@ -227,7 +228,7 @@ def test_tokenizer_preprocessing_and_postprocessing(ds_lemma: FieldedDataset, el
 
 def test_more_tokenization(electra_model):
     max_sequence_length = 512
-    wemb = TransformerEmbedding(electra_model)
+    wemb = TransformerEmbedding(Modules.BERT, electra_model)
     tok = wemb.tokenizer
     # fmt: off
     test = [('Báðar', 'segjast', 'þær', 'hafa', 'verið', 'látnar', 'matast', 'í', 'eldhúsinu', ',', 'eins', 'og', 'hjúum', 'var', 'gjarnan', 'skipað', 'erlendis', ',', 'og', 'ekki', 'líkað', 'það', 'par', 'vel', 'enda', 'vanar', 'meiri', 'virðingu', 'að', 'heiman', '.')]

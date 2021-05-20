@@ -11,7 +11,7 @@ from pos.data.constants import Modules
 from torch import Tensor, softmax
 
 from . import interface
-from .embeddings import CharacterEmbedding
+from .embeddings import CharacterAsWordEmbedding
 
 
 class MultiplicativeAttention(nn.Module):
@@ -51,10 +51,11 @@ class CharacterDecoder(interface.Decoder):
 
     def __init__(
         self,
+        key: str,
         vocab_map: VocabMap,
         hidden_dim,
-        context_dim,
-        character_embedding: CharacterEmbedding,
+        characters_to_tokens_encoder: CharacterAsWordEmbedding,
+        tag_encoder: interface.Encoder,
         num_layers=1,
         char_rnn_input_dim=0,
         attention_dim=0,
@@ -63,22 +64,21 @@ class CharacterDecoder(interface.Decoder):
         weight=1,
     ):
         """Initialize the model."""
-        super().__init__()
+        super().__init__(key)
         self.vocab_map = vocab_map
         self.num_layers = num_layers
-        self.context_dim = context_dim
+        self.tag_encoder = tag_encoder
         self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
         self.attention_dim = attention_dim
         self._output_dim = len(vocab_map)  # The number of characters, these will be interpreted as logits.
         self._weight = weight
         self.char_attention = char_attention
         self.char_rnn_input_dim = char_rnn_input_dim
-
-        self.character_embedding = character_embedding
+        self.characters_to_tokens_encoder = characters_to_tokens_encoder
         # last character + sentence context + character attention
         rnn_in_dim = (
-            self.character_embedding.output_dim
-            + self.context_dim
+            self.characters_to_tokens_encoder.character_embedding.output_dim
+            + self.tag_encoder.output_dim
             + (self.attention_dim if self.char_attention else 0)
             + self.char_rnn_input_dim
         )
@@ -88,7 +88,7 @@ class CharacterDecoder(interface.Decoder):
             num_layers=self.num_layers,
             batch_first=True,
         )
-        char_emb_weights_tensors = self.character_embedding.sparse_embedding.weight.data
+        char_emb_weights_tensors = self.characters_to_tokens_encoder.character_embedding.embedding.weight.data
         num_chars, char_emb_dim = char_emb_weights_tensors.shape
         assert num_chars == len(vocab_map)
 
@@ -145,7 +145,7 @@ class CharacterDecoder(interface.Decoder):
     def postprocess(self, batch: Dict[str, Any]) -> Sentences:
         """Postprocess the model output."""
         # Get the character predictions
-        char_preds = batch[Modules.Lemmatizer].argmax(dim=2)
+        char_preds = batch[self.key].argmax(dim=2)
         # Map to batch of sentences again.
         sent_char_preds = char_preds.view(size=(len(batch[BATCH_KEYS.LENGTHS]), -1, char_preds.shape[-1]))
         as_list = sent_char_preds.tolist()
@@ -192,7 +192,7 @@ class CharacterDecoder(interface.Decoder):
 
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Run the decoder on the batch."""
-        tags = batch[Modules.Trained]  # Danger, danger! High voltage! Trained can also be standard word embeddings.
+        tags = batch[self.tag_encoder.key]
         tag_embeddings = tags.clone().detach()
         b, s, f = tag_embeddings.shape
         # 1 for EOS
@@ -218,14 +218,20 @@ class CharacterDecoder(interface.Decoder):
         )
         while next_char_input is not None:
             # (b*s, f)
-            emb_chars = self.dropout(self.character_embedding({"chars": next_char_input}))
+            emb_chars = self.dropout(
+                self.characters_to_tokens_encoder.character_embedding({BATCH_KEYS.CHAR_IDS: next_char_input})[
+                    self.characters_to_tokens_encoder.character_embedding.key
+                ]
+            )
             rnn_in = torch.cat((emb_chars, tag_embeddings), dim=1)
             if self.char_rnn_input_dim:
                 # (b*s, f)
-                rnn_in = torch.cat((rnn_in, batch[Modules.CharactersToTokens][1]), dim=1)
+                rnn_in = torch.cat((rnn_in, batch[self.characters_to_tokens_encoder.key][1]), dim=1)
             if self.char_attention:
                 # char rnn = (b*s, c, f)
-                char_attention = self.attention(hidden.view(hidden.shape[1], -1), batch[Modules.CharactersToTokens][0])
+                char_attention = self.attention(
+                    hidden.view(hidden.shape[1], -1), batch[self.characters_to_tokens_encoder.key][0]
+                )
                 rnn_in = torch.cat((rnn_in, char_attention), dim=1)
             # (b*s, 1, f), a single timestep
             rnn_in = rnn_in.unsqueeze(1)
@@ -240,7 +246,7 @@ class CharacterDecoder(interface.Decoder):
                 previous_predictions=predictions,
                 max_timestep=c,
             )
-        batch[Modules.Lemmatizer] = predictions
+        batch[self.key] = predictions
         return batch
 
 
@@ -249,20 +255,24 @@ class Tagger(interface.Decoder):
 
     def __init__(
         self,
+        key: str,
         vocab_map: VocabMap,
-        input_dim,
+        encoder: interface.Encoder,
+        encoder_key: str,
         weight=1,
     ):
         """Initialize."""
-        super().__init__()
+        super().__init__(key)
         self.vocab_map = vocab_map
         self._output_dim = len(vocab_map)
         self._weight = weight
+        self.encoder_key = encoder_key
+        self.encoder = encoder
         # Classification head
-        self.dense = nn.Linear(input_dim, input_dim)
+        self.dense = nn.Linear(encoder.output_dim, encoder.output_dim)
         self.activation_fn = nn.ReLU()
-        self.layer_norm = nn.LayerNorm(input_dim)
-        self.out_proj = nn.Linear(input_dim, self.output_dim)
+        self.layer_norm = nn.LayerNorm(encoder.output_dim)
+        self.out_proj = nn.Linear(encoder.output_dim, self.output_dim)
 
     @property
     def output_dim(self) -> int:
@@ -277,11 +287,11 @@ class Tagger(interface.Decoder):
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Run the decoder on the batch."""
         # Now we map the subtokens to tokens.
-        x = batch[Modules.BERT]
+        x = batch[self.encoder_key]
         x = self.dense(x)
         x = self.layer_norm(x)
         x = self.activation_fn(x)
-        batch[Modules.Tagger] = self.out_proj(x)
+        batch[self.key] = self.out_proj(x)
         return batch
 
     def add_targets(self, batch: Dict[str, Any]) -> Dict[str, Any]:
@@ -292,7 +302,7 @@ class Tagger(interface.Decoder):
 
     def postprocess(self, batch: Dict[str, Any]) -> Sentences:
         """Postprocess the model output."""
-        idxs = batch[Modules.Tagger].argmax(dim=2).tolist()
+        idxs = batch[self.key].argmax(dim=2).tolist()
 
         tags = [
             tuple(

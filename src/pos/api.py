@@ -8,9 +8,7 @@ from torch.utils.data import DataLoader
 import pos.core as core
 from pos.core import FieldedDataset, Fields, Sentence, Sentences, set_device
 from pos.data import chunk_dataset, collate_fn, dechunk_dataset
-from pos.model import ABLTagger
-from pos.model import Lemmatizer as m_Lemmatizer
-from pos.model import Modules
+from pos.model import EncodersDecoders, Modules
 from pos.train import tag_data_loader
 
 log = logging.getLogger(__name__)
@@ -29,7 +27,7 @@ class Tagger:
         log.info("Setting device.")
         set_device(gpu_flag="cpu" != device)
         log.info("Reading model file...")
-        self.model: ABLTagger = torch.load(model_file, map_location=core.device)
+        self.model: EncodersDecoders = torch.load(model_file, map_location=core.device)
 
     def tag_sent(self, sent: Sentence) -> Sentence:
         """Tag a (single) sentence. To tag multiple sentences at once (faster) use "tag_bulk".
@@ -57,8 +55,8 @@ class Tagger:
         ds = cast_types(dataset)
         chunked_ds = chunk_dataset(
             ds,
-            tokenizer=self.model.encoder.embeddings[Modules.BERT.value].tokenizer,  # type: ignore
-            max_sequence_length=self.model.encoder.embeddings[Modules.BERT.value].max_length,
+            tokenizer=self.model.encoders[Modules.BERT].tokenizer,  # type: ignore
+            max_sequence_length=self.model.encoders[Modules.BERT].max_length,
         )
         log.info("Predicting tags")
         # Initialize DataLoader
@@ -97,7 +95,7 @@ class Lemmatizer:
         log.info("Setting device.")
         set_device(gpu_flag="cpu" != device)
         log.info("Reading model file...")
-        self.model: m_Lemmatizer = torch.load(model_file, map_location=core.device)
+        self.model = torch.load(model_file, map_location=core.device)
 
     def lemma_sent(self, sent: Sentence, tags: Sentence) -> Sentence:
         """Lemmatize a (single) sentence. To lemmatize multiple sentences at once (faster) use "lemma_bulk".

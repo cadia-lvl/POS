@@ -18,13 +18,13 @@ log = getLogger(__name__)
 class ClassicWordEmbedding(interface.Encoder):
     """Classic word embeddings."""
 
-    def __init__(self, vocab_map: core.VocabMap, embedding_dim: int, padding_idx=0, dropout=0.0):
+    def __init__(self, key: str, vocab_map: core.VocabMap, embedding_dim: int, padding_idx=0, dropout=0.0):
         """Create one."""
-        super().__init__()
+        super().__init__(key)
         self.vocab_map = vocab_map
-        self.sparse_embedding = nn.Embedding(len(vocab_map), embedding_dim, padding_idx=padding_idx, sparse=True)
+        self.embedding = nn.Embedding(len(vocab_map), embedding_dim, padding_idx=padding_idx)
         # Skip the first index, should be zero
-        nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
+        nn.init.xavier_uniform_(self.embedding.weight[1:, :])
         self.dropout = nn.Dropout(p=dropout)
 
     def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
@@ -37,13 +37,13 @@ class ClassicWordEmbedding(interface.Encoder):
 
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
-        batch[Modules.Trained] = self.dropout(self.sparse_embedding(batch[BATCH_KEYS.TOKEN_IDS]))
+        batch[self.key] = self.dropout(self.embedding(batch[BATCH_KEYS.TOKEN_IDS]))
         return batch
 
     @property
     def output_dim(self):
         """Return the output dimension."""
-        return self.sparse_embedding.weight.data.shape[1]
+        return self.embedding.weight.data.shape[1]
 
 
 class CharacterEmbedding(ClassicWordEmbedding):
@@ -56,7 +56,7 @@ class CharacterEmbedding(ClassicWordEmbedding):
 
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
-        batch[Modules.Characters] = self.dropout(self.sparse_embedding(batch[BATCH_KEYS.CHAR_IDS]))
+        batch[self.key] = self.dropout(self.embedding(batch[BATCH_KEYS.CHAR_IDS]))
         return batch
 
 
@@ -65,6 +65,7 @@ class PretrainedEmbedding(ClassicWordEmbedding):
 
     def __init__(
         self,
+        key: str,
         vocab_map: core.VocabMap,
         embeddings: torch.Tensor,
         freeze=False,
@@ -73,14 +74,13 @@ class PretrainedEmbedding(ClassicWordEmbedding):
     ):
         """Create one."""
         super().__init__(
+            key=key,
             vocab_map=vocab_map,
             embedding_dim=1,
             padding_idx=padding_idx,
             dropout=dropout,
         )  # we overwrite the embedding
-        self.sparse_embedding = nn.Embedding.from_pretrained(
-            embeddings, freeze=freeze, padding_idx=padding_idx, sparse=True
-        )
+        self.embedding = nn.Embedding.from_pretrained(embeddings, freeze=freeze, padding_idx=padding_idx)
 
     def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch."""
@@ -92,7 +92,7 @@ class PretrainedEmbedding(ClassicWordEmbedding):
 
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
-        batch[Modules.Pretrained] = self.dropout(self.sparse_embedding(batch[BATCH_KEYS.PRETRAINED_TOKEN_IDS]))
+        batch[self.key] = self.dropout(self.embedding(batch[BATCH_KEYS.PRETRAINED_TOKEN_IDS]))
         return batch
 
 
@@ -101,13 +101,14 @@ class CharacterAsWordEmbedding(interface.Encoder):
 
     def __init__(
         self,
+        key: str,
         character_embedding: CharacterEmbedding,
         char_lstm_dim=64,
         char_lstm_layers=1,
         dropout=0.0,
     ):
         """Create one."""
-        super().__init__()
+        super().__init__(key)
         self.character_embedding = character_embedding
         # The character RNN
         self.rnn = nn.GRU(
@@ -134,7 +135,7 @@ class CharacterAsWordEmbedding(interface.Encoder):
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
         # (b * seq, chars)
-        char_embs = self.character_embedding(batch)
+        char_embs = self.character_embedding(batch)[self.character_embedding.key]
         # (b * seq, chars, f)
         self.rnn.flatten_parameters()
         out, hidden = self.rnn(char_embs)
@@ -147,7 +148,7 @@ class CharacterAsWordEmbedding(interface.Encoder):
         # Hidden documentation (GRU): (num_layers * num_directions, batch, hidden_size)
         # Batch is NOT placed first in the hidden.
         # We map it to (b * seq, hidden_size * num_layers * num_directions)
-        batch[Modules.CharactersToTokens] = (
+        batch[self.key] = (
             self.dropout(out),
             self.dropout(hidden.permute(1, 0, 2).reshape(out.shape[0], -1)),
         )
@@ -162,9 +163,9 @@ class CharacterAsWordEmbedding(interface.Encoder):
 class TransformerEmbedding(interface.Encoder):
     """An embedding of a sentence after going through a Transformer."""
 
-    def __init__(self, model_path: str, dropout=0.0):
+    def __init__(self, key: str, model_path: str, dropout=0.0):
         """Initialize it be reading the config, model and tokenizer."""
-        super().__init__()
+        super().__init__(key)
         self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
         self.model = AutoModel.from_pretrained(model_path, config=self.config)
         self.add_prefix_space = False
@@ -186,7 +187,7 @@ class TransformerEmbedding(interface.Encoder):
             "initial_token_masks": [],
         }
         for sentence in batch[BATCH_KEYS.TOKENS]:
-            encoded = self.tokenizer.encode_plus(
+            encoded = self.tokenizer.encode_plus(  # type: ignore
                 text=" ".join(sentence),
                 padding="max_length",
                 max_length=self.max_length,
@@ -211,7 +212,7 @@ class TransformerEmbedding(interface.Encoder):
         )
         # Tuple[(b, s, f), ...]
         outputs["initial_token_masks"] = batch[BATCH_KEYS.SUBWORDS]["initial_token_masks"]
-        batch[Modules.BERT] = get_emb_by_initial_token_masks(outputs)
+        batch[self.key] = get_emb_by_initial_token_masks(outputs)
         return batch
 
     @property

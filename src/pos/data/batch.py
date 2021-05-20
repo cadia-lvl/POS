@@ -64,7 +64,7 @@ def copy_into_larger_tensor(tensor: Tensor, like_tensor: Tensor) -> Tensor:
     return base
 
 
-def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[BATCH_KEYS, Any]:
+def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[str, Any]:
     """Map the inputs to batches."""
     batch_dict = {}
     if len(batch[0]) >= 1:  # we assume we are given the tokens
