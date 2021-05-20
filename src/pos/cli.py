@@ -298,7 +298,7 @@ def train_lemmatizer(**kwargs):
             pickle.dump(dictionaries, f)
     if kwargs["save_model"]:
         save_location = output_dir.joinpath("lemmatizer.pt")
-        torch.save(lemmatizer, str(save_location))
+        torch.save(lemmatizer.state_dict(), str(save_location))
     log.info("Done!")
 
 
@@ -548,7 +548,7 @@ def train_and_tag(**kwargs):
             pickle.dump(dicts, f)
     if kwargs["save_model"]:
         save_location = output_dir.joinpath("tagger.pt")
-        torch.save(model, str(save_location))
+        torch.save(model.state_dict(), str(save_location))
     log.info("Done!")
 
 
