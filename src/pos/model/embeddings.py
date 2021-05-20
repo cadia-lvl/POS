@@ -1,20 +1,21 @@
 """Implementation of several embeddings."""
 from logging import getLogger
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, List
 
 import torch
 from pos import core
 from pos.data import get_initial_token_mask, map_to_index
 from pos.data.batch import map_to_chars_batch
+from pos.data.constants import BATCH_KEYS, Modules
 from torch import nn
 from transformers import AutoConfig, AutoModel, AutoTokenizer, PreTrainedTokenizerFast
 
-from . import abltagger
+from . import interface
 
 log = getLogger(__name__)
 
 
-class ClassingWordEmbedding(abltagger.Embedding):
+class ClassicWordEmbedding(interface.Encoder):
     """Classic word embeddings."""
 
     def __init__(self, vocab_map: core.VocabMap, embedding_dim: int, padding_idx=0, dropout=0.0):
@@ -26,16 +27,18 @@ class ClassingWordEmbedding(abltagger.Embedding):
         nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
         self.dropout = nn.Dropout(p=dropout)
 
-    def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch."""
-        return torch.nn.utils.rnn.pad_sequence(
-            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch],
+        batch[BATCH_KEYS.TOKEN_IDS] = nn.utils.rnn.pad_sequence(
+            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch[BATCH_KEYS.TOKENS]],
             batch_first=True,
         )
+        return batch
 
-    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> torch.Tensor:
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
-        return self.dropout(self.sparse_embedding(batch))
+        batch[Modules.Trained] = self.dropout(self.sparse_embedding(batch[BATCH_KEYS.TOKEN_IDS]))
+        return batch
 
     @property
     def output_dim(self):
@@ -43,15 +46,21 @@ class ClassingWordEmbedding(abltagger.Embedding):
         return self.sparse_embedding.weight.data.shape[1]
 
 
-class CharacterEmbedding(ClassingWordEmbedding):
+class CharacterEmbedding(ClassicWordEmbedding):
     """Character embedding. Has a distinct preprocessing step from classic."""
 
-    def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch."""
-        return map_to_chars_batch(batch, self.vocab_map.w2i)
+        batch[BATCH_KEYS.CHAR_IDS] = map_to_chars_batch(batch[BATCH_KEYS.TOKENS], self.vocab_map.w2i)
+        return batch
+
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the embedding."""
+        batch[Modules.Characters] = self.dropout(self.sparse_embedding(batch[BATCH_KEYS.CHAR_IDS]))
+        return batch
 
 
-class PretrainedEmbedding(ClassingWordEmbedding):
+class PretrainedEmbedding(ClassicWordEmbedding):
     """The Morphological Lexicion embeddings."""
 
     def __init__(
@@ -73,8 +82,21 @@ class PretrainedEmbedding(ClassingWordEmbedding):
             embeddings, freeze=freeze, padding_idx=padding_idx, sparse=True
         )
 
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Preprocess the sentence batch."""
+        batch[BATCH_KEYS.PRETRAINED_TOKEN_IDS] = nn.utils.rnn.pad_sequence(
+            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch[BATCH_KEYS.TOKENS]],
+            batch_first=True,
+        )
+        return batch
 
-class CharacterAsWordEmbedding(abltagger.Embedding):
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the embedding."""
+        batch[Modules.Pretrained] = self.dropout(self.sparse_embedding(batch[BATCH_KEYS.PRETRAINED_TOKEN_IDS]))
+        return batch
+
+
+class CharacterAsWordEmbedding(interface.Encoder):
     """A Character as Word Embedding."""
 
     def __init__(
@@ -104,14 +126,15 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
                 nn.init.xavier_uniform_(param)
         self._output_dim = 2 * char_lstm_dim
 
-    def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch."""
-        return batch  # type: ignore
+        batch = self.character_embedding.preprocess(batch)
+        return batch
 
-    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> Any:
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
         # (b * seq, chars)
-        char_embs = self.character_embedding(batch, lengths)
+        char_embs = self.character_embedding(batch)
         # (b * seq, chars, f)
         self.rnn.flatten_parameters()
         out, hidden = self.rnn(char_embs)
@@ -124,10 +147,11 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
         # Hidden documentation (GRU): (num_layers * num_directions, batch, hidden_size)
         # Batch is NOT placed first in the hidden.
         # We map it to (b * seq, hidden_size * num_layers * num_directions)
-        return (
+        batch[Modules.CharactersToTokens] = (
             self.dropout(out),
             self.dropout(hidden.permute(1, 0, 2).reshape(out.shape[0], -1)),
         )
+        return batch
 
     @property
     def output_dim(self):
@@ -135,7 +159,7 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
         return self._output_dim
 
 
-class TransformerEmbedding(abltagger.Embedding):
+class TransformerEmbedding(interface.Encoder):
     """An embedding of a sentence after going through a Transformer."""
 
     def __init__(self, model_path: str, dropout=0.0):
@@ -154,14 +178,14 @@ class TransformerEmbedding(abltagger.Embedding):
         self.max_length = min(self.config.max_position_embeddings, self.tokenizer.model_max_length, 512)  # type: ignore
         self.dropout = nn.Dropout(p=dropout)
 
-    def preprocess(self, batch: Sequence[core.Sentence]) -> Dict[str, torch.Tensor]:
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch."""
-        preprocessed = {
+        preprocessed: Dict[str, List[torch.Tensor]] = {
             "input_ids": [],
             "attention_mask": [],
             "initial_token_masks": [],
         }
-        for sentence in batch:
+        for sentence in batch[BATCH_KEYS.TOKENS]:
             encoded = self.tokenizer.encode_plus(
                 text=" ".join(sentence),
                 padding="max_length",
@@ -175,20 +199,33 @@ class TransformerEmbedding(abltagger.Embedding):
             preprocessed["initial_token_masks"].append(
                 torch.Tensor(get_initial_token_mask(encoded["offset_mapping"][0].tolist())).bool()
             )
-        return {key: torch.stack(value).to(core.device) for key, value in preprocessed.items()}
+        batch[BATCH_KEYS.SUBWORDS] = {key: torch.stack(value).to(core.device) for key, value in preprocessed.items()}
+        return batch
 
-    def embed(self, batch: Dict[str, torch.Tensor], lengths: Sequence[int]) -> Any:
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
         outputs = self.model(
-            input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
+            input_ids=batch[BATCH_KEYS.SUBWORDS]["input_ids"],
+            attention_mask=batch[BATCH_KEYS.SUBWORDS]["attention_mask"],
             return_dict=True,
         )
         # Tuple[(b, s, f), ...]
-        outputs["initial_token_masks"] = batch["initial_token_masks"]
-        return outputs
+        outputs["initial_token_masks"] = batch[BATCH_KEYS.SUBWORDS]["initial_token_masks"]
+        batch[Modules.BERT] = get_emb_by_initial_token_masks(outputs)
+        return batch
 
     @property
     def output_dim(self):
         """Return the output dimension."""
         return self.hidden_dim
+
+
+def get_emb_by_initial_token_masks(outputs: Dict[str, Any]) -> torch.Tensor:
+    emb = outputs["hidden_states"][-1]  # Only last layer
+    tokens_emb = []
+    for b in range(emb.shape[0]):
+        initial_token_mask = outputs["initial_token_masks"][b]
+        output_sent = emb[b, :, :]
+        tokens_emb.append(output_sent[initial_token_mask, :])
+    padded = nn.utils.rnn.pad_sequence(tokens_emb, batch_first=True)
+    return padded

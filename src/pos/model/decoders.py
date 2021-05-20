@@ -1,17 +1,16 @@
 """Implmementation of some decoders."""
 
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
-from torch import Tensor, softmax
-from torch.nn.modules.sparse import Embedding
-
 from pos.core import Sentences, VocabMap
-from pos.data import BATCH_KEYS, PAD, SOS, map_to_chars_batch, map_to_index_batch
+from pos.data import BATCH_KEYS, map_to_chars_batch, map_to_index_batch
+from pos.data.constants import Modules
+from torch import Tensor, softmax
 
-from . import abltagger
+from . import interface
 from .embeddings import CharacterEmbedding
 
 
@@ -45,7 +44,7 @@ class MultiplicativeAttention(nn.Module):
         return weights.unsqueeze(dim=1).bmm(values).squeeze()
 
 
-class CharacterDecoder(abltagger.Decoder):
+class CharacterDecoder(interface.Decoder):
     """The lemmatizer."""
 
     MAX_SEQUENCE_ADDITIONAL = 20
@@ -143,25 +142,26 @@ class CharacterDecoder(abltagger.Decoder):
             lemmas.append(self.map_lemma_from_char_idx(sent[tok_num]))
         return tuple(lemmas)
 
-    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sentences:
+    def postprocess(self, batch: Dict[str, Any]) -> Sentences:
         """Postprocess the model output."""
         # Get the character predictions
-        char_preds = batch.argmax(dim=2)
+        char_preds = batch[Modules.Lemmatizer].argmax(dim=2)
         # Map to batch of sentences again.
-        sent_char_preds = char_preds.view(size=(len(lengths), -1, char_preds.shape[-1]))
+        sent_char_preds = char_preds.view(size=(len(batch[BATCH_KEYS.LENGTHS]), -1, char_preds.shape[-1]))
         as_list = sent_char_preds.tolist()
 
         sentence_lemmas = []
-        for sent, sent_length in zip(as_list, lengths):
+        for sent, sent_length in zip(as_list, batch[BATCH_KEYS.LENGTHS]):
             sentence_lemmas.append(self.map_sentence_chars(sent, sent_length))
         return tuple(sentence_lemmas)
 
-    def add_targets(self, batch: Dict[BATCH_KEYS, Any]):
+    def add_targets(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch. HAS SIDE-EFFECTS!."""
         if BATCH_KEYS.LEMMAS in batch:
-            batch[BATCH_KEYS.TARGET_LEMMAS] = map_to_chars_batch(
+            batch[BATCH_KEYS.LEMMA_CHAR_IDS] = map_to_chars_batch(
                 batch[BATCH_KEYS.LEMMAS], self.vocab_map.w2i, add_sos=False
             )
+        return batch
 
     @staticmethod
     def make_sequence(device, token_idx: int, batch_size) -> Tensor:
@@ -190,16 +190,15 @@ class CharacterDecoder(abltagger.Decoder):
         else:
             return last_timestep_idxs
 
-    def decode(
-        self, encoded: Dict[abltagger.Modules, Tensor], batch: Dict[BATCH_KEYS, Any], tags: Optional[Tensor]
-    ) -> Tensor:
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Run the decoder on the batch."""
+        tags = batch[Modules.Trained]  # Danger, danger! High voltage! Trained can also be standard word embeddings.
         tag_embeddings = tags.clone().detach()
         b, s, f = tag_embeddings.shape
         # 1 for EOS
         c = (
-            batch[BATCH_KEYS.TARGET_LEMMAS].shape[1]
-            if BATCH_KEYS.TARGET_LEMMAS in batch
+            batch[BATCH_KEYS.LEMMA_CHAR_IDS].shape[1]
+            if BATCH_KEYS.LEMMA_CHAR_IDS in batch
             else max(batch[BATCH_KEYS.TOKEN_CHARS_LENS]) + self.MAX_SEQUENCE_ADDITIONAL
         )
         # (b*s, f) = (num_tokens, features)
@@ -219,16 +218,14 @@ class CharacterDecoder(abltagger.Decoder):
         )
         while next_char_input is not None:
             # (b*s, f)
-            emb_chars = self.dropout(self.character_embedding.embed(next_char_input, batch[BATCH_KEYS.LENGTHS]))
+            emb_chars = self.dropout(self.character_embedding({"chars": next_char_input}))
             rnn_in = torch.cat((emb_chars, tag_embeddings), dim=1)
             if self.char_rnn_input_dim:
                 # (b*s, f)
-                rnn_in = torch.cat((rnn_in, encoded[abltagger.Modules.CharactersToTokens][1]), dim=1)
+                rnn_in = torch.cat((rnn_in, batch[Modules.CharactersToTokens][1]), dim=1)
             if self.char_attention:
                 # char rnn = (b*s, c, f)
-                char_attention = self.attention(
-                    hidden.view(hidden.shape[1], -1), encoded[abltagger.Modules.CharactersToTokens][0]
-                )
+                char_attention = self.attention(hidden.view(hidden.shape[1], -1), batch[Modules.CharactersToTokens][0])
                 rnn_in = torch.cat((rnn_in, char_attention), dim=1)
             # (b*s, 1, f), a single timestep
             rnn_in = rnn_in.unsqueeze(1)
@@ -243,10 +240,11 @@ class CharacterDecoder(abltagger.Decoder):
                 previous_predictions=predictions,
                 max_timestep=c,
             )
-        return predictions
+        batch[Modules.Lemmatizer] = predictions
+        return batch
 
 
-class Tagger(abltagger.Decoder):
+class Tagger(interface.Decoder):
     """A tagger; accept some tensor input and return logits over classes."""
 
     def __init__(
@@ -254,14 +252,12 @@ class Tagger(abltagger.Decoder):
         vocab_map: VocabMap,
         input_dim,
         weight=1,
-        embedding=abltagger.Modules.BiLSTM,
     ):
         """Initialize."""
         super().__init__()
         self.vocab_map = vocab_map
         self._output_dim = len(vocab_map)
         self._weight = weight
-        self.embedding = embedding
         # Classification head
         self.dense = nn.Linear(input_dim, input_dim)
         self.activation_fn = nn.ReLU()
@@ -278,30 +274,25 @@ class Tagger(abltagger.Decoder):
         """Return the decoder weight."""
         return self._weight
 
-    def decode(
-        self, encoded: Dict[abltagger.Modules, Any], batch: Dict[BATCH_KEYS, Any], decoders: Optional[Tensor]
-    ) -> Tensor:
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Run the decoder on the batch."""
         # Now we map the subtokens to tokens.
-        if self.embedding == abltagger.Modules.BERT:
-            x = abltagger.get_emb_by_initial_token_masks(encoded)
-        elif self.embedding == abltagger.Modules.BiLSTM:
-            x = encoded[abltagger.Modules.BiLSTM]
-        else:
-            raise NotImplementedError(f"{self.embedding} is not implemented in Tagger")
+        x = batch[Modules.BERT]
         x = self.dense(x)
         x = self.layer_norm(x)
         x = self.activation_fn(x)
-        return self.out_proj(x)
+        batch[Modules.Tagger] = self.out_proj(x)
+        return batch
 
-    def add_targets(self, batch: Dict[BATCH_KEYS, Any]):
-        """Add the decoder targets to the batch dictionary. SIDE-EFFECTS!."""
+    def add_targets(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Add the decoder targets to the batch dictionary."""
         if BATCH_KEYS.FULL_TAGS in batch:
-            batch[BATCH_KEYS.TARGET_FULL_TAGS] = map_to_index_batch(batch[BATCH_KEYS.FULL_TAGS], self.vocab_map.w2i)
+            batch[BATCH_KEYS.FULL_TAGS_IDS] = map_to_index_batch(batch[BATCH_KEYS.FULL_TAGS], self.vocab_map.w2i)
+        return batch
 
-    def postprocess(self, batch: Tensor, lengths: Sequence[int]) -> Sentences:
+    def postprocess(self, batch: Dict[str, Any]) -> Sentences:
         """Postprocess the model output."""
-        idxs = batch.argmax(dim=2).tolist()
+        idxs = batch[Modules.Tagger].argmax(dim=2).tolist()
 
         tags = [
             tuple(
@@ -310,7 +301,7 @@ class Tagger(abltagger.Decoder):
                 # All sentences are padded (at the right end) to be of equal length.
                 # We do not want to return tags for the paddings.
                 # We check the information about lengths and paddings.
-                if token_count < lengths[sent_idx]
+                if token_count < batch[BATCH_KEYS.LENGTHS][sent_idx]
             )
             for sent_idx, sent in enumerate(idxs)
         ]
