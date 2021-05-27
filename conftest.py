@@ -129,7 +129,7 @@ def classic_emb(vocab_maps, kwargs) -> ClassicWordEmbedding:
 @fixture
 def tagger_module(vocab_maps, classic_emb) -> Tagger:
     """Return a Tagger."""
-    return Tagger(Modules.Tagger, vocab_map=vocab_maps[Dicts.FullTag], encoder=classic_emb, encoder_key=Modules.Trained)
+    return Tagger(Modules.Tagger, vocab_map=vocab_maps[Dicts.FullTag], encoder=classic_emb)
 
 
 @fixture
@@ -154,11 +154,12 @@ def tag_emb_module(vocab_maps) -> ClassicWordEmbedding:
 
 
 @fixture
-def lemmatizer_module(tag_emb_module, char_as_word_emb_module, vocab_maps) -> CharacterDecoder:
+def lemmatizer_module(tag_emb_module, char_as_word_emb_module, char_emb_module, vocab_maps) -> CharacterDecoder:
     """Return a Tagger."""
     char_decoder = CharacterDecoder(
         Modules.Lemmatizer,
         tag_encoder=tag_emb_module,
+        characters_encoder=char_emb_module,
         characters_to_tokens_encoder=char_as_word_emb_module,
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=70,
@@ -174,9 +175,10 @@ def decoders(tagger_module, lemmatizer_module) -> Dict[str, Decoder]:
 
 
 @fixture
-def encoders(char_as_word_emb_module, tag_emb_module, classic_emb) -> Dict[str, Decoder]:
+def encoders(char_emb_module, char_as_word_emb_module, tag_emb_module, classic_emb) -> Dict[str, Decoder]:
     """Return the decoders."""
     return {
+        char_emb_module.key: char_emb_module,
         char_as_word_emb_module.key: char_as_word_emb_module,
         tag_emb_module.key: tag_emb_module,
         classic_emb.key: classic_emb,

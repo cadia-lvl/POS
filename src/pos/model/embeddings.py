@@ -109,10 +109,10 @@ class CharacterAsWordEmbedding(interface.Encoder):
     ):
         """Create one."""
         super().__init__(key)
-        self.character_embedding = character_embedding
+        self.character_embedding_key = character_embedding.key
         # The character RNN
         self.rnn = nn.GRU(
-            input_size=self.character_embedding.output_dim,
+            input_size=character_embedding.output_dim,
             hidden_size=char_lstm_dim,
             num_layers=char_lstm_layers,
             batch_first=True,
@@ -129,13 +129,12 @@ class CharacterAsWordEmbedding(interface.Encoder):
 
     def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch."""
-        batch = self.character_embedding.preprocess(batch)
         return batch
 
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
         # (b * seq, chars)
-        char_embs = self.character_embedding(batch)[self.character_embedding.key]
+        char_embs = batch[self.character_embedding_key]
         # (b * seq, chars, f)
         self.rnn.flatten_parameters()
         out, hidden = self.rnn(char_embs)

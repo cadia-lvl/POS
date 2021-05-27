@@ -346,12 +346,6 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
             kwargs["word_embedding_dim"],
             dropout=kwargs["emb_dropouts"],
         )
-    character_embedding = CharacterEmbedding(
-        Modules.Characters,
-        dicts[Dicts.Chars],
-        embedding_dim=kwargs["char_emb_dim"],
-        dropout=kwargs["emb_dropouts"],
-    )
     decoders: Dict[str, Decoder] = {}
     if kwargs["tagger"]:
         log.info("Training Tagger")
@@ -360,10 +354,16 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
             vocab_map=dicts[Dicts.FullTag],
             # TODO: Fix so that we define the Encoder the Tagger accepts
             encoder=embs[Modules.BERT],
-            encoder_key=Modules.BERT,
             weight=kwargs["tagger_weight"],
         )
     if kwargs["lemmatizer"]:
+        character_embedding = CharacterEmbedding(
+            Modules.Characters,
+            dicts[Dicts.Chars],
+            embedding_dim=kwargs["char_emb_dim"],
+            dropout=kwargs["emb_dropouts"],
+        )
+        embs[Modules.Characters] = character_embedding
         char_as_word = CharacterAsWordEmbedding(
             Modules.CharactersToTokens,
             character_embedding=character_embedding,
@@ -379,11 +379,13 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
             padding_idx=dicts[Dicts.FullTag].w2i[PAD],
             dropout=kwargs["emb_dropouts"],
         )
+        embs[Modules.TagEmbedding] = tag_embedding
         log.info("Training Lemmatizer")
         char_decoder = CharacterDecoder(
             key=Modules.Lemmatizer,
             tag_encoder=tag_embedding,
             characters_to_tokens_encoder=char_as_word,
+            characters_encoder=character_embedding,
             vocab_map=dicts[Dicts.Chars],
             hidden_dim=kwargs["lemmatizer_hidden_dim"],
             char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,

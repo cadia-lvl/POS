@@ -6,11 +6,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 from pos.core import Sentences, VocabMap
-from pos.data import BATCH_KEYS, map_to_chars_batch, map_to_index_batch
+from pos.data import BATCH_KEYS, PAD, map_to_chars_batch, map_to_index_batch
 from torch import Tensor, softmax
 
 from . import interface
-from .embeddings import CharacterAsWordEmbedding
+from .embeddings import CharacterAsWordEmbedding, CharacterEmbedding
 
 
 class MultiplicativeAttention(nn.Module):
@@ -53,6 +53,7 @@ class CharacterDecoder(interface.Decoder):
         key: str,
         vocab_map: VocabMap,
         hidden_dim,
+        characters_encoder: CharacterEmbedding,
         characters_to_tokens_encoder: CharacterAsWordEmbedding,
         tag_encoder: interface.Encoder,
         num_layers=1,
@@ -66,18 +67,26 @@ class CharacterDecoder(interface.Decoder):
         super().__init__(key)
         self.vocab_map = vocab_map
         self.num_layers = num_layers
-        self.tag_encoder = tag_encoder
+        self.tag_encoder_key = tag_encoder.key
         self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
         self.attention_dim = attention_dim
         self._output_dim = len(vocab_map)  # The number of characters, these will be interpreted as logits.
         self._weight = weight
         self.char_attention = char_attention
         self.char_rnn_input_dim = char_rnn_input_dim
-        self.characters_to_tokens_encoder = characters_to_tokens_encoder
+        self.characters_to_tokens_encoder_key = characters_to_tokens_encoder.key
+        char_weights = characters_encoder.embedding.weight
+        num_chars, char_emb_dim = char_weights.shape
+        # Last char embedding
+        self.char_emb = nn.Embedding(
+            num_embeddings=num_chars, embedding_dim=char_emb_dim, padding_idx=self.vocab_map.w2i[PAD]
+        )
+        self.char_emb.weight = char_weights
+        assert num_chars == len(vocab_map)
         # last character + sentence context + character attention
         rnn_in_dim = (
-            self.characters_to_tokens_encoder.character_embedding.output_dim
-            + self.tag_encoder.output_dim
+            char_emb_dim
+            + tag_encoder.output_dim
             + (self.attention_dim if self.char_attention else 0)
             + self.char_rnn_input_dim
         )
@@ -87,15 +96,12 @@ class CharacterDecoder(interface.Decoder):
             num_layers=self.num_layers,
             batch_first=True,
         )
-        char_emb_weights_tensors = self.characters_to_tokens_encoder.character_embedding.embedding.weight.data
-        num_chars, char_emb_dim = char_emb_weights_tensors.shape
-        assert num_chars == len(vocab_map)
 
         self.dense = nn.Linear(self.hidden_dim, char_emb_dim)
         # Map directly to characters
 
         self.output_embedding = nn.Linear(char_emb_dim, num_chars)
-        self.output_embedding.weight.data = char_emb_weights_tensors
+        self.output_embedding.weight = char_weights
         if self.char_attention:
             self.attention = MultiplicativeAttention(
                 encoder_dim=self.attention_dim,
@@ -191,7 +197,7 @@ class CharacterDecoder(interface.Decoder):
 
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Run the decoder on the batch."""
-        tags = batch[self.tag_encoder.key]
+        tags = batch[self.tag_encoder_key]
         tag_embeddings = tags.clone().detach()
         b, s, f = tag_embeddings.shape
         # 1 for EOS
@@ -217,19 +223,15 @@ class CharacterDecoder(interface.Decoder):
         )
         while next_char_input is not None:
             # (b*s, f)
-            emb_chars = self.dropout(
-                self.characters_to_tokens_encoder.character_embedding({BATCH_KEYS.CHAR_IDS: next_char_input})[
-                    self.characters_to_tokens_encoder.character_embedding.key
-                ]
-            )
+            emb_chars = self.dropout(self.char_emb(next_char_input))
             rnn_in = torch.cat((emb_chars, tag_embeddings), dim=1)
             if self.char_rnn_input_dim:
                 # (b*s, f)
-                rnn_in = torch.cat((rnn_in, batch[self.characters_to_tokens_encoder.key][1]), dim=1)
+                rnn_in = torch.cat((rnn_in, batch[self.characters_to_tokens_encoder_key][1]), dim=1)
             if self.char_attention:
                 # char rnn = (b*s, c, f)
                 char_attention = self.attention(
-                    hidden.view(hidden.shape[1], -1), batch[self.characters_to_tokens_encoder.key][0]
+                    hidden.view(hidden.shape[1], -1), batch[self.characters_to_tokens_encoder_key][0]
                 )
                 rnn_in = torch.cat((rnn_in, char_attention), dim=1)
             # (b*s, 1, f), a single timestep
@@ -257,7 +259,6 @@ class Tagger(interface.Decoder):
         key: str,
         vocab_map: VocabMap,
         encoder: interface.Encoder,
-        encoder_key: str,
         weight=1,
     ):
         """Initialize."""
@@ -265,8 +266,7 @@ class Tagger(interface.Decoder):
         self.vocab_map = vocab_map
         self._output_dim = len(vocab_map)
         self._weight = weight
-        self.encoder_key = encoder_key
-        self.encoder = encoder
+        self.encoder_key = encoder.key
         # Classification head
         self.dense = nn.Linear(encoder.output_dim, encoder.output_dim)
         self.activation_fn = nn.ReLU()

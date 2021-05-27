@@ -47,6 +47,8 @@ def test_chars_as_words(vocab_maps, data_loader):
     wemb = CharacterAsWordEmbedding(Modules.CharactersToTokens, character_embedding=character_embedding)
     # The TransformerEmbedding expects the input to be a Sentence, not vectors.
     for batch in data_loader:
+        batch = character_embedding.preprocess(batch)
+        batch = character_embedding(batch)
         batch = wemb.preprocess(batch)
         embs = wemb(batch)[Modules.CharactersToTokens][0]  # Only take the chars
         assert embs.shape == (3 * 3, 9, 64 * 2)
@@ -62,30 +64,23 @@ def test_transformer_embedding_electra_small(electra_model, data_loader):
         assert embs.requires_grad
 
 
-def test_tagger(tagger_module, data_loader):
-    for batch in data_loader:
-        batch = tagger_module.encoder.preprocess(batch)
-        batch = tagger_module.encoder(batch)
-        tag_embs = tagger_module(batch)[Modules.Tagger]
-        assert tag_embs.shape == (3, 3, tagger_module.output_dim)
-
-
 def test_full_run(data_loader, vocab_maps, electra_model):
     emb = TransformerEmbedding(Modules.BERT, electra_model)
-    tagger = Tagger(Modules.Tagger, vocab_map=vocab_maps[Dicts.FullTag], encoder=emb, encoder_key=Modules.BERT)
+    tagger = Tagger(Modules.Tagger, vocab_map=vocab_maps[Dicts.FullTag], encoder=emb)
     character_embedding = CharacterEmbedding(Modules.Characters, vocab_maps[Dicts.Chars], embedding_dim=10)
     wemb = CharacterAsWordEmbedding(Modules.CharactersToTokens, character_embedding=character_embedding)
     tag_emb = ClassicWordEmbedding(Modules.TagEmbedding, vocab_map=vocab_maps[Dicts.FullTag], embedding_dim=4)
     char_decoder = CharacterDecoder(
         Modules.Lemmatizer,
         tag_encoder=tag_emb,
+        characters_encoder=character_embedding,
         characters_to_tokens_encoder=wemb,
         vocab_map=vocab_maps[Dicts.Chars],
         hidden_dim=70,
         num_layers=2,
     )
     abl_tagger = EncodersDecoders(
-        encoders={emb.key: emb, tag_emb.key: tag_emb, wemb.key: wemb},
+        encoders={character_embedding.key: character_embedding, emb.key: emb, tag_emb.key: tag_emb, wemb.key: wemb},
         decoders={Modules.Tagger: tagger, Modules.Lemmatizer: char_decoder},
     )
     for batch in data_loader:
