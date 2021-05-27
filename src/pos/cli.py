@@ -193,116 +193,7 @@ def prepare_bin_lemma_data(sh_snid, output):
                 f.write("\n")
 
 
-# fmt: off
-@cli.command()
-@click.argument("training_files", nargs=-1)
-@click.argument("test_file")
-@click.argument("output_dir")
-@click.option("--gpu/--no_gpu", default=False)
-@click.option("--save_model/--no_save_model", default=True)
-@click.option("--save_vocab/--no_save_vocab", default=True)
-@click.option("--lemmatizer_accept_char_rnn_last/--no_lemmatizer_accept_char_rnn_last", default=False, help="Should the Character RNN last hidden state be input to Lemmatizer")
-@click.option("--lemmatizer_hidden_dim", default=128, help="The hidden dim of the decoder RNN.")
-@click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
-@click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
-@click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
-@click.option("--tag_embedding_dim", default=128, help="The tag embedding dimension")
-@click.option("--known_chars_file", default="./data/extra/characters_training.txt", help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
-@click.option("--known_tags_file", default="./data/extra/all_tags.txt", help="A file which contains the pos the model should know. File should be a single line, the line is split() to retrieve elements.",)
-@click.option("--char_lstm_layers", default=1, help="The number of layers in character LSTM embedding. Should not be set to 0.")
-@click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
-@click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
-@click.option("--emb_dropouts", default=0.0, help="The dropout to use for Embeddings.")
-@click.option("--from_trained", default=None, help="The path to a model.pt which will be used as a starting point.")
-@click.option("--label_smoothing", default=0.1)
-@click.option("--learning_rate", default=5e-5)
-@click.option("--epochs", default=20)
-@click.option("--batch_size", default=16)
-@click.option("--optimizer", default="adam", type=click.Choice(["sgd", "adam"], case_sensitive=False), help="The optimizer to use.")
-@click.option("--scheduler", default="multiply", type=click.Choice(["none", "multiply", "plateau"], case_sensitive=False), help="The learning rate scheduler to use.")
-# fmt: on
-def train_lemmatizer(**kwargs):
-    """Train a lemmatizer on intpus and write out results to a test file.
-
-    training_files: Files to use for training (supports multiple files = globbing).
-    All training files should be .tsv, with two/three columns, the token, tag, lemma.
-    test_file: Same format as training_files. Used to evaluate the model.
-    output_dir: The directory to write out model and results.
-    """
-
-    log.info("Training Lemmatizer")
-    log.info(kwargs)
-    set_seed()
-    set_device(gpu_flag=kwargs["gpu"])
-
-    # Read train and test data
-    train_ds = read_datasets(kwargs["training_files"], fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
-    test_ds = read_datasets([kwargs["test_file"]], fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
-    # Dicts
-    dictionaries = build_dictionaries(kwargs)
-    if not kwargs["from_trained"]:
-        lemmatizer = build_model(kwargs, dictionaries)
-    else:
-        log.info(f"Loading model={kwargs['from_trained']}")
-        lemmatizer = load_lemmatizer_model(kwargs["from_trained"])
-    lemmatizer.to(core.device)
-    train_dl = DataLoader(
-        train_ds, collate_fn=collate_fn, shuffle=True, batch_size=kwargs["batch_size"]  # type: ignore
-    )
-    test_dl = DataLoader(
-        test_ds, collate_fn=collate_fn, shuffle=False, batch_size=kwargs["batch_size"] * 10  # type: ignore
-    )
-    criterion = get_criterion(lemmatizer.decoders, label_smoothing=kwargs["label_smoothing"])  # type: ignore
-    optimizer = get_optimizer(lemmatizer.named_parameters(), kwargs["optimizer"], kwargs["learning_rate"])
-    scheduler = get_scheduler(optimizer, kwargs["scheduler"])
-    evaluators = {}
-    evaluators[Modules.Lemmatizer] = evaluate.LemmatizationEvaluation(
-        test_dataset=test_ds,
-        train_vocab=train_ds.get_vocab(),
-        train_lemmas=Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)),
-    ).lemma_accuracy
-
-    # Write all configuration to disk
-    output_dir = pathlib.Path(kwargs["output_dir"])
-    write_hyperparameters(output_dir / "hyperparamters.json", (kwargs))
-
-    # Start the training
-    run_epochs(
-        model=lemmatizer,
-        optimizer=optimizer,
-        criterion=criterion,
-        scheduler=scheduler,
-        evaluators=evaluators,
-        train_data_loader=train_dl,
-        test_data_loader=test_dl,
-        epochs=kwargs["epochs"],
-        output_dir=output_dir,
-    )
-    _, values = tag_data_loader(model=lemmatizer, data_loader=test_dl)
-    log.info("Writing predictions, dictionaries and model")
-    for module_name, value in values.items():
-        test_ds = test_ds.add_field(value, MODULE_TO_FIELD[module_name])
-
-    test_ds.to_tsv_file(str(output_dir / "predictions.tsv"))
-
-    with output_dir.joinpath("known_toks.txt").open("w+") as f:
-        for token in Vocab.from_symbols(train_ds.get_field(Fields.Tokens)):
-            f.write(f"{token}\n")
-    if Fields.GoldLemmas in train_ds.fields:
-        with output_dir.joinpath("known_lemmas.txt").open("w+") as f:
-            for lemma in Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)):
-                f.write(f"{lemma}\n")
-    if kwargs["save_vocab"]:
-        save_location = output_dir.joinpath("dictionaries.pickle")
-        with save_location.open("wb+") as f:
-            pickle.dump(dictionaries, f)
-    if kwargs["save_model"]:
-        save_location = output_dir.joinpath("lemmatizer.pt")
-        torch.save(lemmatizer.state_dict(), str(save_location))
-    log.info("Done!")
-
-
-def load_lemmatizer_model(path):
+def load_old_lemmatizer_model(path):
     lemmatizer = torch.load(path, map_location=torch.device("cpu"))
     return lemmatizer
 
@@ -403,14 +294,15 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
 @cli.command()
 @click.argument("training_files", nargs=-1)
 @click.argument("test_file")
-@click.argument("output_dir", default="./out")
+@click.argument("output_dir")
 @click.option("--gpu/--no_gpu", default=False)
 @click.option("--known_chars_file", default="./data/extra/characters_training.txt", help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
-@click.option("--save_model/--no_save_model", default=False)
-@click.option("--save_vocab/--no_save_vocab", default=False)
+@click.option("--known_tags_file", default="./data/extra/all_tags.txt", help="A file which contains the pos the model should know. File should be a single line, the line is split() to retrieve elements.",)
+@click.option("--save_model/--no_save_model", default=True)
+@click.option("--save_vocab/--no_save_vocab", default=True)
 @click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
 @click.option("--tagger_weight", default=1.0, help="Value to multiply tagging loss")
-@click.option("--tagger_embedding", default="bilstm", help="The embedding to feed to the Tagger, see pos.model.Modules.")
+@click.option("--tagger_embedding", default="bert", help="The embedding to feed to the Tagger, see pos.model.Modules.")
 @click.option("--tagger_ignore_e_x/--no_tagger_ignore_e_x", is_flag=True, default=True)
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
 @click.option("--lemmatizer_weight", default=0.1, help="Value to multiply lemmatizer loss")
@@ -445,23 +337,22 @@ def train_and_tag(**kwargs):
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
-    pprint(kwargs)
+    log.info(kwargs)
     set_seed()
     set_device(gpu_flag=kwargs["gpu"])
 
     # Read train and test data
-    unchunked_train_ds = read_datasets(kwargs["training_files"])
-    unchunked_test_ds = read_datasets([kwargs["test_file"]])
-    # Set configuration values and create mappers
-    embeddings, dicts = load_dicts(
-        train_ds=unchunked_train_ds,
-        ignore_e_x=kwargs["tagger_ignore_e_x"],
-        pretrained_word_embeddings_file=kwargs["pretrained_word_embeddings_file"],
-        morphlex_embeddings_file=kwargs["morphlex_embeddings_file"],
-        known_chars_file=kwargs["known_chars_file"],
+
+    unchunked_train_ds = read_datasets(
+        kwargs["training_files"], fields=(Fields.Tokens, Fields.GoldLemmas, Fields.GoldTags)
     )
+    unchunked_test_ds = read_datasets([kwargs["test_file"]], fields=(Fields.Tokens, Fields.GoldLemmas, Fields.GoldTags))
+    # Set configuration values and create mappers
+
+    dicts = build_dictionaries(kwargs)
     model = build_model(kwargs=kwargs, dicts=dicts)
     if Modules.BERT in model.encoders.keys():
+        # TODO: Load tokenizer independently and set it to the encoder.
         tok: PreTrainedTokenizerFast = model.encoders[Modules.BERT].tokenizer  # type: ignore
         max_length = model.encoders[Modules.BERT].max_length
         train_ds = chunk_dataset(unchunked_train_ds, tok, max_length)
@@ -472,18 +363,13 @@ def train_and_tag(**kwargs):
 
     # Train a model
     print_model(model)
+    model.to(core.device)
 
     train_dl = DataLoader(
-        train_ds,
-        collate_fn=collate_fn,  # type: ignore
-        shuffle=True,
-        batch_size=kwargs["batch_size"],
+        train_ds, collate_fn=collate_fn, shuffle=True, batch_size=kwargs["batch_size"]  # type: ignore
     )
     test_dl = DataLoader(
-        test_ds,
-        collate_fn=collate_fn,  # type: ignore
-        shuffle=False,
-        batch_size=kwargs["batch_size"] * 10,
+        test_ds, collate_fn=collate_fn, shuffle=False, batch_size=kwargs["batch_size"] * 10  # type: ignore
     )
     criterion = get_criterion(decoders=model.decoders, label_smoothing=kwargs["label_smoothing"])  # type: ignore
     optimizer = get_optimizer(model.parameters(), kwargs["optimizer"], kwargs["learning_rate"])

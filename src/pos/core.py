@@ -293,9 +293,9 @@ class FieldedDataset(Dataset):
             if len(examples) >= 1:
                 fields = fields + (Fields.Tokens,)
             if len(examples) >= 2:
-                fields = fields + (Fields.GoldTags,)
-            if len(examples) >= 3:
                 fields = fields + (Fields.GoldLemmas,)
+            if len(examples) >= 3:
+                fields = fields + (Fields.GoldTags,)
             if len(examples) >= 4:
                 raise ValueError("Unable to guess fields in TSV file. Please set 'fields'")
         return FieldedDataset(examples, fields=fields)
