@@ -30,13 +30,9 @@ train-and-tag \
 --tagger \
 --tagger_embedding bert \
 --bert_encoder ~/Resources/Models/LM/electra-small-pytorch \
---main_lstm_dim 128 \
---main_lstm_layers 1 \
 --label_smoothing 0.1 \
 --epochs 20 \
 --batch_size 16 \
---save_vocab \
---save_model \
 --optimizer adam \
 --learning_rate 5e-5 \
 $*

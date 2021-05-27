@@ -18,12 +18,14 @@ echo $*
 #    --word_embedding_dim 128 \
 #    --pretrained_model_folder bull \
 pos \
-train-lemmatizer \
+train-and-tag \
 "$TRAIN" \
 "$TEST" \
 "$OUT_DIR" \
---lemmatizer_hidden_dim 256 \
+--lemmatizer \
+--lemmatizer_hidden_dim 512 \
 --lemmatizer_char_dim 64 \
+--lemmatizer_state_dict ~/Resources/Models/Lemmatizer/lemmatizer-bin-data-512-trained-1e-4/state_dict_fixed.pt \
 --tag_embedding_dim 128 \
 --char_lstm_layers 1 \
 --char_lstm_dim 128 \
@@ -36,4 +38,5 @@ train-lemmatizer \
 --optimizer adam \
 --learning_rate 1e-4 \
 --scheduler none \
+--gpu \
 $*

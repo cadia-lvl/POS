@@ -30,13 +30,9 @@ train-and-tag \
 --tagger \
 --tagger_embedding bert \
 --bert_encoder ~/Resources/Models/LM/electra-base-is \
---main_lstm_dim 128 \
---main_lstm_layers 1 \
 --label_smoothing 0.1 \
 --epochs 10 \
---batch_size 6 \
---save_vocab \
---save_model \
+--batch_size 8 \
 --optimizer adam \
 --learning_rate 5e-5 \
 $*

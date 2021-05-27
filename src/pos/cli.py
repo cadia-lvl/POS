@@ -190,11 +190,6 @@ def prepare_bin_lemma_data(sh_snid, output):
                 f.write("\n")
 
 
-def load_old_lemmatizer_model(path):
-    lemmatizer = torch.load(path, map_location=torch.device("cpu"))
-    return lemmatizer
-
-
 def build_dictionaries(kwargs):
     dictionaries: Dict[Dicts, VocabMap] = {}
     char_vocab = Vocab.from_file(kwargs["known_chars_file"])
@@ -308,6 +303,8 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
 @click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
 @click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
+@click.option("--lemmatizer_state_dict", default=None, help="The lemmatizer state_dict to continue training from.")
+@click.option("--tag_embedding_dim", default=0, help="The PoS tag embedding dim to feed to the lemmatizer. Set to 0 to disable.")
 @click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
 @click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
 @click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
@@ -360,6 +357,8 @@ def train_and_tag(**kwargs):
     # Train a model
     print_model(model)
     model.to(core.device)
+    if kwargs["lemmatizer_state_dict"]:
+        model.load_state_dict(torch.load(kwargs["lemmatizer_state_dict"], map_location=core.device))
 
     train_dl = DataLoader(
         train_ds, collate_fn=train_ds.collate_fn, shuffle=True, batch_size=kwargs["batch_size"]  # type: ignore
