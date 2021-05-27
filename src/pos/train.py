@@ -183,7 +183,7 @@ def train_model(
             epoch_losses[module_name] += loss
         if i % 10 == 0:
             for module_name, pred, loss in zip(preds.keys(), preds.values(), losses.values()):
-                acc = categorical_accuracy(pred, batch[module_name].to(pred.device))
+                acc = categorical_accuracy(pred, batch[MODULE_TO_TARGET[module_name]].to(pred.device))
                 log.info(
                     f"{log_prepend}batch={i}/{len(data_loader)}, module_name={module_name} acc={acc}, loss={loss:.4f}"
                 )

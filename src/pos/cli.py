@@ -323,7 +323,7 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
     embs: Dict[str, Encoder] = {}
     if kwargs["bert_encoder"]:
         emb = TransformerEmbedding(Modules.BERT, kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"])
-        embs[Modules.BERT] = emb
+        embs[emb.key] = emb
 
     # if kwargs["morphlex_embeddings_file"]:
     #     embs[Modules.MorphLex] = PretrainedEmbedding(
@@ -352,15 +352,6 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
         embedding_dim=kwargs["char_emb_dim"],
         dropout=kwargs["emb_dropouts"],
     )
-    char_as_word = CharacterAsWordEmbedding(
-        Modules.CharactersToTokens,
-        character_embedding=character_embedding,
-        char_lstm_layers=kwargs["char_lstm_layers"],
-        char_lstm_dim=kwargs["char_lstm_dim"],
-        dropout=kwargs["emb_dropouts"],
-    )
-    if kwargs["char_lstm_layers"]:
-        embs[Modules.CharactersToTokens] = char_as_word
     decoders: Dict[str, Decoder] = {}
     if kwargs["tagger"]:
         log.info("Training Tagger")
@@ -373,6 +364,14 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
             weight=kwargs["tagger_weight"],
         )
     if kwargs["lemmatizer"]:
+        char_as_word = CharacterAsWordEmbedding(
+            Modules.CharactersToTokens,
+            character_embedding=character_embedding,
+            char_lstm_layers=kwargs["char_lstm_layers"],
+            char_lstm_dim=kwargs["char_lstm_dim"],
+            dropout=kwargs["emb_dropouts"],
+        )
+        embs[Modules.CharactersToTokens] = char_as_word
         tag_embedding = ClassicWordEmbedding(
             key=Modules.TagEmbedding,
             vocab_map=dicts[Dicts.FullTag],
@@ -404,6 +403,7 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
 @click.argument("test_file")
 @click.argument("output_dir", default="./out")
 @click.option("--gpu/--no_gpu", default=False)
+@click.option("--known_chars_file", default="./data/extra/characters_training.txt", help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
 @click.option("--save_model/--no_save_model", default=False)
 @click.option("--save_vocab/--no_save_vocab", default=False)
 @click.option("--tagger/--no_tagger", is_flag=True, default=False, help="Train tagger")
@@ -417,7 +417,6 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
 @click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
 @click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
 @click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
-@click.option("--known_chars_file", default=None, help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
 @click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
 @click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
 @click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
