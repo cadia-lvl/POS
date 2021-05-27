@@ -2,7 +2,7 @@
 import logging
 import random
 from enum import Enum
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
 import torch
@@ -10,6 +10,7 @@ from torch import device as t_device
 from torch import set_num_threads
 from torch.utils.data import Dataset
 
+from pos.constants import BATCH_KEYS
 from pos.utils import read_tsv, tokens_to_sentences, write_tsv
 
 log = logging.getLogger(__name__)
@@ -281,6 +282,22 @@ class FieldedDataset(Dataset):
         """Write the dataset to a file as TSV."""
         with open(path, mode="w") as f:
             write_tsv(f, self._iter_for_tsv())
+
+    def collate_fn(self, batch: Sequence[Tuple[Sentence, ...]]) -> Dict[str, Any]:
+        """Map the inputs to batches."""
+        batch_dict = {}
+        for idx, field in enumerate(self.fields):
+            if field == Fields.Tokens:
+                batch_dict[BATCH_KEYS.TOKENS] = tuple(element[idx] for element in batch)
+            elif field == Fields.GoldTags:
+                batch_dict[BATCH_KEYS.FULL_TAGS] = tuple(element[idx] for element in batch)
+            elif field == Fields.GoldLemmas:
+                batch_dict[BATCH_KEYS.LEMMAS] = tuple(element[idx] for element in batch)
+        batch_dict[BATCH_KEYS.TOKEN_CHARS_LENS] = tuple(
+            len(token) for sent in batch_dict[BATCH_KEYS.TOKENS] for token in sent
+        )
+        batch_dict[BATCH_KEYS.LENGTHS] = tuple(len(x) for x in batch_dict[BATCH_KEYS.TOKENS])
+        return batch_dict
 
     @staticmethod
     def from_file(filepath: str, fields: Tuple[str, ...] = None, sep="\t"):

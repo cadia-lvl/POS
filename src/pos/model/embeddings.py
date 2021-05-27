@@ -4,9 +4,9 @@ from typing import Any, Dict, List
 
 import torch
 from pos import core
+from pos.constants import BATCH_KEYS
 from pos.data import get_initial_token_mask, map_to_index
 from pos.data.batch import map_to_chars_batch
-from pos.data.constants import BATCH_KEYS
 from torch import nn
 from transformers import AutoConfig, AutoModel, AutoTokenizer, PreTrainedTokenizerFast
 

@@ -3,11 +3,11 @@
 from typing import Any, Dict, Sequence, Tuple
 
 from pos import core
+from pos.constants import BATCH_KEYS, EOS, PAD, PAD_ID, SOS, UNK
 from pos.core import Dicts, FieldedDataset, Fields, Sentence, Vocab, VocabMap
 from torch import Tensor, zeros_like
 from torch.nn.utils.rnn import pad_sequence
 
-from .constants import BATCH_KEYS, EOS, PAD, PAD_ID, SOS, UNK
 from .pretrained import read_morphlex, read_pretrained_word_embeddings
 
 
@@ -62,22 +62,6 @@ def copy_into_larger_tensor(tensor: Tensor, like_tensor: Tensor) -> Tensor:
     base = zeros_like(like_tensor)
     base[: tensor.shape[0], : tensor.shape[1]] = tensor
     return base
-
-
-def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[str, Any]:
-    """Map the inputs to batches."""
-    batch_dict = {}
-    if len(batch[0]) >= 1:  # we assume we are given the tokens
-        batch_dict[BATCH_KEYS.TOKENS] = tuple(element[0] for element in batch)
-    if len(batch[0]) >= 2:  # Next, the tags. Usually only for training.
-        batch_dict[BATCH_KEYS.FULL_TAGS] = tuple(element[1] for element in batch)
-    if len(batch[0]) >= 3:  # lastly, the lemmas. Usually only for training.
-        batch_dict[BATCH_KEYS.LEMMAS] = tuple(element[2] for element in batch)
-    batch_dict[BATCH_KEYS.TOKEN_CHARS_LENS] = tuple(
-        len(token) for sent in batch_dict[BATCH_KEYS.TOKENS] for token in sent  # type: ignore
-    )
-    batch_dict[BATCH_KEYS.LENGTHS] = tuple(len(x) for x in batch_dict[BATCH_KEYS.TOKENS])  # type: ignore
-    return batch_dict
 
 
 def load_dicts(

@@ -7,7 +7,6 @@ import pickle
 import random
 import re
 from collections import Counter
-from pprint import pprint
 from typing import Dict
 
 import click
@@ -17,20 +16,18 @@ from transformers import PreTrainedTokenizerFast
 
 from pos import bin_to_ifd, core, evaluate
 from pos.api import Tagger as api_tagger
+from pos.constants import PAD, Modules
 from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap, set_device, set_seed
 from pos.data import (
     bin_str_to_emb_pair,
     chunk_dataset,
-    collate_fn,
     dechunk_dataset,
     emb_pairs_to_dict,
-    load_dicts,
     read_datasets,
     read_morphlex,
     read_pretrained_word_embeddings,
     wemb_str_to_emb_pair,
 )
-from pos.data.constants import PAD, Modules
 from pos.model import (
     CharacterAsWordEmbedding,
     CharacterDecoder,
@@ -360,16 +357,15 @@ def train_and_tag(**kwargs):
     else:
         train_ds = unchunked_train_ds
         test_ds = unchunked_test_ds
-
     # Train a model
     print_model(model)
     model.to(core.device)
 
     train_dl = DataLoader(
-        train_ds, collate_fn=collate_fn, shuffle=True, batch_size=kwargs["batch_size"]  # type: ignore
+        train_ds, collate_fn=train_ds.collate_fn, shuffle=True, batch_size=kwargs["batch_size"]  # type: ignore
     )
     test_dl = DataLoader(
-        test_ds, collate_fn=collate_fn, shuffle=False, batch_size=kwargs["batch_size"] * 10  # type: ignore
+        test_ds, collate_fn=train_ds.collate_fn, shuffle=False, batch_size=kwargs["batch_size"] * 10  # type: ignore
     )
     criterion = get_criterion(decoders=model.decoders, label_smoothing=kwargs["label_smoothing"])  # type: ignore
     optimizer = get_optimizer(model.parameters(), kwargs["optimizer"], kwargs["learning_rate"])

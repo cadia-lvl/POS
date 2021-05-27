@@ -17,11 +17,11 @@ from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
+from pos.constants import Modules
 from pos.model.interface import EncodersDecoders
 
 from .core import Fields, Sentences
 from .data import BATCH_KEYS, PAD_ID
-from .data.constants import Modules
 from .model import Decoder
 
 log = logging.getLogger(__name__)

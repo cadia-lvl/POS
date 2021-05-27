@@ -1,7 +1,7 @@
 """To test parts of the model."""
 import torch
+from pos.constants import Modules
 from pos.core import Dicts
-from pos.data.constants import Modules
 from pos.model import (
     CharacterAsWordEmbedding,
     CharacterDecoder,

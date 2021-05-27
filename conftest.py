@@ -8,9 +8,9 @@ from torch.utils.data.dataloader import DataLoader
 import pos
 from pos import evaluate
 from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
+from pos.constants import Modules
 from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap
-from pos.data import collate_fn, load_dicts
-from pos.data.constants import Modules
+from pos.data import load_dicts
 from pos.model import CharacterDecoder, ClassicWordEmbedding, EncodersDecoders, Tagger
 from pos.model.embeddings import CharacterAsWordEmbedding, CharacterEmbedding
 from pos.model.interface import Decoder
@@ -52,12 +52,6 @@ def test_tsv_untagged_file():
 
 
 @fixture()
-def test_tsv_file():
-    """Return the filepath of the test tsv file."""
-    return "./tests/test.tsv"
-
-
-@fixture()
 def tagged_test_tsv_file():
     """Return the filepath of the test tsv file."""
     return "./tests/test_pred.tsv"
@@ -70,21 +64,15 @@ def test_tsv_lemma_file():
 
 
 @fixture
-def ds(test_tsv_file):
-    """Return a sequence tagged dataset."""
-    return FieldedDataset.from_file(test_tsv_file, fields=(Fields.Tokens, Fields.GoldTags))
-
-
-@fixture
-def ds_lemma(test_tsv_lemma_file):
+def ds(test_tsv_lemma_file):
     """Return a sequence tagged dataset."""
     return FieldedDataset.from_file(test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
 
 
 @fixture
-def vocab_maps(ds_lemma) -> Dict[Dicts, VocabMap]:
+def vocab_maps(ds) -> Dict[Dicts, VocabMap]:
     """Return the dictionaries for the dataset."""
-    return load_dicts(ds_lemma)[1]
+    return load_dicts(ds)[1]
 
 
 @fixture
@@ -113,9 +101,9 @@ def kwargs():
 
 
 @fixture()
-def data_loader(ds_lemma, kwargs):
+def data_loader(ds, kwargs):
     """Return a data loader over the unit testing data."""
-    return DataLoader(ds_lemma, batch_size=kwargs["batch_size"], collate_fn=collate_fn)  # type: ignore
+    return DataLoader(ds, batch_size=kwargs["batch_size"], collate_fn=ds.collate_fn)  # type: ignore
 
 
 @fixture
@@ -192,11 +180,11 @@ def abl_tagger(encoders, decoders) -> EncodersDecoders:
 
 
 @fixture
-def tagger_evaluator(ds_lemma):
+def tagger_evaluator(ds):
     """Return a tagger evaluator."""
     return evaluate.TaggingEvaluation(
-        test_dataset=ds_lemma,
-        train_vocab=ds_lemma.get_vocab(),
+        test_dataset=ds,
+        train_vocab=ds.get_vocab(),
         external_vocabs=evaluate.ExternalVocabularies(
             morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
             pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
@@ -205,10 +193,10 @@ def tagger_evaluator(ds_lemma):
 
 
 @fixture
-def lemma_evaluator(ds_lemma):
+def lemma_evaluator(ds):
     """Return a lemma evaluator."""
     return evaluate.LemmatizationEvaluation(
-        test_dataset=ds_lemma,
-        train_vocab=ds_lemma.get_vocab(),
-        train_lemmas=Vocab.from_symbols(ds_lemma.get_field(Fields.GoldLemmas)),
+        test_dataset=ds,
+        train_vocab=ds.get_vocab(),
+        train_lemmas=Vocab.from_symbols(ds.get_field(Fields.GoldLemmas)),
     ).lemma_accuracy

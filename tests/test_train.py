@@ -1,6 +1,6 @@
 import pathlib
 
-from pos.data.constants import Modules
+from pos.constants import Modules
 from pos.model.interface import EncodersDecoders
 from pos.train import get_criterion, get_optimizer, get_scheduler, run_epochs, tag_data_loader
 

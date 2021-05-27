@@ -6,9 +6,9 @@ import torch
 from torch.utils.data import DataLoader
 
 import pos.core as core
+from pos.constants import Modules
 from pos.core import FieldedDataset, Fields, Sentence, Sentences, set_device
-from pos.data import chunk_dataset, collate_fn, dechunk_dataset
-from pos.data.constants import Modules
+from pos.data import chunk_dataset, dechunk_dataset
 from pos.model import EncodersDecoders
 from pos.train import tag_data_loader
 
@@ -65,7 +65,7 @@ class Tagger:
         # The dict needs to be loaded based on some files
         dl = DataLoader(
             chunked_ds,
-            collate_fn=collate_fn,  # type: ignore
+            collate_fn=ds.collate_fn,  # type: ignore
             shuffle=False,
             batch_size=batch_size,
         )
@@ -137,7 +137,7 @@ class Lemmatizer:
         # The dict needs to be loaded based on some files
         dl = DataLoader(
             ds,
-            collate_fn=collate_fn,  # type: ignore
+            collate_fn=ds.collate_fn,  # type: ignore
             shuffle=False,
             batch_size=batch_size,
         )
