@@ -15,8 +15,8 @@ from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
 from pos import bin_to_ifd, core, evaluate
-from pos.api import Tagger as api_tagger
-from pos.constants import PAD, Modules
+from pos.api import Tagger
+from pos.constants import Modules
 from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap, set_device, set_seed
 from pos.data import (
     bin_str_to_emb_pair,
@@ -28,17 +28,6 @@ from pos.data import (
     read_pretrained_word_embeddings,
     wemb_str_to_emb_pair,
 )
-from pos.model import (
-    CharacterAsWordEmbedding,
-    CharacterDecoder,
-    ClassicWordEmbedding,
-    Decoder,
-    Encoder,
-    EncodersDecoders,
-    Tagger,
-    TransformerEmbedding,
-)
-from pos.model.embeddings import CharacterEmbedding
 from pos.model.utils import build_model
 from pos.train import (
     MODULE_TO_FIELD,
@@ -376,32 +365,79 @@ def write_hyperparameters(path, hyperparameters):
 
 
 @cli.command()
-@click.argument("model_file")
 @click.argument("data_in", type=str)
 @click.argument("output", type=str)
-@click.option("--device", default="cpu", help="The device to use, 'cpu' or 'cuda:0' for GPU.")
+@click.option("--device", default="cpu", help="The device to use, 'cpu' or 'cuda' for GPU.")
 @click.option(
     "--batch_size",
     default=16,
     help="The number of sentences to process at once. Works best to have this high for a GPU.",
 )
-def tag(model_file, data_in, output, device, batch_size):
-    """Tag tokens in a file.
+def pos_large(data_in, output, device, batch_size):
+    """PoS tag tokens in a file with a large model.
 
     Args:
-        model_file: A filepath to a trained model.
         data_in: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
         output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
-        device: cpu or gpu:0
-        contains_tags: A flag. Set it if the data_in already contains tags.
+        device: cpu or cuda
     """
-    model: Tagger = torch.hub.load(repo_or_dir="cadia-lvl/POS:hubconf", model="pos-small")
-    tags = model.tag_sent(("Þetta", "er", "prófun."))
-    tagger = api_tagger(model_file=model_file, device=device)
+    model: Tagger = torch.hub.load(repo_or_dir="cadia-lvl/POS:hubconf", model="pos-large")
+    run_model(model, data_in, output, batch_size, Fields.Tags)
+
+
+@cli.command()
+@click.argument("data_in", type=str)
+@click.argument("output", type=str)
+@click.option("--device", default="cpu", help="The device to use, 'cpu' or 'cuda' for GPU.")
+@click.option(
+    "--batch_size",
+    default=16,
+    help="The number of sentences to process at once. Works best to have this high for a GPU.",
+)
+def pos(data_in, output, device, batch_size):
+    """PoS tag tokens in a file.
+
+    Args:
+        data_in: A filepath of a file formatted as: token per line, sentences separated with newlines (empty line).
+        output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
+        device: cpu or cuda
+    """
+    model: Tagger = torch.hub.load(repo_or_dir="cadia-lvl/POS:hubconf", model="pos")
+    run_model(model, data_in, output, batch_size, Fields.Tags)
+
+
+@cli.command()
+@click.argument("data_in", type=str)
+@click.argument("output", type=str)
+@click.option("--device", default="cpu", help="The device to use, 'cpu' or 'cuda' for GPU.")
+@click.option(
+    "--batch_size",
+    default=16,
+    help="The number of sentences to process at once. Works best to have this high for a GPU.",
+)
+def lemma(data_in, output, device, batch_size):
+    """Lemma using tokens and PoS tags in a file.
+
+    Args:
+        data_in: A filepath of a file formatted as: token TAB PoS-tag per line, sentences separated with newlines (empty line).
+        output: A filepath. Output is formatted like the input, but after each token TAB PoS-tag there is a tab and then the lemma.
+        device: cpu or cuda
+    """
+    model: Tagger = torch.hub.load(repo_or_dir="cadia-lvl/POS:hubconf", model="lemma")
     log.info("Reading dataset")
     ds = FieldedDataset.from_file(data_in)
-    predicted_tags = tagger.tag_bulk(dataset=ds, batch_size=batch_size)
-    ds = ds.add_field(predicted_tags, Fields.Tags)
+    predicted_tags = model.lemma_bulk(dataset=ds, batch_size=batch_size)
+    ds = ds.add_field(predicted_tags, Fields.Lemmas)
+    log.info("Writing results")
+    ds.to_tsv_file(output)
+    log.info("Done!")
+
+
+def run_model(model, data_in, output, batch_size, field):
+    log.info("Reading dataset")
+    ds = FieldedDataset.from_file(data_in)
+    predicted_tags = model.tag_bulk(dataset=ds, batch_size=batch_size)
+    ds = ds.add_field(predicted_tags, field)
     log.info("Writing results")
     ds.to_tsv_file(output)
     log.info("Done!")

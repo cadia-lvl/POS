@@ -1,5 +1,6 @@
 from typing import Dict
 
+import torch
 from pos import core
 from pos.constants import PAD, Modules
 from pos.core import Dicts
@@ -10,14 +11,20 @@ from pos.model.embeddings import (
     ClassicWordEmbedding,
     TransformerEmbedding,
 )
-
-from .interface import Decoder, Encoder, EncodersDecoders
+from pos.model.interface import Decoder, Encoder, EncodersDecoders
 
 
 def build_model(kwargs, dicts) -> EncodersDecoders:
     embs: Dict[str, Encoder] = {}
     if kwargs["bert_encoder"]:
-        emb = TransformerEmbedding(Modules.BERT, kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"])
+        path = kwargs["bert_encoder"]
+        load_state_dict = True
+        if "trained" in kwargs:
+            path = kwargs["trained"]
+            load_state_dict = False
+        emb = TransformerEmbedding(Modules.BERT, path=path, dropout=kwargs["emb_dropouts"])
+        if load_state_dict:
+            emb.load_state_dict(torch.load(f'{kwargs["bert_encoder"]}/pytorch_model.bin', map_location="cpu"))
         embs[emb.key] = emb
 
     # if kwargs["morphlex_embeddings_file"]:

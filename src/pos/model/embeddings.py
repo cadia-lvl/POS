@@ -8,7 +8,8 @@ from pos.constants import BATCH_KEYS
 from pos.data import get_initial_token_mask, map_to_index
 from pos.data.batch import map_to_chars_batch
 from torch import nn
-from transformers import AutoConfig, AutoModel, AutoTokenizer, PreTrainedTokenizerFast
+from transformers import AutoTokenizer, PreTrainedTokenizerFast
+from transformers.models.electra import ElectraConfig, ElectraModel
 
 from . import interface
 
@@ -162,16 +163,16 @@ class CharacterAsWordEmbedding(interface.Encoder):
 class TransformerEmbedding(interface.Encoder):
     """An embedding of a sentence after going through a Transformer."""
 
-    def __init__(self, key: str, model_path: str, dropout=0.0):
+    def __init__(self, key: str, path: str, dropout=0.0):
         """Initialize it be reading the config, model and tokenizer."""
         super().__init__(key)
-        self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
-        self.model = AutoModel.from_pretrained(model_path, config=self.config)
+        self.config = ElectraConfig.from_pretrained(path, output_hidden_states=True)
+        self.model = ElectraModel(self.config)
         self.add_prefix_space = False
-        if "roberta" in str(self.model.__class__).lower():  # type: ignore
+        if "roberta" in str(self.config.__class__).lower():  # type: ignore
             log.debug("Using prefix space")
             self.add_prefix_space = True
-        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_path, add_prefix_space=self.add_prefix_space)  # type: ignore
+        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(path, add_prefix_space=self.add_prefix_space)  # type: ignore
         # ELECTRA property
         self.num_layers = self.config.num_hidden_layers  # type: ignore
         self.hidden_dim = self.config.hidden_size  # type: ignore
