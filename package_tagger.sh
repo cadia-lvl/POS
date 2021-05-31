@@ -1,13 +1,13 @@
 #!/bin/bash
 FILE_NAME=$1
 MODEL_DIR=$2
-zip $FILE_NAME \
-    $MODEL_DIR/config.json \
-    $MODEL_DIR/dictionaries.pickle \
-    $MODEL_DIR/hyperparamters.json \
-    $MODEL_DIR/known_lemmas.txt \
-    $MODEL_DIR/known_toks.txt \
-    $MODEL_DIR/special_tokens_map.json \
-    $MODEL_DIR/tagger.pt \
-    $MODEL_DIR/tokenizer_config.json \
-    $MODEL_DIR/vocab.txt
+tar czf $FILE_NAME -C $MODEL_DIR \
+    config.json \
+    dictionaries.pickle \
+    hyperparamters.json \
+    known_lemmas.txt \
+    known_toks.txt \
+    special_tokens_map.json \
+    tagger.pt \
+    tokenizer_config.json \
+    vocab.txt

@@ -172,7 +172,7 @@ class TransformerEmbedding(interface.Encoder):
         if "roberta" in str(self.config.__class__).lower():  # type: ignore
             log.debug("Using prefix space")
             self.add_prefix_space = True
-        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(path, add_prefix_space=self.add_prefix_space)  # type: ignore
+        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(path, add_prefix_space=self.add_prefix_space, config=self.config)  # type: ignore
         # ELECTRA property
         self.num_layers = self.config.num_hidden_layers  # type: ignore
         self.hidden_dim = self.config.hidden_size  # type: ignore
