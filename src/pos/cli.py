@@ -39,6 +39,7 @@ from pos.model import (
     TransformerEmbedding,
 )
 from pos.model.embeddings import CharacterEmbedding
+from pos.model.utils import build_model
 from pos.train import (
     MODULE_TO_FIELD,
     get_criterion,
@@ -180,7 +181,7 @@ def prepare_bin_lemma_data(sh_snid, output):
             # fjölyrtar segðir
             if mim_mark is None:
                 continue
-            bin_data.append((orðmynd, mim_mark, lemma))
+            bin_data.append((orðmynd, lemma, mim_mark))
     random.shuffle(bin_data)
     with open(output, "w") as f:
         for idx, values in enumerate(bin_data):
@@ -202,91 +203,12 @@ def build_dictionaries(kwargs):
     return dictionaries
 
 
-def build_model(kwargs, dicts) -> EncodersDecoders:
-    embs: Dict[str, Encoder] = {}
-    if kwargs["bert_encoder"]:
-        emb = TransformerEmbedding(Modules.BERT, kwargs["bert_encoder"], dropout=kwargs["emb_dropouts"])
-        embs[emb.key] = emb
-
-    # if kwargs["morphlex_embeddings_file"]:
-    #     embs[Modules.MorphLex] = PretrainedEmbedding(
-    #         vocab_map=dicts[Dicts.MorphLex],
-    #         embeddings=embeddings[Dicts.MorphLex],
-    #         freeze=kwargs["morphlex_freeze"],
-    #         dropout=kwargs["emb_dropouts"],
-    #     )
-    # if kwargs["pretrained_word_embeddings_file"]:
-    #     embs[Modules.Pretrained] = PretrainedEmbedding(
-    #         vocab_map=dicts[Dicts.Pretrained],
-    #         embeddings=embeddings[Dicts.Pretrained],
-    #         freeze=True,
-    #         dropout=kwargs["emb_dropouts"],
-    #     )
-    if kwargs["word_embedding_dim"]:
-        embs[Modules.Trained] = ClassicWordEmbedding(
-            Modules.Trained,
-            dicts[Dicts.Tokens],
-            kwargs["word_embedding_dim"],
-            dropout=kwargs["emb_dropouts"],
-        )
-    decoders: Dict[str, Decoder] = {}
-    if kwargs["tagger"]:
-        log.info("Training Tagger")
-        decoders[Modules.Tagger] = Tagger(
-            key=Modules.Tagger,
-            vocab_map=dicts[Dicts.FullTag],
-            # TODO: Fix so that we define the Encoder the Tagger accepts
-            encoder=embs[Modules.BERT],
-            weight=kwargs["tagger_weight"],
-        )
-    if kwargs["lemmatizer"]:
-        character_embedding = CharacterEmbedding(
-            Modules.Characters,
-            dicts[Dicts.Chars],
-            embedding_dim=kwargs["char_emb_dim"],
-            dropout=kwargs["emb_dropouts"],
-        )
-        embs[Modules.Characters] = character_embedding
-        char_as_word = CharacterAsWordEmbedding(
-            Modules.CharactersToTokens,
-            character_embedding=character_embedding,
-            char_lstm_layers=kwargs["char_lstm_layers"],
-            char_lstm_dim=kwargs["char_lstm_dim"],
-            dropout=kwargs["emb_dropouts"],
-        )
-        embs[Modules.CharactersToTokens] = char_as_word
-        tag_embedding = ClassicWordEmbedding(
-            key=Modules.TagEmbedding,
-            vocab_map=dicts[Dicts.FullTag],
-            embedding_dim=kwargs["tag_embedding_dim"],
-            padding_idx=dicts[Dicts.FullTag].w2i[PAD],
-            dropout=kwargs["emb_dropouts"],
-        )
-        embs[Modules.TagEmbedding] = tag_embedding
-        log.info("Training Lemmatizer")
-        char_decoder = CharacterDecoder(
-            key=Modules.Lemmatizer,
-            tag_encoder=tag_embedding,
-            characters_to_tokens_encoder=char_as_word,
-            characters_encoder=character_embedding,
-            vocab_map=dicts[Dicts.Chars],
-            hidden_dim=kwargs["lemmatizer_hidden_dim"],
-            char_rnn_input_dim=0 if not kwargs["lemmatizer_accept_char_rnn_last"] else char_as_word.output_dim,
-            attention_dim=char_as_word.output_dim,
-            char_attention=kwargs["lemmatizer_char_attention"],
-            num_layers=kwargs["lemmatizer_num_layers"],
-            dropout=kwargs["emb_dropouts"],
-        )
-        decoders[Modules.Lemmatizer] = char_decoder
-    model = EncodersDecoders(encoders=embs, decoders=decoders).to(core.device)
-    return model
-
-
 # fmt: off
 @cli.command()
 @click.argument("training_files", nargs=-1)
 @click.argument("test_file")
 @click.argument("output_dir")
+@click.option("--adjust_lengths", default=0, help="Should we adjust the lengths of sequences to something specific?")
 @click.option("--gpu/--no_gpu", default=False)
 @click.option("--known_chars_file", default="./data/extra/characters_training.txt", help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
 @click.option("--known_tags_file", default="./data/extra/all_tags.txt", help="A file which contains the pos the model should know. File should be a single line, the line is split() to retrieve elements.",)
@@ -297,10 +219,9 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
 @click.option("--tagger_embedding", default="bert", help="The embedding to feed to the Tagger, see pos.model.Modules.")
 @click.option("--tagger_ignore_e_x/--no_tagger_ignore_e_x", is_flag=True, default=True)
 @click.option("--lemmatizer/--no_lemmatizer", is_flag=True, default=False, help="Train lemmatizer")
-@click.option("--lemmatizer_weight", default=0.1, help="Value to multiply lemmatizer loss")
+@click.option("--lemmatizer_weight", default=1.0, help="Value to multiply lemmatizer loss")
 @click.option("--lemmatizer_accept_char_rnn_last/--no_lemmatizer_accept_char_rnn_last", default=False, help="Should the Character RNN last hidden state be input to Lemmatizer")
 @click.option("--lemmatizer_hidden_dim", default=128, help="The hidden dim of the decoder RNN.")
-@click.option("--lemmatizer_char_dim", default=64, help="The character embedding dim.")
 @click.option("--lemmatizer_num_layers", default=1, help="The number of layers in Lemmatizer RNN.")
 @click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
 @click.option("--lemmatizer_state_dict", default=None, help="The lemmatizer state_dict to continue training from.")
@@ -345,7 +266,13 @@ def train_and_tag(**kwargs):
 
     dicts = build_dictionaries(kwargs)
     model = build_model(kwargs=kwargs, dicts=dicts)
-    if Modules.BERT in model.encoders.keys():
+    if kwargs["adjust_lengths"]:
+        log.info("Adjusting lengths")
+        lengths = tuple(1 for _ in range(sum(unchunked_train_ds.get_lengths())))
+        train_ds = unchunked_train_ds.adjust_lengths(lengths, shorten=True)
+        lengths = tuple(1 for _ in range(sum(unchunked_test_ds.get_lengths())))
+        test_ds = unchunked_test_ds.adjust_lengths(lengths, shorten=True)
+    elif Modules.BERT in model.encoders.keys():
         # TODO: Load tokenizer independently and set it to the encoder.
         tok: PreTrainedTokenizerFast = model.encoders[Modules.BERT].tokenizer  # type: ignore
         max_length = model.encoders[Modules.BERT].max_length
@@ -390,6 +317,23 @@ def train_and_tag(**kwargs):
     output_dir = pathlib.Path(kwargs["output_dir"])
     write_hyperparameters(output_dir / "hyperparamters.json", (kwargs))
 
+    # Write other stuff for the model
+    with output_dir.joinpath("known_toks.txt").open("w+") as f:
+        for token in Vocab.from_symbols(train_ds.get_field(Fields.Tokens)):
+            f.write(f"{token}\n")
+    if Fields.GoldLemmas in train_ds.fields:
+        with output_dir.joinpath("known_lemmas.txt").open("w+") as f:
+            for lemma in Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)):
+                f.write(f"{lemma}\n")
+    if kwargs["bert_encoder"]:
+        write_bert_config(pathlib.Path(kwargs["bert_encoder"]), output_dir)
+    if kwargs["save_vocab"]:
+        save_location = output_dir.joinpath("dictionaries.pickle")
+        with save_location.open("wb+") as f:
+            pickle.dump(dicts, f)
+    if kwargs["save_model"]:
+        save_location = output_dir.joinpath("model.pt")
+        torch.save(model.state_dict(), str(save_location))
     # Start the training
     run_epochs(
         model=model,
@@ -415,22 +359,6 @@ def train_and_tag(**kwargs):
 
     test_ds.to_tsv_file(str(output_dir / "predictions.tsv"))
 
-    with output_dir.joinpath("known_toks.txt").open("w+") as f:
-        for token in Vocab.from_symbols(train_ds.get_field(Fields.Tokens)):
-            f.write(f"{token}\n")
-    if Fields.GoldLemmas in train_ds.fields:
-        with output_dir.joinpath("known_lemmas.txt").open("w+") as f:
-            for lemma in Vocab.from_symbols(train_ds.get_field(Fields.GoldLemmas)):
-                f.write(f"{lemma}\n")
-    if kwargs["bert_encoder"]:
-        write_bert_config(pathlib.Path(kwargs["bert_encoder"]), output_dir)
-    if kwargs["save_vocab"]:
-        save_location = output_dir.joinpath("dictionaries.pickle")
-        with save_location.open("wb+") as f:
-            pickle.dump(dicts, f)
-    if kwargs["save_model"]:
-        save_location = output_dir.joinpath("tagger.pt")
-        torch.save(model.state_dict(), str(save_location))
     log.info("Done!")
 
 
@@ -467,6 +395,8 @@ def tag(model_file, data_in, output, device, batch_size):
         device: cpu or gpu:0
         contains_tags: A flag. Set it if the data_in already contains tags.
     """
+    model: Tagger = torch.hub.load(repo_or_dir="cadia-lvl/POS:hubconf", model="pos-small")
+    tags = model.tag_sent(("Þetta", "er", "prófun."))
     tagger = api_tagger(model_file=model_file, device=device)
     log.info("Reading dataset")
     ds = FieldedDataset.from_file(data_in)

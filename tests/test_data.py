@@ -198,6 +198,12 @@ def test_collate_fn(ds):
         ]
 
 
+def test_adjust_lens(ds: FieldedDataset):
+    lengths = tuple(1 for _ in range(sum(ds.get_lengths())))
+    ds = ds.adjust_lengths(lengths, shorten=True)
+    assert ds.get_lengths() == lengths
+
+
 def test_tokenizer_preprocessing_and_postprocessing(ds: FieldedDataset, electra_model):
     assert len(ds.fields) == len(ds.data)  # sanity check
     assert len(ds) == 3

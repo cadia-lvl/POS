@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Callable, Dict, Tuple
 
+import torch
 from torch import Tensor, log_softmax, no_grad, numel, stack, zeros_like
 from torch.nn import CrossEntropyLoss, Module
 from torch.nn.utils import clip_grad_norm_
@@ -233,6 +234,9 @@ def run_epochs(
             scheduler.step(sum((loss for loss in val_losses.values())))
         else:
             scheduler.step()
+        save_location = output_dir.joinpath(f"model_{epoch}.pt")
+        torch.save(model.state_dict(), str(save_location))
+
     # model.load_state_dict(torch.load('model.pt'))
 
 
