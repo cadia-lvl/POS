@@ -2,7 +2,7 @@
 The goal of this project is to create a combined part-of-speech tagger and lemmatizer for Icelandic using the revised fine-grained tagging schema for Icelandic.
 For further information about the schema see [MIM-Gold on CLARIN-IS](https://repository.clarin.is/repository/xmlui/handle/20.500.12537/40) (the description pdf).
 
-This work is based on the ABLTagger (in [References](#references)) but with considerable model modifications and runs on Python 3.8, PyTorch 1.7.0 and [transformers 4.1.1](https://github.com/huggingface/transformers).
+This work is based on the ABLTagger (in [References](#references)) but with considerable model modifications and runs on Python 3.8, PyTorch 1.7.0+ and [transformers 4.1.1+](https://github.com/huggingface/transformers).
 
 # Table of Contents
 - [Versions](#versions)
@@ -32,18 +32,38 @@ See [releases](https://github.com/cadia-lvl/POS/releases)
 To use a pretrained model follow the instructions below.
 
 ```
-# Using v2.0.4 - consider using the latest version: [releases](https://github.com/cadia-lvl/POS/releases)
-pip install git+https://github.com/cadia-lvl/POS.git@v2.0.4
-# Download the model
-wget https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/98/tagger-v2.0.0.pt
+# Using v3.0.0 - consider using the latest version: [releases](https://github.com/cadia-lvl/POS/releases)
+pip install git+https://github.com/cadia-lvl/POS.git@v3.0.0
+```
+The models will be downloaded automatically when needed. The models are stored in `~/.cache/torch/hub`, for more information see [Torch hub documentation](https://pytorch.org/docs/stable/hub.html)
+
+Instructions for further development can be found in [Contributing](#Contributing).
+
+# Running the models
+The models expect input to be tokenized and a tokenizer is not bundled with this package. We reccomend [tokenizer](https://github.com/mideind/Tokenizer) version 2.0+.
+
+There are three pretrained models available.
+- A small PoS tagger
+- A large PoS tagger
+- A lemmatizer
+
+## PoS small
+```
+pos tag-small example.txt example_tagged.txt
+```
+
+This model takes about 60MB of disk space. It processes ~14.000 toks/sec on GPU and ... on CPU. It has around ~96.7% accuracy (on MIM-Gold).
+
+It is meant to be smaller but considerably faster than the larger alternative.
+
 # Test the installation
 pos tag path/to/tagger-v2.0.0.pt example.txt example_tagged.txt
 ```
-The tagger expects input to be tokenized and a tokenizer is not bundled with this package. We reccomend [tokenizer](https://github.com/mideind/Tokenizer) version 2.0+.
 
-A docker container with the an in-built model is also provided, see [Docker](#docker).
 
-Instructions for further development can be found in [Contributing](#Contributing).
+
+## Lemmatizer
+~7.600 toks/sec on GPU.
 
 ## Command line usage
 Note that the input and output should be paths (i.e. not stdin or stdout).

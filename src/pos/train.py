@@ -3,89 +3,38 @@
 During training this module handles:
 - Logging and monitoring.
 - Epochs (iterations) and evaluation.
-- Schedulers and optimizers. 
+- Schedulers and optimizers.
 """
 import logging
 from collections import defaultdict
 from datetime import datetime
-from functools import partial
-from math import inf
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Tuple
 
-from torch import Tensor, cat, log_softmax, no_grad, numel, stack, zeros_like
+import torch
+from torch import Tensor, log_softmax, no_grad, numel, stack, zeros_like
 from torch.nn import CrossEntropyLoss, Module
 from torch.nn.utils import clip_grad_norm_
-from torch.optim import SGD, Adam, Optimizer, SparseAdam
+from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
+from pos.constants import Modules
+from pos.model.interface import EncodersDecoders
+
 from .core import Fields, Sentences
 from .data import BATCH_KEYS, PAD_ID
-from .model import ABLTagger, Decoder, Modules
+from .model import Decoder
 
 log = logging.getLogger(__name__)
 
-MODULE_TO_BATCHKEY = {
-    Modules.Lemmatizer: BATCH_KEYS.TARGET_LEMMAS,
-    Modules.Tagger: BATCH_KEYS.TARGET_FULL_TAGS,
+MODULE_TO_TARGET = {
+    Modules.Lemmatizer: BATCH_KEYS.LEMMA_CHAR_IDS,
+    Modules.Tagger: BATCH_KEYS.FULL_TAGS_IDS,
 }
 MODULE_TO_FIELD = {
     Modules.Lemmatizer: Fields.Lemmas,
     Modules.Tagger: Fields.Tags,
 }
-
-
-def get_parameter_groups(model: Module) -> List[Dict]:
-    """Return the parameters groups with differing learning rates."""
-    sparse_name = "sparse_embedding"
-    params = [
-        {
-            "params": list(
-                param
-                for name, param in filter(
-                    lambda kv: sparse_name not in kv[0],
-                    model.named_parameters(),
-                )
-            ),
-        },
-        {
-            "params": list(
-                param
-                for name, param in filter(
-                    lambda kv: sparse_name in kv[0],
-                    model.named_parameters(),
-                )
-            ),
-            "sparse": True,
-        },
-    ]
-    return params
-
-
-class CombinedAdamOptimzer(Optimizer):
-    """An optimzer which combines Adam and SparseAdam based on layer name (sparse_embedding)."""
-
-    def __init__(self, params, lr) -> None:
-        """Initialize."""
-        super().__init__(params, {"lr": lr})
-        self.optimizers: List[Optimizer] = []
-        for group in params:
-            if "sparse" in group:
-                self.optimizers.append(SparseAdam([group], lr=lr))
-            else:
-                self.optimizers.append(Adam([group], lr=lr))
-
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
-        """Take a step."""
-        result = None
-        for optimzer in self.optimizers:
-            res = optimzer.step(closure=closure)
-            if res is not None:
-                if result is None:
-                    result = res
-                else:
-                    result += res
-        return result
 
 
 def get_optimizer(parameters, optimizer, lr):
@@ -94,7 +43,7 @@ def get_optimizer(parameters, optimizer, lr):
     if optimizer == "sgd":
         return SGD(parameters, lr=lr)
     elif optimizer == "adam":
-        return CombinedAdamOptimzer(parameters, lr=lr)
+        return Adam(parameters, lr=lr)
     else:
         raise ValueError("Unknown optimizer")
 
@@ -106,18 +55,16 @@ def _cross_entropy(label_smoothing):
     return smooth_ce_loss
 
 
-def get_criterion(
-    decoders: Dict[Modules, Decoder], label_smoothing=0.0
-) -> Callable[[Modules, Tensor, Dict[BATCH_KEYS, Any]], Tensor]:
+def get_criterion(decoders: Dict[str, Decoder], label_smoothing=0.0) -> Callable[[str, Tensor, Dict[str, Any]], Tensor]:
     """Return the criterion to use based on options."""
     loss = _cross_entropy(label_smoothing)
 
-    def weight_loss(key: Modules, pred: Tensor, batch):
+    def weight_loss(key: str, pred: Tensor, batch: Dict[str, Any]):
         """Combine the losses with their corresponding weights."""
         return (
             loss(
                 pred.reshape((-1, pred.shape[-1])),
-                batch[MODULE_TO_BATCHKEY[key]].to(pred.device).view((-1)),
+                batch[MODULE_TO_TARGET[key]].to(pred.device).view((-1)),
             )
             * decoders[key].weight
         )
@@ -146,7 +93,7 @@ def get_scheduler(torch_optimizer, scheduler):
         raise ValueError("Unknown scheduler")
 
 
-def print_tagger(tagger: Module):
+def print_model(tagger: Module):
     """Print all information about the model."""
     log.info(tagger)
     for name, tensor in tagger.state_dict().items():
@@ -156,11 +103,11 @@ def print_tagger(tagger: Module):
 
 
 def run_batch(
-    model: Module,
-    batch: Dict[BATCH_KEYS, Any],
-    criterion: Callable[[Modules, Tensor, Dict[BATCH_KEYS, Any]], Tensor] = None,
+    model: EncodersDecoders,
+    batch: Dict[str, Any],
+    criterion: Callable[[str, Tensor, Dict[str, Any]], Tensor] = None,
     optimizer=None,
-) -> Tuple[Dict[Modules, Tensor], Dict[Modules, float]]:
+) -> Tuple[Dict[str, Tensor], Dict[str, float]]:
     """Run a batch through the model.
 
     If criterion is given, it will be applied and returned (as float).
@@ -169,7 +116,7 @@ def run_batch(
     if optimizer is not None:
         optimizer.zero_grad()
 
-    preds: Dict[Modules, Tensor] = model(batch)
+    preds: Dict[str, Any] = model(batch)
     # (b, seq, features)
     losses = {
         # (b*s, c, f)
@@ -185,28 +132,25 @@ def run_batch(
 
 
 def tag_batch(
-    model: Module,
-    batch: Dict[BATCH_KEYS, Any],
+    model: EncodersDecoders,
+    batch: Dict[str, Any],
     criterion=None,
     optimizer=None,
-) -> Tuple[Dict[Modules, float], Dict[Modules, Sentences]]:
+) -> Tuple[Dict[str, float], Dict[str, Sentences]]:
     """Tag (apply POS) on a given data set."""
     preds, losses = run_batch(model, batch, criterion, optimizer)
-    preds = {
-        key: model.__getattr__(key.value).postprocess(preds, batch[BATCH_KEYS.LENGTHS])  # type: ignore
-        for key, preds in preds.items()
-    }
+    preds = {key: model.decoders[key].postprocess(batch) for key in preds.keys()}  # type: ignore
     return losses, preds  # type: ignore
 
 
 def tag_data_loader(
-    model: Module,
+    model: EncodersDecoders,
     data_loader: DataLoader,
     criterion=None,
-) -> Tuple[Dict[Modules, float], Dict[Modules, Sentences]]:
+) -> Tuple[Dict[str, float], Dict[str, Sentences]]:
     """Tag (apply POS) on a given data set. Sets the model to evaluation mode."""
-    total_values = defaultdict(tuple)
-    total_losses = defaultdict(float)
+    total_values: Dict[str, Sentences] = defaultdict(tuple)
+    total_losses: Dict[str, float] = defaultdict(float)
     total_tokens = 0
     model.eval()
     with no_grad():
@@ -224,23 +168,23 @@ def tag_data_loader(
 
 
 def train_model(
-    model,
+    model: EncodersDecoders,
     optimizer,
     criterion,
     data_loader: DataLoader,
     log_prepend: str,
-) -> Dict[Modules, float]:
+) -> Dict[str, float]:
     """Run a single training epoch and evaluate the model."""
     model.train()
 
-    epoch_losses = defaultdict(float)
+    epoch_losses: Dict[str, float] = defaultdict(float)
     for i, batch in enumerate(data_loader, start=1):
         preds, losses = run_batch(model, batch, criterion, optimizer)
         for module_name, loss in losses.items():
             epoch_losses[module_name] += loss
         if i % 10 == 0:
-            for module_name, preds, loss in zip(preds.keys(), preds.values(), losses.values()):
-                acc = categorical_accuracy(preds, batch[MODULE_TO_BATCHKEY[module_name]].to(preds.device))
+            for module_name, pred, loss in zip(preds.keys(), preds.values(), losses.values()):
+                acc = categorical_accuracy(pred, batch[MODULE_TO_TARGET[module_name]].to(pred.device))
                 log.info(
                     f"{log_prepend}batch={i}/{len(data_loader)}, module_name={module_name} acc={acc}, loss={loss:.4f}"
                 )
@@ -248,11 +192,11 @@ def train_model(
 
 
 def run_epochs(
-    model: Module,
+    model: EncodersDecoders,
     optimizer,
     criterion,
     scheduler,
-    evaluators: Dict[Modules, Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]],
+    evaluators: Dict[str, Callable[[Sentences], Tuple[Dict[str, float], Dict[str, int]]]],
     train_data_loader: DataLoader,
     test_data_loader: DataLoader,
     epochs: int,
@@ -263,8 +207,6 @@ def run_epochs(
 
     writer = tensorboard.SummaryWriter(str(output_dir))
 
-    best_validation_loss = inf
-    # Get the tokens only
     for epoch in range(1, epochs + 1):
         # Time it
         start = datetime.now()
@@ -279,7 +221,6 @@ def run_epochs(
         write_losses(writer, "Train", train_losses, epoch)
         end = datetime.now()
         log.info(f"Training took={end-start} seconds")
-        # We just run the validation using a larger batch size
         val_losses, val_preds = tag_data_loader(
             model,
             data_loader=test_data_loader,
@@ -293,6 +234,9 @@ def run_epochs(
             scheduler.step(sum((loss for loss in val_losses.values())))
         else:
             scheduler.step()
+        save_location = output_dir.joinpath(f"model_{epoch}.pt")
+        torch.save(model.state_dict(), str(save_location))
+
     # model.load_state_dict(torch.load('model.pt'))
 
 

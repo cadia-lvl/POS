@@ -1,7 +1,7 @@
 """An Icelandic POS tagger."""
 import logging
 
-from .api import Lemmatizer, Tagger
+from .api import Tagger
 from .core import FieldedDataset, Fields
 
 log = logging.getLogger(__name__)

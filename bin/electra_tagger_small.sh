@@ -29,10 +29,10 @@ train-and-tag \
 "$OUT_DIR" \
 --tagger \
 --tagger_embedding bert \
---bert_encoder ~/Resources/Models/LM/electra-base-is \
+--bert_encoder ~/Resources/Models/LM/electra-small-pytorch \
 --label_smoothing 0.1 \
---epochs 10 \
---batch_size 6 \
+--epochs 20 \
+--batch_size 16 \
 --optimizer adam \
 --learning_rate 5e-5 \
 $*

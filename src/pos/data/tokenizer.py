@@ -2,15 +2,6 @@
 
 from typing import List, Tuple
 
-from transformers import PreTrainedTokenizerFast
-
-
-def tok_space_added(tokenizer: PreTrainedTokenizerFast) -> bool:
-    """Return True if tokenizer is set to add_prefix_space."""
-    if hasattr(tokenizer, "add_prefix_space"):
-        return tokenizer.__getattribute__("add_prefix_space")
-    return False
-
 
 def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]], contains_bos_eos=True):
     """Return the inital token masks for subword tokens. Special tokens are not considered inital."""
