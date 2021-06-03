@@ -41,7 +41,7 @@ class Tagger:
             dicts = pickle.load(f)
         # Þetta mun klikka þegar það á að búa til transformer
         self.model: EncodersDecoders = build_model(kwargs=kwargs, dicts=dicts)
-        self.model.load_state_dict(torch.load(model_path / "tagger.pt", map_location=core.device))
+        self.model.load_state_dict(torch.load(model_path / "model.pt", map_location=core.device))
 
     def _infer(self, ds: FieldedDataset, batch_size=16) -> FieldedDataset:
         # If we have a BERT model, we need to chunk

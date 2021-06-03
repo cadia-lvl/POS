@@ -81,7 +81,7 @@ class CharacterDecoder(interface.Decoder):
         self.char_emb = nn.Embedding(
             num_embeddings=num_chars, embedding_dim=char_emb_dim, padding_idx=self.vocab_map.w2i[PAD]
         )
-        self.char_emb.weight = char_weights
+        # self.char_emb.weight = char_weights
         assert num_chars == len(vocab_map)
         # last character + sentence context + character attention
         rnn_in_dim = (
@@ -101,7 +101,7 @@ class CharacterDecoder(interface.Decoder):
         # Map directly to characters
 
         self.output_embedding = nn.Linear(char_emb_dim, num_chars)
-        self.output_embedding.weight = char_weights
+        # self.output_embedding.weight = char_weights
         if self.char_attention:
             self.attention = MultiplicativeAttention(
                 encoder_dim=self.attention_dim,

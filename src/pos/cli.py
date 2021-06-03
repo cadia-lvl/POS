@@ -368,12 +368,14 @@ def write_hyperparameters(path, hyperparameters):
 @click.argument("data_in", type=str)
 @click.argument("output", type=str)
 @click.option("--device", default="cpu", help="The device to use, 'cpu' or 'cuda' for GPU.")
+@click.option("--force_reload/--no_force_reload", is_flag=True, default=False)
+@click.option("--force_download/--no_force_download", is_flag=True, default=False)
 @click.option(
     "--batch_size",
     default=16,
     help="The number of sentences to process at once. Works best to have this high for a GPU.",
 )
-def pos_large(data_in, output, device, batch_size):
+def pos_large(data_in, output, device, batch_size, force_reload, force_download):
     """PoS tag tokens in a file with a large model.
 
     Args:
@@ -381,7 +383,13 @@ def pos_large(data_in, output, device, batch_size):
         output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
         device: cpu or cuda
     """
-    model: Tagger = torch.hub.load(repo_or_dir="cadia-lvl/POS:hubconf", model="pos-large")
+    model: Tagger = torch.hub.load(
+        repo_or_dir="cadia-lvl/POS:hubconf",
+        model="pos-large",
+        device=device,
+        force_reload=force_reload,
+        force_download=force_download,
+    )
     run_model(model, data_in, output, batch_size, Fields.Tags)
 
 
@@ -389,12 +397,14 @@ def pos_large(data_in, output, device, batch_size):
 @click.argument("data_in", type=str)
 @click.argument("output", type=str)
 @click.option("--device", default="cpu", help="The device to use, 'cpu' or 'cuda' for GPU.")
+@click.option("--force_reload/--no_force_reload", is_flag=True, default=False)
+@click.option("--force_download/--no_force_download", is_flag=True, default=False)
 @click.option(
     "--batch_size",
     default=16,
     help="The number of sentences to process at once. Works best to have this high for a GPU.",
 )
-def pos(data_in, output, device, batch_size):
+def pos(data_in, output, device, batch_size, force_reload, force_download):
     """PoS tag tokens in a file.
 
     Args:
@@ -402,7 +412,13 @@ def pos(data_in, output, device, batch_size):
         output: A filepath. Output is formatted like the input, but after each token there is a tab and then the tag.
         device: cpu or cuda
     """
-    model: Tagger = torch.hub.load(repo_or_dir="cadia-lvl/POS:hubconf", model="pos")
+    model: Tagger = torch.hub.load(
+        repo_or_dir="cadia-lvl/POS:hubconf",
+        model="pos",
+        device=device,
+        force_reload=force_reload,
+        force_download=force_download,
+    )
     run_model(model, data_in, output, batch_size, Fields.Tags)
 
 
@@ -410,12 +426,14 @@ def pos(data_in, output, device, batch_size):
 @click.argument("data_in", type=str)
 @click.argument("output", type=str)
 @click.option("--device", default="cpu", help="The device to use, 'cpu' or 'cuda' for GPU.")
+@click.option("--force_reload/--no_force_reload", is_flag=True, default=False)
+@click.option("--force_download/--no_force_download", is_flag=True, default=False)
 @click.option(
     "--batch_size",
     default=16,
     help="The number of sentences to process at once. Works best to have this high for a GPU.",
 )
-def lemma(data_in, output, device, batch_size):
+def lemma(data_in, output, device, batch_size, force_reload, force_download):
     """Lemma using tokens and PoS tags in a file.
 
     Args:
@@ -423,7 +441,13 @@ def lemma(data_in, output, device, batch_size):
         output: A filepath. Output is formatted like the input, but after each token TAB PoS-tag there is a tab and then the lemma.
         device: cpu or cuda
     """
-    model: Tagger = torch.hub.load(repo_or_dir="cadia-lvl/POS:hubconf", model="lemma")
+    model: Tagger = torch.hub.load(
+        repo_or_dir="cadia-lvl/POS:hubconf",
+        model="lemma",
+        device=device,
+        force_reload=force_reload,
+        force_download=force_download,
+    )
     log.info("Reading dataset")
     ds = FieldedDataset.from_file(data_in)
     predicted_tags = model.lemma_bulk(dataset=ds, batch_size=batch_size)

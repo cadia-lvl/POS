@@ -8,6 +8,6 @@ tar czf $FILE_NAME -C $MODEL_DIR \
     known_lemmas.txt \
     known_toks.txt \
     special_tokens_map.json \
-    tagger.pt \
+    model.pt \
     tokenizer_config.json \
     vocab.txt

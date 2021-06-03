@@ -32,7 +32,7 @@ train-and-tag \
 --bert_encoder ~/Resources/Models/LM/electra-base-is \
 --label_smoothing 0.1 \
 --epochs 10 \
---batch_size 8 \
+--batch_size 6 \
 --optimizer adam \
 --learning_rate 5e-5 \
 $*
