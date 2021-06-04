@@ -4,12 +4,12 @@ For further information about the schema see [MIM-Gold on CLARIN-IS](https://rep
 
 This work is based on the ABLTagger (in [References](#references)) but with considerable model modifications and runs on Python 3.8, PyTorch 1.7.0+ and [transformers 4.1.1+](https://github.com/huggingface/transformers).
 
-# Table of Contents
 - [Versions](#versions)
 - [Installation](#installation)
+- [Running the models](#running-the-models)
+  * [Note](#note)
   * [Command line usage](#command-line-usage)
   * [Python module](#python-module)
-- [Docker](#docker)
 - [License](#license)
 - [Authors](#authors)
   * [Acknowledgments](#acknowledgments)
@@ -42,28 +42,20 @@ Instructions for further development can be found in [Contributing](#Contributin
 # Running the models
 The models expect input to be tokenized and a tokenizer is not bundled with this package. We reccomend [tokenizer](https://github.com/mideind/Tokenizer) version 2.0+.
 
-There are three pretrained models available.
-- A small PoS tagger
-- A large PoS tagger
-- A lemmatizer
+There are two pretrained models available.
+- A small PoS tagger: `pos tag example.txt tagged.txt`
+- A large PoS tagger: `pos tag-large example.txt tagged.txt`
 
-## PoS small
-```
-pos tag-small example.txt example_tagged.txt
-```
+Below is a table with some rough numbers (they are dependant on hardware and text domain).
 
-This model takes about 60MB of disk space. It processes ~14.000 toks/sec on GPU and ... on CPU. It has around ~96.7% accuracy (on MIM-Gold).
+|           | Accuracy (MIM-Gold) | Disk space | CPU speed | GPU speed |
+|-----------|---------------------|------------|-----------|-----------|
+| PoS small | ~96.7%              | ~60MB      | 360       | 10000     |
+| PoS large | ~97.8%              | ~425MB     | 20        | 1100      |
 
-It is meant to be smaller but considerably faster than the larger alternative.
-
-# Test the installation
-pos tag path/to/tagger-v2.0.0.pt example.txt example_tagged.txt
-```
-
-
-
-## Lemmatizer
-~7.600 toks/sec on GPU.
+## Note
+- The models are currently not trained on "noisy" text, thus they might not preform as well on text which is far from the data in MIM-Gold.
+- The `batch_size` parameter works best with GPUs.
 
 ## Command line usage
 Note that the input and output should be paths (i.e. not stdin or stdout).
@@ -119,19 +111,8 @@ Laxness
 ```
 Tagging this file
 ```Bash
-pos tag path/to/tagger.pt example.txt example_tagged.txt
-2021-01-27 13:01:20,442 - Setting device.
-2021-01-27 13:01:20,443 - Using 1 CPU threads
-2021-01-27 13:01:20,443 - Reading model file...
-2021-01-27 13:01:20,785 - Reading dataset
-2021-01-27 13:01:20,786 - No newline at end of file, handling it.
-2021-01-27 13:01:20,786 - Splitting sentences in order to fit BERT-like model
-2021-01-27 13:01:20,787 - Predicting tags
-2021-01-27 13:01:20,934 - Processed 44 tokens in 0:00:00.145607 seconds
-2021-01-27 13:01:20,934 - Done predicting!
-2021-01-27 13:01:20,934 - Reversing the splitting of sentences in order to fit BERT-like model
-2021-01-27 13:01:20,934 - Writing results
-2021-01-27 13:01:20,935 - Done!
+pos tag-large example.txt example_tagged.txt
+...
 cat example_tagged.txt 
 Þar     aa
 sem     c
@@ -180,28 +161,35 @@ Halldór nken-s
 Laxness nken-s
 ```
 For additional flags and further details see `pos tag --help`
+
 ## Python module
 Usage example of the tagger in another Python module [example.py](example.py).
 ```Python
 """An example of the POS tagger as a module."""
+import torch
+
 import pos
 
 # Initialize the tagger
-tagger = pos.Tagger(
-    model_file="tagger.pt",
-    device="cpu",
+device = torch.device("cpu")  # CPU
+tagger: pos.Tagger = torch.hub.load(
+    repo_or_dir="cadia-lvl/POS",
+    model="tag", # This specifies which model to use. Set to 'tag_large' for large model.
+    device=device,
+    force_reload=False,
+    force_download=False,
 )
 
 # Tag a single sentence
-tags = tagger.tag_sent(["Þetta", "er", "setning", "."])
+tags = tagger.tag_sent(("Þetta", "er", "setning", "."))
 print(tags)
 # ('fahen', 'sfg3en', 'nven', 'pl')
 # Tuple[str, ...]
 
 # Tag multiple sentences at the same time (faster).
 tags = tagger.tag_bulk(
-    [["Þetta", "er", "setning", "."], ["Og", "önnur", "!"]], batch_size=2
-)
+    (("Þetta", "er", "setning", "."), ("Og", "önnur", "!")), batch_size=2
+)  # Batch size works best with GPUs
 print(tags)
 # (('fahen', 'sfg3en', 'nven', 'pl'), ('c', 'foven', 'pl'))
 # Tuple[Tuple[str, ...], ...]
@@ -210,22 +198,10 @@ print(tags)
 dataset = pos.FieldedDataset.from_file("example.txt")
 tags = tagger.tag_bulk(dataset)
 print(tags)
-# (('aa', 'c', 'nkeog', 'sfg3en', 'af', 'nheo', 'sfg3en', 'nheng', 'cn', 'sng', 'lhensf', 'pk', 'c', 'nveng', 'sfg3en', 'nveo', 'af', 'nkeþg', 'pk', 'aa', 'sfg3fn', 'aa', 'aam', 'fovfn', 'nvfn', 'c', 'fphee', 'af', 'sfg3en', 'nveng', 'aa', 'lvensf', 'pk', 'aa', 'sfg3en', 'nveng', 'lvensf', 'pk', 'afm', 'foveþ', 'nveþ', 'pl'), ('nken-s', 'nken-s'))
+# (('aa', 'ct', 'nkeog', 'sfg3en', 'af', 'nheo', 'sfg3en', 'nheng', 'cn', 'sng', 'lhensf', 'pk', 'c', 'nveng', 'sfg3en', 'nveo', 'af', 'nkeþg', 'pk', 'aa', 'sfg3fn', 'aa', 'aam', 'fovfn', 'nvfn', 'c', 'fphee', 'af', 'sfg3en', 'nveng', 'aa', 'lvensf', 'pk', 'aa', 'sfg3en', 'nveng', 'lvensf', 'pk', 'afm', 'foveþ', 'nveþ', 'pl'), ('nken-s', 'nken-s'))
 # Tuple[Tuple[str, ...], ...]
-
 ```
 For additional information, see the docstrings provided.
-# Docker
-Follow the [official installation guide for Docker](https://www.docker.com/).
-
-Trained models are distributed with Docker and then the command line client is exposed by default, so see instructions above.
-
-Before running the docker command be sure that the docker daemon has access to roughly 4GB of RAM.
-
-```Bash
-# Using version 2.0.0
-docker run -v $PWD:/data haukurp/pos:2.0.0 /data/example.txt /data/example_tagged.txt
-```
 
 # License
 [Apache v2.0](LICENSE)
