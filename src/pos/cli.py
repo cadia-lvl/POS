@@ -385,7 +385,7 @@ def tag_large(data_in, output, device, batch_size, force_reload, force_download)
     """
     model: Tagger = torch.hub.load(
         repo_or_dir="cadia-lvl/POS:dev",
-        model="tag-large",
+        model="tag_large",
         device=device,
         force_reload=force_reload,
         force_download=force_download,
