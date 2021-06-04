@@ -55,7 +55,13 @@ def lemma(model_dir_or_url="http://localhost:8000/lemma.tar.gz", device="cpu", f
     return _load_model(model_dir_or_url, "lemma", device, force_download, *args, **kwargs)
 
 
-def tag(model_dir_or_url="http://localhost:8000/pos.tar.gz", device="cpu", force_download=False, *args, **kwargs):
+def tag(
+    model_dir_or_url="https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/115/pos.tar.gz",
+    device="cpu",
+    force_download=False,
+    *args,
+    **kwargs,
+):
     """
     Part-of-Speech tagger for Icelandic.
 
@@ -66,7 +72,11 @@ def tag(model_dir_or_url="http://localhost:8000/pos.tar.gz", device="cpu", force
 
 
 def tag_large(
-    model_dir_or_url="http://localhost:8000/pos-large.tar.gz", device="cpu", force_download=False, *args, **kwargs
+    model_dir_or_url="https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/115/pos-large.tar.gz",
+    device="cpu",
+    force_download=False,
+    *args,
+    **kwargs,
 ):
     """
     A large Part-of-Speech tagger for Icelandic.
