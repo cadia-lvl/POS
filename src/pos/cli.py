@@ -375,7 +375,7 @@ def write_hyperparameters(path, hyperparameters):
     default=16,
     help="The number of sentences to process at once. Works best to have this high for a GPU.",
 )
-def pos_large(data_in, output, device, batch_size, force_reload, force_download):
+def tag_large(data_in, output, device, batch_size, force_reload, force_download):
     """PoS tag tokens in a file with a large model.
 
     Args:
@@ -384,8 +384,8 @@ def pos_large(data_in, output, device, batch_size, force_reload, force_download)
         device: cpu or cuda
     """
     model: Tagger = torch.hub.load(
-        repo_or_dir="cadia-lvl/POS:hubconf",
-        model="pos-large",
+        repo_or_dir="cadia-lvl/POS:dev",
+        model="tag-large",
         device=device,
         force_reload=force_reload,
         force_download=force_download,
@@ -404,7 +404,7 @@ def pos_large(data_in, output, device, batch_size, force_reload, force_download)
     default=16,
     help="The number of sentences to process at once. Works best to have this high for a GPU.",
 )
-def pos(data_in, output, device, batch_size, force_reload, force_download):
+def tag(data_in, output, device, batch_size, force_reload, force_download):
     """PoS tag tokens in a file.
 
     Args:
@@ -413,8 +413,8 @@ def pos(data_in, output, device, batch_size, force_reload, force_download):
         device: cpu or cuda
     """
     model: Tagger = torch.hub.load(
-        repo_or_dir="cadia-lvl/POS:hubconf",
-        model="pos",
+        repo_or_dir="cadia-lvl/POS:dev",
+        model="tag",
         device=device,
         force_reload=force_reload,
         force_download=force_download,
@@ -442,7 +442,7 @@ def lemma(data_in, output, device, batch_size, force_reload, force_download):
         device: cpu or cuda
     """
     model: Tagger = torch.hub.load(
-        repo_or_dir="cadia-lvl/POS:hubconf",
+        repo_or_dir="cadia-lvl/POS:dev",
         model="lemma",
         device=device,
         force_reload=force_reload,
