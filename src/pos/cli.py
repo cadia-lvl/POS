@@ -320,9 +320,6 @@ def train_and_tag(**kwargs):
         save_location = output_dir.joinpath("dictionaries.pickle")
         with save_location.open("wb+") as f:
             pickle.dump(dicts, f)
-    if kwargs["save_model"]:
-        save_location = output_dir.joinpath("model.pt")
-        torch.save(model.state_dict(), str(save_location))
     # Start the training
     run_epochs(
         model=model,
@@ -347,6 +344,9 @@ def train_and_tag(**kwargs):
         test_ds = dechunk_dataset(unchunked_test_ds, test_ds)
 
     test_ds.to_tsv_file(str(output_dir / "predictions.tsv"))
+    if kwargs["save_model"]:
+        save_location = output_dir.joinpath("model.pt")
+        torch.save(model.state_dict(), str(save_location))
 
     log.info("Done!")
 
