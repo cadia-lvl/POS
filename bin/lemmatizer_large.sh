@@ -1,10 +1,13 @@
 #!/bin/bash
 OUT_DIR=$1
-TRAIN=$2
-TEST=$3
+TRAIN="/home/haukurpj/Resources/Data/MIM-GOLD-SETS.21.05/sets/10TM.tsv"
+TEST="/home/haukurpj/Resources/Data/MIM-GOLD-SETS.21.05/sets/10PM.tsv"
 
 mkdir -p $OUT_DIR
-shift; shift; shift
+echo $OUT_DIR
+echo $TRAIN
+echo $TEST
+shift;
 echo $*
 #    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
 #    --morphlex_freeze \
@@ -14,25 +17,22 @@ echo $*
 #    --main_lstm_layers 2 \
 #    --word_embedding_dim 128 \
 #    --pretrained_model_folder bull \
-# --lemmatizer \
-# --known_chars_file data/extra/characters_training.txt \
-# --char_lstm_layers 1 \
-# --char_emb_dim 64 \
-# --main_lstm_layers 1 \
-# --main_lstm_dim 128 \
-# --bert_encoder roberta \
-# --bert_encoder_dim 768 \
 pos \
 train-and-tag \
-"$TRAIN" \
+$TRAIN \
 "$TEST" \
 "$OUT_DIR" \
---tagger \
---tagger_embedding bert \
---bert_encoder ~/Resources/Models/LM/electra-base-is \
+--lemmatizer \
+--lemmatizer_hidden_dim 512 \
+--tag_embedding_dim 128 \
+--char_lstm_layers 1 \
+--char_lstm_dim 256 \
+--char_emb_dim 128 \
 --label_smoothing 0.1 \
---epochs 10 \
---batch_size 6 \
+--epochs 40 \
+--batch_size 4 \
 --optimizer adam \
---learning_rate 5e-5 \
+--learning_rate 1e-4 \
+--scheduler none \
+--gpu \
 $*

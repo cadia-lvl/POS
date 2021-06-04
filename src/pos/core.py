@@ -1,23 +1,16 @@
 """The main abstractions in the project."""
-from enum import Enum
-from typing import (
-    Iterator,
-    Tuple,
-    Iterable,
-    List,
-    Dict,
-    Optional,
-    Sequence,
-    Union,
-)
 import logging
 import random
+from enum import Enum
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
-import torch
-from torch.utils.data import Dataset
-from torch import device as t_device, set_num_threads
 import numpy as np
+import torch
+from torch import device as t_device
+from torch import set_num_threads
+from torch.utils.data import Dataset
 
+from pos.constants import BATCH_KEYS
 from pos.utils import read_tsv, tokens_to_sentences, write_tsv
 
 log = logging.getLogger(__name__)
@@ -33,7 +26,7 @@ def set_device(gpu_flag=False):
     if gpu_flag and torch.cuda.is_available():
         device_set = t_device("cuda")  # type: ignore
         # Torch will use the allocated GPUs from environment variable CUDA_VISIBLE_DEVICES
-        log.info(f"Using {torch.cuda.device_count()} GPUs")
+        log.info(f"Using {torch.cuda.device_count()} GPUs {torch.cuda.get_device_name()}")
     else:
         device_set = t_device("cpu")  # type: ignore
         threads = 1
@@ -75,9 +68,7 @@ class Vocab(set):
     def from_file(filepath: str):
         """Create a Vocab from a file with a sequence of Symbols."""
         with open(filepath) as f:
-            return Vocab(
-                (symbol for line in f.readlines() for symbol in line.strip().split())
-            )
+            return Vocab((symbol for line in f.readlines() for symbol in line.strip().split()))
 
 
 class VocabMap:
@@ -105,9 +96,7 @@ class VocabMap:
     w2i: Dict[str, int]
     i2w: Dict[int, str]
 
-    def __init__(
-        self, vocab: Vocab, special_tokens: Optional[List[Tuple[str, int]]] = None
-    ):
+    def __init__(self, vocab: Set[str], special_tokens: Optional[List[Tuple[str, int]]] = None):
         """Build a vocabulary mapping from the provided vocabulary, needs to start at index=0.
 
         If special_tokens is given, will add these tokens first and start from the next index of the highest index provided.
@@ -154,9 +143,7 @@ class FieldedDataset(Dataset):
             if lengths == -1:
                 lengths = self._get_field_length(field)
             else:
-                assert lengths == self._get_field_length(
-                    field
-                ), "All fields should be of the same size"
+                assert lengths == self._get_field_length(field), "All fields should be of the same size"
 
     def __getitem__(self, idx) -> Tuple[Sentence, ...]:
         """Support itemgetter."""
@@ -172,20 +159,18 @@ class FieldedDataset(Dataset):
 
     def __add__(self, other):
         """Support addition."""
-        new_data = tuple(
-            data + other_data for data, other_data in zip(self.data, other.data)
-        )
+        new_data = tuple(data + other_data for data, other_data in zip(self.data, other.data))
         return self.__class__(new_data, self.fields)
 
-    def _get_field_length(self, field: str) -> Tuple[int]:
+    def _get_field_length(self, field: str) -> Tuple[int, ...]:
         """Return the field length."""
         return tuple(len(sentence) for sentence in self.data[self.fields.index(field)])
 
-    def get_lengths(self) -> Tuple[int]:
+    def get_lengths(self) -> Tuple[int, ...]:
         """Return the sentence lengths."""
         return self._get_field_length(self.fields[0])
 
-    def _shorten_field_length(self, field, lengths: Tuple[int]) -> Sentences:
+    def _shorten_field_length(self, field, lengths: Tuple[int, ...]) -> Sentences:
         """Shorten the field based on lengths."""
         elements = self.get_field(field)
         # lengths, x
@@ -210,13 +195,11 @@ class FieldedDataset(Dataset):
                     adjusted_sentences[index] = part
                     index += 1
             else:
-                log.error(
-                    f"Shortening but element too short {element}, {len(element)}, {length}"
-                )
+                log.error(f"Shortening but element too short {element}, {len(element)}, {length}")
                 raise ValueError("Bad lengths")
         return tuple(adjusted_sentences)
 
-    def _lengthen_field_length(self, field, lengths: Tuple[int]) -> Sentences:
+    def _lengthen_field_length(self, field, lengths: Tuple[int, ...]) -> Sentences:
         """Lengthen field length back to original."""
         elements = self.get_field(field)
         # lengths, x
@@ -243,15 +226,13 @@ class FieldedDataset(Dataset):
                 index += 1
         return tuple(adjusted_sentences)
 
-    def _adjust_field_length(
-        self, field, lengths: Tuple[int], shorten=True
-    ) -> Sentences:
+    def _adjust_field_length(self, field, lengths: Tuple[int, ...], shorten=True) -> Sentences:
         if shorten:
             return self._shorten_field_length(field, lengths)
         else:
             return self._lengthen_field_length(field, lengths)
 
-    def adjust_lengths(self, lengths: Tuple[int], shorten):
+    def adjust_lengths(self, lengths: Tuple[int, ...], shorten):
         """Adjust the lengths of the dataset according to the given lengths."""
         adjusted_data = []
         for field in self.fields:
@@ -272,9 +253,7 @@ class FieldedDataset(Dataset):
 
     def get_char_vocab(self, field=Fields.Tokens) -> Vocab:
         """Return the character Vocabulary in the dataset."""
-        return Vocab.from_symbols(
-            (tok for sent in self.get_field(field) for tok in sent)
-        )
+        return Vocab.from_symbols((tok for sent in self.get_field(field) for tok in sent))
 
     def get_char_vocab_map(self, special_tokens=None, field=Fields.Tokens) -> VocabMap:
         """Return the character VocabularyMapping in the dataset."""
@@ -304,21 +283,36 @@ class FieldedDataset(Dataset):
         with open(path, mode="w") as f:
             write_tsv(f, self._iter_for_tsv())
 
+    def collate_fn(self, batch: Sequence[Tuple[Sentence, ...]]) -> Dict[str, Any]:
+        """Map the inputs to batches."""
+        batch_dict = {}
+        for idx, field in enumerate(self.fields):
+            if field == Fields.Tokens:
+                batch_dict[BATCH_KEYS.TOKENS] = tuple(element[idx] for element in batch)
+            elif field == Fields.GoldTags:
+                batch_dict[BATCH_KEYS.FULL_TAGS] = tuple(element[idx] for element in batch)
+            elif field == Fields.GoldLemmas:
+                batch_dict[BATCH_KEYS.LEMMAS] = tuple(element[idx] for element in batch)
+        batch_dict[BATCH_KEYS.TOKEN_CHARS_LENS] = tuple(
+            len(token) for sent in batch_dict[BATCH_KEYS.TOKENS] for token in sent
+        )
+        batch_dict[BATCH_KEYS.LENGTHS] = tuple(len(x) for x in batch_dict[BATCH_KEYS.TOKENS])
+        return batch_dict
+
     @staticmethod
     def from_file(filepath: str, fields: Tuple[str, ...] = None, sep="\t"):
         """Construct from a file. By default we assume first there are Tokens, GoldTags, GoldLemmas."""
         with open(filepath) as f:
-            examples = tuple(zip(*tuple(tokens_to_sentences(read_tsv(f, sep=sep)))))
+            sentences = tuple(tokens_to_sentences(read_tsv(f, sep=sep)))
+            examples = tuple(zip(*sentences))
         if not fields:
             fields = tuple()
             if len(examples) >= 1:
                 fields = fields + (Fields.Tokens,)
             if len(examples) >= 2:
-                fields = fields + (Fields.GoldTags,)
-            if len(examples) >= 3:
                 fields = fields + (Fields.GoldLemmas,)
+            if len(examples) >= 3:
+                fields = fields + (Fields.GoldTags,)
             if len(examples) >= 4:
-                raise ValueError(
-                    "Unable to guess fields in TSV file. Please set 'fields'"
-                )
+                raise ValueError("Unable to guess fields in TSV file. Please set 'fields'")
         return FieldedDataset(examples, fields=fields)

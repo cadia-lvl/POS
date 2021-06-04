@@ -2,24 +2,8 @@
 
 from typing import List, Tuple
 
-from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
-
-def load_tokenizer(directory: str) -> PreTrainedTokenizerFast:
-    """Load a subword tokenizer from a directory."""
-    return AutoTokenizer.from_pretrained(directory)  # type: ignore
-
-
-def tok_space_added(tokenizer: PreTrainedTokenizerFast) -> bool:
-    """Return True if tokenizer is set to add_prefix_space."""
-    if hasattr(tokenizer, "add_prefix_space"):
-        return tokenizer.__getattribute__("add_prefix_space")
-    return False
-
-
-def get_initial_token_mask(
-    offsets_mapping: List[Tuple[int, int]], contains_bos_eos=True
-):
+def get_initial_token_mask(offsets_mapping: List[Tuple[int, int]], contains_bos_eos=True):
     """Return the inital token masks for subword tokens. Special tokens are not considered inital."""
     initial_token_masks = []
     if contains_bos_eos:

@@ -1,45 +1,29 @@
 """Batch processing."""
 
-from typing import Tuple, Dict, Sequence, Any
-
-from torch import (
-    Tensor,
-    zeros_like,
-)
-from torch.nn.utils.rnn import pad_sequence
+from typing import Any, Dict, Sequence, Tuple
 
 from pos import core
-from pos.core import Vocab, VocabMap, Sentence, Dicts, FieldedDataset
-from .constants import UNK, SOS, EOS, PAD, BATCH_KEYS
-from .pretrained import (
-    read_morphlex,
-    read_pretrained_word_embeddings,
-)
+from pos.constants import BATCH_KEYS, EOS, PAD, PAD_ID, SOS, UNK
+from pos.core import Dicts, FieldedDataset, Fields, Sentence, Vocab, VocabMap
+from torch import Tensor, zeros_like
+from torch.nn.utils.rnn import pad_sequence
+
+from .pretrained import read_morphlex, read_pretrained_word_embeddings
 
 
 def map_to_index(sentence: Sentence, w2i: Dict[str, int]) -> Tensor:
     """Map a sequence to indices."""
-    return (
-        Tensor([w2i[token] if token in w2i else w2i[UNK] for token in sentence])
-        .long()
-        .to(core.device)
-    )
+    return Tensor([w2i[token] if token in w2i else w2i[UNK] for token in sentence]).long().to(core.device)
 
 
-def map_to_chars_and_index(
-    sentence: Sentence, w2i: Dict[str, int], add_eos=True, add_sos=True
-) -> Tensor:
+def map_to_chars_and_index(sentence: Sentence, w2i: Dict[str, int], add_eos=True, add_sos=True) -> Tensor:
     """Map a sequence to characters then to indices."""
     SOS_l = [w2i[SOS]] if add_sos else []
     EOS_l = [w2i[EOS]] if add_eos else []
     # (tokens, chars)
     return pad_sequence(
         [
-            Tensor(
-                SOS_l
-                + [w2i[char] if char in w2i else w2i[UNK] for char in token]
-                + EOS_l
-            ).long()
+            Tensor(SOS_l + [w2i[char] if char in w2i else w2i[UNK] for char in token] + EOS_l).long()
             for token in sentence
         ],
         batch_first=True,
@@ -47,21 +31,14 @@ def map_to_chars_and_index(
     ).to(core.device)
 
 
-def map_to_chars_batch(
-    sentences: Sequence[Sentence], w2i: Dict[str, int], add_eos=True, add_sos=True
-) -> Tensor:
+def map_to_chars_batch(sentences: Sequence[Sentence], w2i: Dict[str, int], add_eos=True, add_sos=True) -> Tensor:
     """Map a batch of sentences to characters of words. This is convoluted, I know."""
     sents_padded = []
     for sentence in sentences:
-        sents_padded.append(
-            map_to_chars_and_index(sentence, w2i, add_eos=add_eos, add_sos=add_sos)
-        )
+        sents_padded.append(map_to_chars_and_index(sentence, w2i, add_eos=add_eos, add_sos=add_sos))
     max_words = max((t.shape[0] for t in sents_padded))
     max_chars = max((t.shape[1] for t in sents_padded))
-    sents_padded = [
-        copy_into_larger_tensor(t, t.new_zeros(size=(max_words, max_chars)))
-        for t in sents_padded
-    ]
+    sents_padded = [copy_into_larger_tensor(t, t.new_zeros(size=(max_words, max_chars))) for t in sents_padded]
     # (b * tokens, chars)
     return (
         pad_sequence(sents_padded, batch_first=True, padding_value=w2i[PAD])
@@ -87,26 +64,9 @@ def copy_into_larger_tensor(tensor: Tensor, like_tensor: Tensor) -> Tensor:
     return base
 
 
-def collate_fn(batch: Sequence[Tuple[Sentence, ...]]) -> Dict[BATCH_KEYS, Any]:
-    """Map the inputs to batches."""
-    batch_dict = {}
-    if len(batch[0]) >= 1:  # we assume we are given the tokens
-        batch_dict[BATCH_KEYS.TOKENS] = tuple(element[0] for element in batch)
-    if len(batch[0]) >= 2:  # Next, the tags. Usually only for training.
-        batch_dict[BATCH_KEYS.FULL_TAGS] = tuple(element[1] for element in batch)
-    if len(batch[0]) >= 3:  # lastly, the lemmas. Usually only for training.
-        batch_dict[BATCH_KEYS.LEMMAS] = tuple(element[2] for element in batch)
-    batch_dict[BATCH_KEYS.TOKEN_CHARS_LENS] = tuple(
-        len(token) for sent in batch_dict[BATCH_KEYS.TOKENS] for token in sent  # type: ignore
-    )
-    batch_dict[BATCH_KEYS.LENGTHS] = tuple(
-        len(x) for x in batch_dict[BATCH_KEYS.TOKENS]  # type: ignore
-    )
-    return batch_dict
-
-
 def load_dicts(
     train_ds: FieldedDataset,
+    ignore_e_x=False,
     pretrained_word_embeddings_file=None,
     morphlex_embeddings_file=None,
     known_chars_file=None,
@@ -117,9 +77,7 @@ def load_dicts(
 
     # Pretrained
     if pretrained_word_embeddings_file:
-        m_map, m_embedding = read_pretrained_word_embeddings(
-            pretrained_word_embeddings_file
-        )
+        m_map, m_embedding = read_pretrained_word_embeddings(pretrained_word_embeddings_file)
         embeddings[Dicts.Pretrained] = m_embedding
         dictionaries[Dicts.Pretrained] = m_map
 
@@ -144,7 +102,12 @@ def load_dicts(
     dictionaries[Dicts.Chars] = c_map
 
     # TAGS (POS)
-    dictionaries[Dicts.FullTag] = train_ds.get_tag_vocab_map(
-        special_tokens=VocabMap.UNK_PAD
-    )
+    special_tokens = VocabMap.UNK_PAD
+    tags = train_ds.get_vocab(field=Fields.GoldTags)
+    if ignore_e_x:
+        special_tokens.append(("e", PAD_ID))
+        tags.remove("e")
+        special_tokens.append(("x", PAD_ID))
+        tags.remove("x")
+    dictionaries[Dicts.FullTag] = VocabMap(tags, special_tokens=VocabMap.UNK_PAD)
     return embeddings, dictionaries

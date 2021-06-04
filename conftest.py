@@ -1,23 +1,19 @@
 """Fixtures for tests."""
-from pytest import fixture
 from typing import Dict
+
 import pytest
-
+from pytest import fixture
 from torch.utils.data.dataloader import DataLoader
-from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
 
-from pos.core import Fields, Vocab, VocabMap, Dicts, FieldedDataset
-from pos.data import collate_fn, load_dicts
-from pos import evaluate
 import pos
-from pos.model import (
-    ABLTagger,
-    Encoder,
-    ClassingWordEmbedding,
-    CharacterDecoder,
-    Tagger,
-    Modules,
-)
+from pos import evaluate
+from pos.cli import MORPHLEX_VOCAB_PATH, PRETRAINED_VOCAB_PATH
+from pos.constants import Modules
+from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap
+from pos.data import load_dicts
+from pos.model import CharacterDecoder, ClassicWordEmbedding, EncodersDecoders, Tagger
+from pos.model.embeddings import CharacterAsWordEmbedding, CharacterEmbedding
+from pos.model.interface import Decoder
 
 
 def pytest_addoption(parser):
@@ -56,12 +52,6 @@ def test_tsv_untagged_file():
 
 
 @fixture()
-def test_tsv_file():
-    """Return the filepath of the test tsv file."""
-    return "./tests/test.tsv"
-
-
-@fixture()
 def tagged_test_tsv_file():
     """Return the filepath of the test tsv file."""
     return "./tests/test_pred.tsv"
@@ -74,94 +64,15 @@ def test_tsv_lemma_file():
 
 
 @fixture
-def ds(test_tsv_file):
+def ds(test_tsv_lemma_file):
     """Return a sequence tagged dataset."""
-    return FieldedDataset.from_file(
-        test_tsv_file, fields=(Fields.Tokens, Fields.GoldTags)
-    )
+    return FieldedDataset.from_file(test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
 
 
 @fixture
-def ds_lemma(test_tsv_lemma_file):
-    """Return a sequence tagged dataset."""
-    return FieldedDataset.from_file(
-        test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas)
-    )
-
-
-@fixture
-def vocab_maps(ds_lemma) -> Dict[Dicts, VocabMap]:
+def vocab_maps(ds) -> Dict[Dicts, VocabMap]:
     """Return the dictionaries for the dataset."""
-    return load_dicts(ds_lemma)[1]
-
-
-@fixture()
-def data_loader(ds_lemma):
-    """Return a data loader over the unit testing data."""
-    return DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)  # type: ignore
-
-
-@fixture
-def encoder(vocab_maps) -> Encoder:
-    """Return an Encoder."""
-    wembs = ClassingWordEmbedding(vocab_map=vocab_maps[Dicts.Tokens], embedding_dim=3)
-    return Encoder({Modules.Trained: wembs}, main_lstm_layers=1)
-
-
-@fixture
-def tagger_module(vocab_maps, encoder) -> Tagger:
-    """Return a Tagger."""
-    return Tagger(vocab_map=vocab_maps[Dicts.FullTag], input_dim=encoder.output_dim)
-
-
-@fixture
-def lemmatizer_module(vocab_maps, encoder) -> CharacterDecoder:
-    """Return a Tagger."""
-    return CharacterDecoder(
-        vocab_map=vocab_maps[Dicts.Chars],
-        hidden_dim=encoder.output_dim,
-        context_dim=encoder.output_dim,
-        char_emb_dim=20,
-        dropout=0.0,
-    )
-
-
-@fixture
-def decoders(tagger_module, lemmatizer_module):
-    """Return the decoders."""
-    return {Modules.Lemmatizer: lemmatizer_module, Modules.Tagger: tagger_module}
-
-
-@fixture
-def abl_tagger(encoder, tagger_module, lemmatizer_module) -> ABLTagger:
-    """Return a default ABLTagger."""
-    return ABLTagger(
-        encoder=encoder,
-        decoders={Modules.Tagger: tagger_module, Modules.Lemmatizer: lemmatizer_module},
-    )
-
-
-@fixture
-def tagger_evaluator(ds_lemma):
-    """Return a tagger evaluator."""
-    return evaluate.TaggingEvaluation(
-        test_dataset=ds_lemma,
-        train_vocab=ds_lemma.get_vocab(),
-        external_vocabs=evaluate.ExternalVocabularies(
-            morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
-            pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
-        ),
-    ).tagging_accuracy
-
-
-@fixture
-def lemma_evaluator(ds_lemma):
-    """Return a lemma evaluator."""
-    return evaluate.LemmatizationEvaluation(
-        test_dataset=ds_lemma,
-        train_vocab=ds_lemma.get_vocab(),
-        train_lemmas=Vocab.from_symbols(ds_lemma.get_field(Fields.GoldLemmas)),
-    ).lemma_accuracy
+    return load_dicts(ds)[1]
 
 
 @fixture
@@ -169,7 +80,10 @@ def kwargs():
     """Return a default set of arguments."""
     return {
         "tagger": True,
+        "batch_size": 3,
         "lemmatizer": True,
+        "lemmatizer_hidden_dim": 50,
+        "word_embedding_dim": 3,
         "tagger_weight": 1,
         "lemmatizer_weight": 1,
         "char_emb_dim": 20,
@@ -184,3 +98,105 @@ def kwargs():
         "output_dir": "debug/",
         "epochs": 20,
     }
+
+
+@fixture()
+def data_loader(ds, kwargs):
+    """Return a data loader over the unit testing data."""
+    return DataLoader(ds, batch_size=kwargs["batch_size"], collate_fn=ds.collate_fn)  # type: ignore
+
+
+@fixture
+def classic_emb(vocab_maps, kwargs) -> ClassicWordEmbedding:
+    """Return an Encoder."""
+    return ClassicWordEmbedding(
+        Modules.Trained, vocab_map=vocab_maps[Dicts.Tokens], embedding_dim=kwargs["word_embedding_dim"]
+    )
+
+
+@fixture
+def tagger_module(vocab_maps, classic_emb) -> Tagger:
+    """Return a Tagger."""
+    return Tagger(Modules.Tagger, vocab_map=vocab_maps[Dicts.FullTag], encoder=classic_emb)
+
+
+@fixture
+def char_emb_module(vocab_maps, classic_emb) -> CharacterEmbedding:
+    """Return a Tagger."""
+    character_embedding = CharacterEmbedding(Modules.Characters, vocab_maps[Dicts.Chars], embedding_dim=10)
+    return character_embedding
+
+
+@fixture
+def char_as_word_emb_module(char_emb_module) -> CharacterAsWordEmbedding:
+    """Return a Tagger."""
+    wemb = CharacterAsWordEmbedding(Modules.CharactersToTokens, character_embedding=char_emb_module)
+    return wemb
+
+
+@fixture
+def tag_emb_module(vocab_maps) -> ClassicWordEmbedding:
+    """Return a Tagger."""
+    tag_emb = ClassicWordEmbedding(Modules.TagEmbedding, vocab_map=vocab_maps[Dicts.FullTag], embedding_dim=4)
+    return tag_emb
+
+
+@fixture
+def lemmatizer_module(tag_emb_module, char_as_word_emb_module, char_emb_module, vocab_maps) -> CharacterDecoder:
+    """Return a Tagger."""
+    char_decoder = CharacterDecoder(
+        Modules.Lemmatizer,
+        tag_encoder=tag_emb_module,
+        characters_encoder=char_emb_module,
+        characters_to_tokens_encoder=char_as_word_emb_module,
+        vocab_map=vocab_maps[Dicts.Chars],
+        hidden_dim=70,
+        num_layers=2,
+    )
+    return char_decoder
+
+
+@fixture
+def decoders(tagger_module, lemmatizer_module) -> Dict[str, Decoder]:
+    """Return the decoders."""
+    return {Modules.Lemmatizer: lemmatizer_module, Modules.Tagger: tagger_module}
+
+
+@fixture
+def encoders(char_emb_module, char_as_word_emb_module, tag_emb_module, classic_emb) -> Dict[str, Decoder]:
+    """Return the decoders."""
+    return {
+        char_emb_module.key: char_emb_module,
+        char_as_word_emb_module.key: char_as_word_emb_module,
+        tag_emb_module.key: tag_emb_module,
+        classic_emb.key: classic_emb,
+    }
+
+
+@fixture
+def abl_tagger(encoders, decoders) -> EncodersDecoders:
+    """Return a default ABLTagger."""
+    return EncodersDecoders(encoders=encoders, decoders=decoders)
+
+
+@fixture
+def tagger_evaluator(ds):
+    """Return a tagger evaluator."""
+    return evaluate.TaggingEvaluation(
+        test_dataset=ds,
+        train_vocab=ds.get_vocab(),
+        external_vocabs=evaluate.ExternalVocabularies(
+            morphlex_tokens=Vocab.from_file(MORPHLEX_VOCAB_PATH),
+            pretrained_tokens=Vocab.from_file(PRETRAINED_VOCAB_PATH),
+        ),
+    ).tagging_accuracy
+
+
+@fixture
+def lemma_evaluator(ds):
+    """Return a lemma evaluator."""
+    return evaluate.LemmatizationEvaluation(
+        test_dataset=ds,
+        train_vocab=ds.get_vocab(),
+        train_lemmas=Vocab.from_symbols(ds.get_field(Fields.GoldLemmas)),
+    ).lemma_accuracy

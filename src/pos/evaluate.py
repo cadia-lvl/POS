@@ -1,14 +1,12 @@
 """A collection of types and function used to evaluate the performance of a tagger."""
-from dataclasses import Field
-import json
-from os import stat
-from typing import Callable, Iterable, Optional, Tuple, List, Dict, Set, Any, Union
 import logging
 from collections import Counter
+from dataclasses import Field
 from pathlib import Path
 from statistics import stdev
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
-from .core import Sentences, Vocab, FieldedDataset, Fields
+from .core import FieldedDataset, Fields, Sentences, Vocab
 
 log = logging.getLogger(__name__)
 
@@ -45,9 +43,7 @@ class Evaluation:
         self.test_tokens = Vocab.from_symbols(test_dataset.get_field(Fields.Tokens))
         self.test_dataset = test_dataset
         self.known_tokens = self.train_tokens.intersection(self.test_tokens)
-        self.unknown_tokens = self.test_tokens.difference(
-            self.known_tokens
-        )  # pylint: disable=no-member
+        self.unknown_tokens = self.test_tokens.difference(self.known_tokens)  # pylint: disable=no-member
 
     @staticmethod
     def accuracy(
@@ -56,6 +52,7 @@ class Evaluation:
         comparison_field: Fields,
         gold_field: Fields,
         pred_field=Fields,
+        skip_gold_ex=False,
     ) -> Tuple[float, int]:
         """Calculate the accuracy given a vocabulary to filter on. If nothing is provided, we do not filter.
 
@@ -67,9 +64,11 @@ class Evaluation:
             pred_field: The field in the predictions to consider predictions.
         """
 
-        def in_vocabulary(token, vocab):
+        def in_vocabulary(token, tag, vocab):
             """Filter condition."""
             # Empty vocab implies all
+            if skip_gold_ex and (tag == "e" or tag == "x"):
+                return False
             if vocab is None:
                 return True
             else:
@@ -78,9 +77,12 @@ class Evaluation:
         total = sum(
             (
                 1
-                for tokens in predictions.get_field(comparison_field)
-                for token in tokens
-                if in_vocabulary(token, vocab)
+                for tokens, tags in zip(
+                    predictions.get_field(comparison_field),
+                    predictions.get_field(Fields.GoldTags),
+                )
+                for token, tag in zip(tokens, tags)
+                if in_vocabulary(token, tag, vocab)
             )
         )
         if total == 0:
@@ -88,22 +90,29 @@ class Evaluation:
         correct = sum(
             (
                 predicted == gold
-                for tokens, golds, predicted in zip(
+                for tokens, golds, predicted, tags in zip(
                     predictions.get_field(comparison_field),
                     predictions.get_field(gold_field),
                     predictions.get_field(pred_field),
+                    predictions.get_field(Fields.GoldTags),
                 )
-                for token, gold, predicted in zip(tokens, golds, predicted)
-                if in_vocabulary(token, vocab)
+                for token, gold, predicted, tag in zip(tokens, golds, predicted, tags)
+                if in_vocabulary(token, tag, vocab)
             )
         )
         return (correct / total, total)
 
     @staticmethod
-    def error_profile(
-        predictions: FieldedDataset, gold_field: Fields, pred_field: Field
-    ):
+    def error_profile(predictions: FieldedDataset, gold_field: Fields, pred_field: Field, skip_gold_ex=False):
         """Return an error profile with counts of errors (pred > correct/gold)."""
+
+        def should_skip_gold(gold: str) -> bool:
+            """Return True if gold tag should be skipped."""
+            if skip_gold_ex:
+                return gold == "e" or gold == "x"
+            else:
+                return False
+
         return Counter(
             f"{predicted} > {gold}"
             for gold_tags, predicted_tags in zip(
@@ -111,7 +120,7 @@ class Evaluation:
                 predictions.get_field(pred_field),
             )
             for gold, predicted in zip(gold_tags, predicted_tags)
-            if gold != predicted
+            if gold != predicted and not should_skip_gold(gold)
         )
 
 
@@ -121,10 +130,12 @@ class TaggingEvaluation(Evaluation):
     def __init__(
         self,
         external_vocabs: ExternalVocabularies,
+        skip_gold_ex=True,
         **kw,
     ):
         """Initialize."""
         super().__init__(**kw)
+        self.skip_gold_ex = skip_gold_ex
         morphlex_tokens = external_vocabs.morphlex_tokens.intersection(self.test_tokens)  # type: ignore
         pretrained_tokens = external_vocabs.pretrained_tokens.intersection(self.test_tokens)  # type: ignore
         # fmt: off
@@ -138,9 +149,7 @@ class TaggingEvaluation(Evaluation):
         self.test_tokens_only = self.unknown_tokens.difference(pretrained_tokens).difference(morphlex_tokens)
         # fmt: on
 
-    def _tagging_accuracy(
-        self, predictions: FieldedDataset
-    ) -> Tuple[Measures, Measures]:
+    def _tagging_accuracy(self, predictions: FieldedDataset) -> Tuple[Measures, Measures]:
         """Return all tagging accuracies. Assumes that predicted tags have been set."""
         accuracy_results = {
             "Total": self.accuracy(
@@ -149,6 +158,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unknown": self.accuracy(
                 predictions,
@@ -156,6 +166,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Known": self.accuracy(
                 predictions,
@@ -163,6 +174,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Known-Wemb": self.accuracy(
                 predictions,
@@ -170,6 +182,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Known-Wemb+Morph": self.accuracy(
                 predictions,
@@ -177,6 +190,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Known-Morph": self.accuracy(
                 predictions,
@@ -184,6 +198,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Seen": self.accuracy(
                 predictions,
@@ -191,6 +206,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unknown-Wemb": self.accuracy(
                 predictions,
@@ -198,6 +214,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unknown-Wemb+Morph": self.accuracy(
                 predictions,
@@ -205,6 +222,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unknown-Morph": self.accuracy(
                 predictions,
@@ -212,6 +230,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
             "Unseen": self.accuracy(
                 predictions,
@@ -219,6 +238,7 @@ class TaggingEvaluation(Evaluation):
                 comparison_field=Fields.Tokens,
                 gold_field=Fields.GoldTags,
                 pred_field=Fields.Tags,
+                skip_gold_ex=self.skip_gold_ex,
             ),
         }
 
@@ -229,9 +249,7 @@ class TaggingEvaluation(Evaluation):
     def tagging_accuracy(self, tags):
         """Calculate the tagging accuracy, given some tags."""
         if Fields.Tags in self.test_dataset.fields:
-            raise RuntimeError(
-                "Unable to evaluate predictions. Predicted tags are already present."
-            )
+            raise RuntimeError("Unable to evaluate predictions. Predicted tags are already present.")
 
         test_ds = self.test_dataset.add_field(tags, Fields.Tags)
         return self._tagging_accuracy(test_ds)
@@ -239,7 +257,7 @@ class TaggingEvaluation(Evaluation):
     def tagging_profile(self, predictions: FieldedDataset):
         """Error profile for tagging."""
         return self.error_profile(
-            predictions, gold_field=Fields.GoldTags, pred_field=Fields.Tags
+            predictions, gold_field=Fields.GoldTags, pred_field=Fields.Tags, skip_gold_ex=self.skip_gold_ex
         )
 
 
@@ -254,13 +272,9 @@ class LemmatizationEvaluation(Evaluation):
         """Initialize."""
         super().__init__(**kw)
         self.train_lemmas = train_lemmas
-        self.test_lemmas = Vocab.from_symbols(
-            self.test_dataset.get_field(Fields.GoldLemmas)
-        )
+        self.test_lemmas = Vocab.from_symbols(self.test_dataset.get_field(Fields.GoldLemmas))
         self.known_lemmas = self.train_lemmas.intersection(self.test_lemmas)
-        self.unknown_lemmas = self.test_lemmas.difference(
-            self.known_lemmas
-        )  # pylint: disable=no-member
+        self.unknown_lemmas = self.test_lemmas.difference(self.known_lemmas)  # pylint: disable=no-member
 
     def _lemma_accuracy(self, predictions: FieldedDataset) -> Tuple[Measures, Measures]:
         """Return all lemma accuracies."""
@@ -309,18 +323,14 @@ class LemmatizationEvaluation(Evaluation):
     def lemma_accuracy(self, lemmas: Sentences):
         """Calculate the lemmatization accuracy, given some lemmas."""
         if Fields.Lemmas in self.test_dataset.fields:
-            raise RuntimeError(
-                "Unable to evaluate predictions. Predicted lemmas are already present."
-            )
+            raise RuntimeError("Unable to evaluate predictions. Predicted lemmas are already present.")
 
         test_ds = self.test_dataset.add_field(lemmas, Fields.Lemmas)
         return self._lemma_accuracy(test_ds)
 
     def lemma_profile(self, predictions: FieldedDataset):
         """Error profile for lemmatization."""
-        return self.error_profile(
-            predictions, gold_field=Fields.GoldLemmas, pred_field=Fields.Lemmas
-        )
+        return self.error_profile(predictions, gold_field=Fields.GoldLemmas, pred_field=Fields.Lemmas)
 
 
 class TaggingLemmatizationEvaluation(TaggingEvaluation, LemmatizationEvaluation):
@@ -362,9 +372,7 @@ class TaggingLemmatizationEvaluation(TaggingEvaluation, LemmatizationEvaluation)
                 self.test_dataset.get_field(Fields.GoldLemmas),
                 self.test_dataset.get_field(Fields.Lemmas),
             )
-            for gold_tag, tag, gold_lemma, lemma in zip(
-                gold_tags, tags, gold_lemmas, lemmas
-            )
+            for gold_tag, tag, gold_lemma, lemma in zip(gold_tags, tags, gold_lemmas, lemmas)
         )
         return confusion
 
@@ -376,9 +384,7 @@ def get_average(accuracies: List[Measures]) -> Measures_std:
     for key in keys:
         totals[key] = (
             average([accuracy[key] for accuracy in accuracies]),
-            stdev([accuracy[key] for accuracy in accuracies])
-            if len(accuracies) >= 2
-            else 0.0,
+            stdev([accuracy[key] for accuracy in accuracies]) if len(accuracies) >= 2 else 0.0,
         )
     return totals
 
@@ -388,9 +394,7 @@ def average(values: List[Union[int, float]]) -> float:
     return sum(values) / len(values)
 
 
-def all_accuracy_average(
-    accuracies: List[Tuple[Measures, Measures]]
-) -> Tuple[Measures_std, Measures_std]:
+def all_accuracy_average(accuracies: List[Tuple[Measures, Measures]]) -> Tuple[Measures_std, Measures_std]:
     """Return the average of all accuracies."""
     return (
         get_average([accuracy for accuracy, _ in accuracies]),
@@ -405,6 +409,7 @@ def get_accuracy_from_files(
     train_lemmas: str,
     morphlex_vocab: str,
     pretrained_vocab: str,
+    skip_gold_ex=True,
 ) -> Tuple[Measures, Measures]:
     """Get the accuracy results based on the feature and files."""
     train_vocab = Vocab.from_file(train_tokens)
@@ -415,6 +420,7 @@ def get_accuracy_from_files(
             test_dataset=ds,
             train_vocab=train_vocab,
             external_vocabs=ExternalVocabularies(morphlex_vocab, pretrained_vocab),
+            skip_gold_ex=skip_gold_ex,
         )
         return evaluation._tagging_accuracy(ds)
     else:  # lemmas
@@ -434,6 +440,7 @@ def get_profile_from_files(
     train_lemmas: str,
     morphlex_vocab: str,
     pretrained_vocab: str,
+    skip_gold_ex=True,
 ) -> Counter:
     """Get the error profiles based on the feature and files."""
     train_vocab = Vocab.from_file(train_tokens)
@@ -444,13 +451,12 @@ def get_profile_from_files(
             test_dataset=ds,
             train_vocab=train_vocab,
             external_vocabs=ExternalVocabularies(morphlex_vocab, pretrained_vocab),
+            skip_gold_ex=skip_gold_ex,
         )
         return evaluation.tagging_profile(ds)
     else:  # lemmas
         train_lemmas = Vocab.from_file(train_lemmas)
-        evaluation = LemmatizationEvaluation(
-            test_dataset=ds, train_vocab=train_vocab, train_lemmas=train_lemmas
-        )
+        evaluation = LemmatizationEvaluation(test_dataset=ds, train_vocab=train_vocab, train_lemmas=train_lemmas)
         return evaluation.lemma_profile(ds)
 
 

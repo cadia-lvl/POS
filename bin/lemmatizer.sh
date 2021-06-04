@@ -1,13 +1,13 @@
 #!/bin/bash
 OUT_DIR=$1
-TRAIN=$2
-TEST=$3
+TRAIN="/home/haukurpj/Resources/Data/MIM-GOLD-SETS.21.05/sets/10TM.tsv /home/haukurpj/Resources/Data/bin_data.tsv"
+TEST="/home/haukurpj/Resources/Data/MIM-GOLD-SETS.21.05/sets/10PM.tsv"
 
 mkdir -p $OUT_DIR
 echo $OUT_DIR
 echo $TRAIN
 echo $TEST
-shift; shift; shift
+shift;
 echo $*
 #    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
 #    --morphlex_freeze \
@@ -19,28 +19,22 @@ echo $*
 #    --pretrained_model_folder bull \
 pos \
 train-and-tag \
-"$TRAIN" \
+$TRAIN \
 "$TEST" \
 "$OUT_DIR" \
+--adjust_lengths 1 \
 --lemmatizer \
---lemmatizer_weight 0.1 \
---lemmatizer_hidden_dim 256 \
---lemmatizer_char_dim 64 \
---lemmatizer_num_layers 1 \
---no_lemmatizer_char_attention \
---lemmatizer_accept_char_rnn_last \
---tagger \
---tagger_embedding bert \
---bert_encoder electra-base-is \
---known_chars_file data/extra/characters_training.txt \
+--lemmatizer_hidden_dim 512 \
+--lemmatizer_state_dict ~/Resources/Models/Lemmatizer/lemmatizer-bin-data-512-trained-1e-4/state_dict_fixed.pt \
+--tag_embedding_dim 128 \
 --char_lstm_layers 1 \
 --char_lstm_dim 128 \
 --char_emb_dim 64 \
---label_smoothing 0.1 \
---epochs 20 \
---batch_size 8 \
---save_vocab \
---save_model \
+--label_smoothing 0.0 \
+--epochs 40 \
+--batch_size 512 \
 --optimizer adam \
---learning_rate 5e-5 \
+--learning_rate 5e-4 \
+--scheduler none \
+--gpu \
 $*

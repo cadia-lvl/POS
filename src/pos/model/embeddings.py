@@ -1,54 +1,72 @@
 """Implementation of several embeddings."""
-from typing import Dict, Sequence
+from logging import getLogger
+from typing import Any, Dict, List
 
 import torch
 from pos import core
+from pos.constants import BATCH_KEYS
 from pos.data import get_initial_token_mask, map_to_index
 from pos.data.batch import map_to_chars_batch
 from torch import nn
-from transformers import AutoConfig, AutoModel, AutoTokenizer, PreTrainedTokenizerFast
+from transformers import AutoTokenizer, PreTrainedTokenizerFast
+from transformers.models.electra import ElectraConfig, ElectraModel
 
-from . import abltagger
+from . import interface
+
+log = getLogger(__name__)
 
 
-class ClassingWordEmbedding(abltagger.Embedding):
+class ClassicWordEmbedding(interface.Encoder):
     """Classic word embeddings."""
 
-    def __init__(
-        self, vocab_map: core.VocabMap, embedding_dim: int, padding_idx=0, dropout=0.0
-    ):
+    def __init__(self, key: str, vocab_map: core.VocabMap, embedding_dim: int, padding_idx=0, dropout=0.0):
         """Create one."""
-        super().__init__()
+        super().__init__(key)
         self.vocab_map = vocab_map
-        self.sparse_embedding = nn.Embedding(
-            len(vocab_map), embedding_dim, padding_idx=padding_idx, sparse=True
-        )
+        self.embedding = nn.Embedding(len(vocab_map), embedding_dim, padding_idx=padding_idx)
         # Skip the first index, should be zero
-        nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
+        nn.init.xavier_uniform_(self.embedding.weight[1:, :])
         self.dropout = nn.Dropout(p=dropout)
 
-    def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch."""
-        return torch.nn.utils.rnn.pad_sequence(
-            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch],
+        batch[BATCH_KEYS.TOKEN_IDS] = nn.utils.rnn.pad_sequence(
+            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch[BATCH_KEYS.TOKENS]],
             batch_first=True,
         )
+        return batch
 
-    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> torch.Tensor:
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
-        return self.dropout(self.sparse_embedding(batch))
+        batch[self.key] = self.dropout(self.embedding(batch[BATCH_KEYS.TOKEN_IDS]))
+        return batch
 
     @property
     def output_dim(self):
         """Return the output dimension."""
-        return self.sparse_embedding.weight.data.shape[1]
+        return self.embedding.weight.data.shape[1]
 
 
-class PretrainedEmbedding(ClassingWordEmbedding):
+class CharacterEmbedding(ClassicWordEmbedding):
+    """Character embedding. Has a distinct preprocessing step from classic."""
+
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Preprocess the sentence batch."""
+        batch[BATCH_KEYS.CHAR_IDS] = map_to_chars_batch(batch[BATCH_KEYS.TOKENS], self.vocab_map.w2i)
+        return batch
+
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the embedding."""
+        batch[self.key] = self.dropout(self.embedding(batch[BATCH_KEYS.CHAR_IDS]))
+        return batch
+
+
+class PretrainedEmbedding(ClassicWordEmbedding):
     """The Morphological Lexicion embeddings."""
 
     def __init__(
         self,
+        key: str,
         vocab_map: core.VocabMap,
         embeddings: torch.Tensor,
         freeze=False,
@@ -57,41 +75,45 @@ class PretrainedEmbedding(ClassingWordEmbedding):
     ):
         """Create one."""
         super().__init__(
+            key=key,
             vocab_map=vocab_map,
             embedding_dim=1,
             padding_idx=padding_idx,
             dropout=dropout,
         )  # we overwrite the embedding
-        self.sparse_embedding = nn.Embedding.from_pretrained(
-            embeddings, freeze=freeze, padding_idx=padding_idx, sparse=True
+        self.embedding = nn.Embedding.from_pretrained(embeddings, freeze=freeze, padding_idx=padding_idx)
+
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Preprocess the sentence batch."""
+        batch[BATCH_KEYS.PRETRAINED_TOKEN_IDS] = nn.utils.rnn.pad_sequence(
+            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch[BATCH_KEYS.TOKENS]],
+            batch_first=True,
         )
+        return batch
+
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the embedding."""
+        batch[self.key] = self.dropout(self.embedding(batch[BATCH_KEYS.PRETRAINED_TOKEN_IDS]))
+        return batch
 
 
-class CharacterAsWordEmbedding(abltagger.Embedding):
+class CharacterAsWordEmbedding(interface.Encoder):
     """A Character as Word Embedding."""
 
     def __init__(
         self,
-        vocab_map: core.VocabMap,
-        character_embedding_dim=20,
+        key: str,
+        character_embedding: CharacterEmbedding,
         char_lstm_dim=64,
         char_lstm_layers=1,
-        padding_idx=0,
         dropout=0.0,
     ):
         """Create one."""
-        super().__init__()
-        self.vocab_map = vocab_map
-        self.sparse_embedding = nn.Embedding(
-            len(vocab_map),
-            character_embedding_dim,
-            padding_idx=padding_idx,
-            sparse=True,
-        )
-        nn.init.xavier_uniform_(self.sparse_embedding.weight[1:, :])
+        super().__init__(key)
+        self.character_embedding_key = character_embedding.key
         # The character RNN
         self.rnn = nn.GRU(
-            input_size=character_embedding_dim,
+            input_size=character_embedding.output_dim,
             hidden_size=char_lstm_dim,
             num_layers=char_lstm_layers,
             batch_first=True,
@@ -106,14 +128,14 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
                 nn.init.xavier_uniform_(param)
         self._output_dim = 2 * char_lstm_dim
 
-    def preprocess(self, batch: Sequence[core.Sentence]) -> torch.Tensor:
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch."""
-        return map_to_chars_batch(batch, self.vocab_map.w2i)
+        return batch
 
-    def embed(self, batch: torch.Tensor, lengths: Sequence[int]) -> torch.Tensor:
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
         # (b * seq, chars)
-        char_embs = self.emb_dropout(self.sparse_embedding(batch))
+        char_embs = batch[self.character_embedding_key]
         # (b * seq, chars, f)
         self.rnn.flatten_parameters()
         out, hidden = self.rnn(char_embs)
@@ -126,10 +148,11 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
         # Hidden documentation (GRU): (num_layers * num_directions, batch, hidden_size)
         # Batch is NOT placed first in the hidden.
         # We map it to (b * seq, hidden_size * num_layers * num_directions)
-        return (
+        batch[self.key] = (
             self.dropout(out),
             self.dropout(hidden.permute(1, 0, 2).reshape(out.shape[0], -1)),
         )
+        return batch
 
     @property
     def output_dim(self):
@@ -137,84 +160,73 @@ class CharacterAsWordEmbedding(abltagger.Embedding):
         return self._output_dim
 
 
-class TransformerEmbedding(abltagger.Embedding):
+class TransformerEmbedding(interface.Encoder):
     """An embedding of a sentence after going through a Transformer."""
 
-    def __init__(self, model_path: str, layers="weights", dropout=0.0):
+    def __init__(self, key: str, path: str, dropout=0.0):
         """Initialize it be reading the config, model and tokenizer."""
-        super().__init__()
-        self.config = AutoConfig.from_pretrained(model_path, output_hidden_states=True)
-        self.model = AutoModel.from_pretrained(model_path, config=self.config)
+        super().__init__(key)
+        self.config = ElectraConfig.from_pretrained(path, output_hidden_states=True)
+        self.model = ElectraModel(self.config)
         self.add_prefix_space = False
-        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(
-            model_path, add_prefix_space=self.add_prefix_space
-        )
+        if "roberta" in str(self.config.__class__).lower():  # type: ignore
+            log.debug("Using prefix space")
+            self.add_prefix_space = True
+        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(path, add_prefix_space=self.add_prefix_space, config=self.config)  # type: ignore
         # ELECTRA property
-        self.num_layers = self.config.num_hidden_layers
-        self.hidden_dim = self.config.hidden_size
-        self.max_length = min(
-            self.config.max_position_embeddings, self.tokenizer.model_max_length
-        )
+        self.num_layers = self.config.num_hidden_layers  # type: ignore
+        self.hidden_dim = self.config.hidden_size  # type: ignore
+        self.max_length = min(self.config.max_position_embeddings, self.tokenizer.model_max_length, 512)  # type: ignore
         self.dropout = nn.Dropout(p=dropout)
-        self.layers = layers
-        if self.layers == "weights":
-            self.layer_weights = nn.parameter.Parameter(torch.randn(self.num_layers))
 
-    def preprocess(self, batch: Sequence[core.Sentence]) -> Dict[str, torch.Tensor]:
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Preprocess the sentence batch."""
-        preprocessed = {
+        preprocessed: Dict[str, List[torch.Tensor]] = {
             "input_ids": [],
             "attention_mask": [],
             "initial_token_masks": [],
         }
-        for sentence in batch:
-            encoded = self.tokenizer.encode_plus(
+        for sentence in batch[BATCH_KEYS.TOKENS]:
+            encoded = self.tokenizer.encode_plus(  # type: ignore
                 text=" ".join(sentence),
                 padding="max_length",
                 max_length=self.max_length,
                 return_tensors="pt",
                 return_offsets_mapping=True,
             )
+            assert encoded["input_ids"].shape[1] == self.max_length, "The should be exactly the max_length defined."
             preprocessed["input_ids"].append(encoded["input_ids"][0])
             preprocessed["attention_mask"].append(encoded["attention_mask"][0])
             preprocessed["initial_token_masks"].append(
-                torch.Tensor(
-                    get_initial_token_mask(encoded["offset_mapping"][0].tolist())
-                ).bool()
+                torch.Tensor(get_initial_token_mask(encoded["offset_mapping"][0].tolist())).bool()
             )
-        return {
-            key: torch.stack(value).to(core.device)
-            for key, value in preprocessed.items()
-        }
+        batch[BATCH_KEYS.SUBWORDS] = {key: torch.stack(value).to(core.device) for key, value in preprocessed.items()}
+        return batch
 
-    def embed(
-        self, batch: Dict[str, torch.Tensor], lengths: Sequence[int]
-    ) -> torch.Tensor:
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Apply the embedding."""
         outputs = self.model(
-            input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
+            input_ids=batch[BATCH_KEYS.SUBWORDS]["input_ids"],
+            attention_mask=batch[BATCH_KEYS.SUBWORDS]["attention_mask"],
             return_dict=True,
         )
         # Tuple[(b, s, f), ...]
-        output = outputs["hidden_states"][-self.num_layers :]
-        emb = outputs["last_hidden_state"]
-        if self.layers == "weights":
-            weights = nn.functional.softmax(self.layer_weights, dim=0)
-            weighted_layers = output[0] * weights[0]
-            for l in range(1, self.num_layers):
-                weighted_layers += output[l] * weights[l]
-            emb = weighted_layers
-        # Now we map the subtokens to tokens.
-        tokens_emb = []
-        for b in range(emb.shape[0]):
-            initial_token_mask = batch["initial_token_masks"][b]
-            output_sent = emb[b, :, :]
-            tokens_emb.append(output_sent[initial_token_mask, :])
-        padded = torch.nn.utils.rnn.pad_sequence(tokens_emb, batch_first=True)
-        return self.dropout(padded)
+        outputs["initial_token_masks"] = batch[BATCH_KEYS.SUBWORDS]["initial_token_masks"]
+        batch[self.key] = get_emb_by_initial_token_masks(outputs)
+        return batch
 
     @property
     def output_dim(self):
         """Return the output dimension."""
         return self.hidden_dim
+
+
+def get_emb_by_initial_token_masks(outputs: Dict[str, Any]) -> torch.Tensor:
+    emb = outputs["hidden_states"][-1]  # Only last layer
+    tokens_emb = []
+    for b in range(emb.shape[0]):
+        initial_token_mask = outputs["initial_token_masks"][b]
+        output_sent = emb[b, :, :]
+        tokens_emb.append(output_sent[initial_token_mask, :])
+    padded = nn.utils.rnn.pad_sequence(tokens_emb, batch_first=True)
+    return padded

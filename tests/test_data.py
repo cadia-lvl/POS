@@ -1,37 +1,23 @@
 import torch
-from torch import Tensor
-from torch.utils.data.dataloader import DataLoader
-from pos.data.dataset import dechunk_dataset, get_adjusted_lengths
-
-from pos.utils import read_tsv, tokens_to_sentences
+from pos.constants import Modules
+from pos.core import Dicts, FieldedDataset, Fields, VocabMap
 from pos.data import (
+    BATCH_KEYS,
+    bin_str_to_emb_pair,
+    chunk_dataset,
     emb_pairs_to_dict,
-    read_datasets,
     load_dicts,
-    map_to_index,
     map_to_chars_and_index,
     map_to_chars_batch,
-    bin_str_to_emb_pair,
+    map_to_index,
+    read_datasets,
     wemb_str_to_emb_pair,
-    collate_fn,
-    PAD,
-    PAD_ID,
-    EOS,
-    EOS_ID,
-    SOS,
-    SOS_ID,
-    UNK,
-    UNK_ID,
-    BATCH_KEYS,
-    chunk_dataset,
-    load_tokenizer,
 )
-from pos.core import (
-    FieldedDataset,
-    Fields,
-    VocabMap,
-    Dicts,
-)
+from pos.data.dataset import dechunk_dataset, get_adjusted_lengths
+from pos.model.embeddings import TransformerEmbedding
+from pos.utils import read_tsv, tokens_to_sentences
+from torch import Tensor
+from torch.utils.data.dataloader import DataLoader
 
 
 def test_parse_bin_embedding():
@@ -59,31 +45,27 @@ def test_parse_wemb():
     # fmt: on
 
 
-def test_read_tsv(test_tsv_file):
-    with open(test_tsv_file) as f:
+def test_read_tsv(test_tsv_lemma_file):
+    with open(test_tsv_lemma_file) as f:
         tmp = list(tokens_to_sentences(read_tsv(f)))
         print(tmp)
         tmp == [
-            (("Hæ",), ("a",)),
-            (("Þetta", "er", "test"), ("f", "s", "n")),
-            (("Já", "Kannski"), ("a", "a")),
+            (("Hæ",), ("a",), ("hæ",)),
+            (("Þetta", "er", "test"), ("f", "s", "n"), ("þetta", "vera", "test")),
+            (("Já", "Kannski"), ("a", "a"), ("já", "kannski")),
         ]
 
 
-def test_dataset_from_file(test_tsv_file):
-    test_ds = FieldedDataset.from_file(
-        test_tsv_file, fields=(Fields.Tokens, Fields.GoldTags)
-    )
+def test_dataset_from_file(test_tsv_lemma_file):
+    test_ds = FieldedDataset.from_file(test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
     tmp = test_ds[0]
     print(tmp)
-    assert tmp == (("Hæ",), ("a",))
+    assert tmp == (("Hæ",), ("a",), ("hæ",))
     assert len(test_ds) == 3
 
 
 def test_dataset_from_file_lemmas(test_tsv_lemma_file):
-    test_ds = FieldedDataset.from_file(
-        test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas)
-    )
+    test_ds = FieldedDataset.from_file(test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
     tmp = test_ds[0]
     print(tmp)
     assert tmp == (("Hæ",), ("a",), ("hæ",))
@@ -96,26 +78,16 @@ def test_dataset_from_file_lemmas(test_tsv_lemma_file):
 
 
 def test_add_field(test_tsv_lemma_file):
-    test_ds = FieldedDataset.from_file(
-        test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas)
-    )
+    test_ds = FieldedDataset.from_file(test_tsv_lemma_file, fields=(Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas))
     test_ds = test_ds.add_field(test_ds.get_field(Fields.GoldTags), Fields.Tags)
     assert len(test_ds.fields) == 4
     for element in test_ds:
         assert len(element) == 4
 
 
-def test_add_field_wrong_creation(test_tsv_file):
-    test_ds = FieldedDataset.from_file(test_tsv_file)
-    test_ds = test_ds.add_field(test_ds.get_field(Fields.GoldTags), Fields.Tags)
-    assert len(test_ds.fields) == 3
-    for element in test_ds:
-        assert len(element) == 3
-
-
-def test_read_datasets(test_tsv_file):
-    fields = (Fields.Tokens, Fields.GoldTags)
-    test_ds = read_datasets([test_tsv_file], fields=fields)
+def test_read_datasets(test_tsv_lemma_file):
+    fields = (Fields.Tokens, Fields.GoldTags, Fields.GoldLemmas)
+    test_ds = read_datasets([test_tsv_lemma_file], fields=fields)
     assert len(test_ds) == 3
 
 
@@ -163,9 +135,9 @@ def test_load_dicts(ds):
     assert len(dicts) == 3
 
 
-def test_load_dicts_read_datasets(test_tsv_file):
+def test_load_dicts_read_datasets(test_tsv_lemma_file):
     train_ds = read_datasets(
-        [test_tsv_file],
+        [test_tsv_lemma_file],
     )
     _, dicts = load_dicts(train_ds)
 
@@ -178,7 +150,8 @@ def test_map_to_idx():
 
 def test_map_to_chars(ds):
     c_map = ds.get_char_vocab_map(special_tokens=VocabMap.UNK_PAD_EOS_SOS)
-    for idx, (sent, _) in enumerate(ds):
+    idx = -1
+    for idx, (sent, _, _) in enumerate(ds):
         if idx == 0:
             mapped = map_to_chars_and_index(sent, c_map.w2i)
             print(mapped)
@@ -195,10 +168,8 @@ def test_map_to_chars(ds):
 
 
 def test_map_to_chars_batch(ds):
-    sent_batch = [tokens for tokens, _ in ds]
-    batch = map_to_chars_batch(
-        sent_batch, ds.get_char_vocab_map(VocabMap.UNK_PAD_EOS_SOS).w2i
-    )
+    sent_batch = [tokens for tokens, _, _ in ds]
+    batch = map_to_chars_batch(sent_batch, ds.get_char_vocab_map(VocabMap.UNK_PAD_EOS_SOS).w2i)
     assert batch.shape == (
         3 * 3,
         9,
@@ -206,9 +177,9 @@ def test_map_to_chars_batch(ds):
     print(batch)
 
 
-def test_collate_fn(ds_lemma):
-    _, dicts = load_dicts(ds_lemma)
-    dl = DataLoader(ds_lemma, batch_size=3, collate_fn=collate_fn)
+def test_collate_fn(ds):
+    _, dicts = load_dicts(ds)
+    dl = DataLoader(ds, batch_size=3, collate_fn=ds.collate_fn)  # type: ignore
     assert len(dl) == 1
     for batch in dl:
         assert len(batch) == 5  # The keys
@@ -227,87 +198,109 @@ def test_collate_fn(ds_lemma):
         ]
 
 
-def test_tokenizer_preprocessing_and_postprocessing(
-    ds_lemma: FieldedDataset, electra_model
-):
-    assert len(ds_lemma.fields) == len(ds_lemma.data)  # sanity check
-    assert len(ds_lemma) == 3
-    assert ds_lemma.get_lengths() == (1, 3, 2)
+def test_adjust_lens(ds: FieldedDataset):
+    lengths = tuple(1 for _ in range(sum(ds.get_lengths())))
+    ds = ds.adjust_lengths(lengths, shorten=True)
+    assert ds.get_lengths() == lengths
+
+
+def test_tokenizer_preprocessing_and_postprocessing(ds: FieldedDataset, electra_model):
+    assert len(ds.fields) == len(ds.data)  # sanity check
+    assert len(ds) == 3
+    assert ds.get_lengths() == (1, 3, 2)
     # be sure that there are too long sentences
-    assert any(
-        len(field) > 2 for sentence_fields in ds_lemma for field in sentence_fields
-    )
-    max_sequence_length = (
-        2 + 2 + 6
-    )  # 2 extra for [SEP] and [CLS] and extra defined in function
-    chunked_ds = chunk_dataset(
-        ds_lemma, load_tokenizer(electra_model), max_sequence_length=max_sequence_length
-    )
+    assert any(len(field) > 2 for sentence_fields in ds for field in sentence_fields)
+    max_sequence_length = 2 + 2 + 6  # 2 extra for [SEP] and [CLS] and extra defined in function
+
+    wemb = TransformerEmbedding(Modules.BERT, electra_model)
+    chunked_ds = chunk_dataset(ds, wemb.tokenizer, max_sequence_length=max_sequence_length)
     assert len(chunked_ds) == 4
     chunked_lengths = chunked_ds.get_lengths()
     assert chunked_lengths == (1, 2, 1, 2)
     # All should be of acceptable length
     assert all(length <= max_sequence_length for length in chunked_lengths)
-    dechunked_ds = dechunk_dataset(ds_lemma, chunked_ds)
+    dechunked_ds = dechunk_dataset(ds, chunked_ds)
     dechunked_lengths = dechunked_ds.get_lengths()
-    assert dechunked_lengths == ds_lemma.get_lengths()
+    assert dechunked_lengths == ds.get_lengths()
 
 
 def test_more_tokenization(electra_model):
     max_sequence_length = 512
-    tok = load_tokenizer(electra_model)
+    wemb = TransformerEmbedding(Modules.BERT, electra_model)
+    tok = wemb.tokenizer
     # fmt: off
     test = [('Báðar', 'segjast', 'þær', 'hafa', 'verið', 'látnar', 'matast', 'í', 'eldhúsinu', ',', 'eins', 'og', 'hjúum', 'var', 'gjarnan', 'skipað', 'erlendis', ',', 'og', 'ekki', 'líkað', 'það', 'par', 'vel', 'enda', 'vanar', 'meiri', 'virðingu', 'að', 'heiman', '.')]
     # fmt: on
     lengts = get_adjusted_lengths(
         tuple(test),
-        load_tokenizer(electra_model),
+        tok,
         max_sequence_length=max_sequence_length,
     )
     assert lengts == (len(test[0]),)
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
-    chunked_ds = chunk_dataset(
-        ds, load_tokenizer(electra_model), max_sequence_length=max_sequence_length
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
+    # fmt: off
+    test = [('Fræðslu-', 'og', 'kynningarfundur', 'kl.', '14', '.')]
+    # fmt: on
+    lengts = get_adjusted_lengths(
+        tuple(test),
+        tok,
+        max_sequence_length=max_sequence_length,
     )
-
+    ds = FieldedDataset((tuple(test),), fields=("tokens",))
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
     # fmt: off
     test = [("9,754", "kl.")]
     # fmt: on
     lengts = get_adjusted_lengths(
         tuple(test),
-        load_tokenizer(electra_model),
+        tok,
         max_sequence_length=max_sequence_length,
     )
     assert lengts == (len(test[0]),)
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
-    chunked_ds = chunk_dataset(
-        ds, load_tokenizer(electra_model), max_sequence_length=max_sequence_length
-    )
-
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
     # fmt: off
     test = [('Kl.', '9', 'handavinna', ',', 'útskurður', ',', 'fótaaðgerð', 'og', 'hárgreiðsla', '.')]
     # fmt: on
     lengts = get_adjusted_lengths(
         tuple(test),
-        load_tokenizer(electra_model),
+        tok,
         max_sequence_length=max_sequence_length,
     )
     assert lengts == (len(test[0]),)
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
-    chunked_ds = chunk_dataset(
-        ds, load_tokenizer(electra_model), max_sequence_length=max_sequence_length
-    )
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
 
     # fmt: off
     test = [('ýsa', '36', '36', '36', '257', '9,252', 'Und.', 'þorskur', '62', '62', '62', '276', '17,112', 'Ýsa', '169', '34', '129', '5,967', '767,608', 'Þorskur', '204', '160', '174', '460', '79,831', 'Þykkvalúra', '214', '214', '214', '1,070', 'Samtals', '143', '11,129', '1,592,544', 'FISKMARKAÐUR', 'VESTMANNAEYJA', 'Blálanga', '31', '31', '31', '76', '2,356', 'Grálúða', '180', '177', '178', '44', '7,833', 'Gullkarfi', '87', '87', '87', '124', '10,788', 'Hlýri', '76', '76', '76', '899', '68,325', 'Keila', '32', '32', '32', '41', '1,312', 'Keilubróðir', '4', 'Langa', '74', '67', '72', '1,111', '79,799', 'Lúða', '204', '181', '192', '83', '15,917', 'Skarkoli', '21', '21', '21', '5', '105', 'Skata', '97', '17', '68', '25', '1,705', 'Skötuselur', '181', '140', '165', '576', '94,846', 'Steinbítur', '76', '69', '75', '454', '34,203', 'Stórkjafta', '12', '12', '12', '283', '3,396', 'Ufsi', '35', '25', '34', '5,384', '181,863', 'Und.', 'ufsi', '6', '6', '6', '30', '180', 'Ósundurliðað', '3', 'Ýsa', '55', '67', '89', '6,005', 'Þorskur', '186', '76', '141', '236', '33,375', 'Þykkvalúra', '190', '7', '160', '133', '21,244', 'Samtals', '59', '9,600', '563,252', 'FISKMARKAÐUR', 'ÞÓRSHAFNAR', 'Hlýri', '81', '81', '81', '770', '62,371', 'Langa', '59', '59', '59', '43', '2,537', 'Náskata', '15', '15', '15', '103', '1,545', 'Steinbítur', '70', '70', '70', '131', '9,170', 'Ufsi', '22', '22', '22', '777', '17,094', 'Und.', 'ýsa', '29', '29', '29', '192', '5,568', 'Ýsa', '36', '36', '36', '120', '4,320', 'Samtals', '48', '2,136', '102,605', 'FISKMARKAÐURINN', 'Á', 'SKAGASTRÖND', 'Lúða', '459', '151', '298', '21', '6,251', 'Skata', '47', '47', '47', '12', '564', 'Ufsi', '15', '15', '15', '117', '1,755', 'Und.', 'þorskur', '63', '63', '63', '31,500', 'Ýsa', '172', '69', '133', '800', '106,700', 'Þorskur', '229', '90', '129', '6,690', '862,380', 'Samtals', '124', '8,140', '1,009,150', 'FM', 'PATREKSFJARÐAR', 'Lúða', '161', '161', '161', '24', '3,864', 'Skarkoli', '100', '100', '100', '129', '12,900', 'Steinbítur', '68', '68', '68', '75', '5,100', 'Ufsi', '22', '22', '22', '1,042', '22,924', 'Und.', 'þorskur', '64', '64', '64', '1,258', '80,512', 'Ýsa', '122', '41', '86', '370', '31,937', 'Þorskur', '128', '72', '101', '14,733', '1,493,633', 'Samtals', '94', '17,631')]
     # fmt: on
     lengts = get_adjusted_lengths(
         tuple(test),
-        load_tokenizer(electra_model),
+        tok,
         max_sequence_length=max_sequence_length,
     )
     assert sum(lengts) == len(test[0])
     ds = FieldedDataset((tuple(test),), fields=("tokens",))
-    chunked_ds = chunk_dataset(
-        ds, load_tokenizer(electra_model), max_sequence_length=max_sequence_length
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
+    test = [("Síðan", "kom", "Gern", "hab", "'", "ich", "die", "Frau", "'", "n", "geküßt", "úr")]
+    lengts = get_adjusted_lengths(
+        tuple(test),
+        tok,
+        max_sequence_length=max_sequence_length,
     )
+    assert sum(lengts) == len(test[0])
+    ds = FieldedDataset((tuple(test),), fields=("tokens",))
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
+    # fmt: off
+    test = [('qt', '/', 'qt-1', '<', '1', '.')]
+    # fmt: on
+    lengts = get_adjusted_lengths(
+        tuple(test),
+        tok,
+        max_sequence_length=max_sequence_length,
+    )
+    assert sum(lengts) == len(test[0])
+    ds = FieldedDataset((tuple(test),), fields=("tokens",))
+    chunked_ds = chunk_dataset(ds, tok, max_sequence_length=max_sequence_length)
+    assert chunked_ds is not None
