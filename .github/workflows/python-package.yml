@@ -20,9 +20,6 @@ jobs:
         pip install -U pip
         pip install poetry
         poetry install
-    - name: Check documentation with pydocstyle
-      run: |
-        poetry run pydocstyle
     - name: Test with pytest
       run: |
         poetry run pytest
