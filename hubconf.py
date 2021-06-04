@@ -25,7 +25,7 @@ def _get_model_location(model_dir_or_url: str, model_name: str, force_download: 
 
         need_extraction = False
         if not download_location.exists() or force_download:
-            log.debug("Downloading model")
+            log.debug(f"Downloading model from {model_dir_or_url}")
             torch.hub.download_url_to_file(model_dir_or_url, download_location)
             need_extraction = True
 
