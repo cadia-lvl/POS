@@ -4,12 +4,8 @@ from pos import core
 from pos.constants import PAD, Modules
 from pos.core import Dicts
 from pos.model.decoders import CharacterDecoder, Tagger
-from pos.model.embeddings import (
-    CharacterAsWordEmbedding,
-    CharacterEmbedding,
-    ClassicWordEmbedding,
-    TransformerEmbedding,
-)
+from pos.model.embeddings import (CharacterAsWordEmbedding, CharacterEmbedding,
+                                  ClassicWordEmbedding, TransformerEmbedding)
 from pos.model.interface import Decoder, Encoder, EncodersDecoders
 from transformers.models.auto import AutoModel
 
@@ -84,6 +80,7 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
         char_decoder = CharacterDecoder(
             key=Modules.Lemmatizer,
             tag_encoder=tag_embedding,
+            context_encoder=embs[Modules.BERT] if Modules.BERT in embs else None,
             characters_to_tokens_encoder=char_as_word,
             characters_encoder=character_embedding,
             vocab_map=dicts[Dicts.Chars],

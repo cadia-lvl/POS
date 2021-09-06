@@ -11,33 +11,21 @@ from typing import Dict
 
 import click
 import torch
+import wandb
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
 from pos import bin_to_ifd, core, evaluate
 from pos.api import Tagger
 from pos.constants import Modules
-from pos.core import Dicts, FieldedDataset, Fields, Vocab, VocabMap, set_device, set_seed
-from pos.data import (
-    bin_str_to_emb_pair,
-    chunk_dataset,
-    dechunk_dataset,
-    emb_pairs_to_dict,
-    read_datasets,
-    read_morphlex,
-    read_pretrained_word_embeddings,
-    wemb_str_to_emb_pair,
-)
+from pos.core import (Dicts, FieldedDataset, Fields, Vocab, VocabMap,
+                      set_device, set_seed)
+from pos.data import (bin_str_to_emb_pair, chunk_dataset, dechunk_dataset,
+                      emb_pairs_to_dict, read_datasets, read_morphlex,
+                      read_pretrained_word_embeddings, wemb_str_to_emb_pair)
 from pos.model.utils import build_model
-from pos.train import (
-    MODULE_TO_FIELD,
-    get_criterion,
-    get_optimizer,
-    get_scheduler,
-    print_model,
-    run_epochs,
-    tag_data_loader,
-)
+from pos.train import (MODULE_TO_FIELD, get_criterion, get_optimizer,
+                       get_scheduler, print_model, run_epochs, tag_data_loader)
 
 MORPHLEX_VOCAB_PATH = "./data/extra/morphlex_vocab.txt"
 PRETRAINED_VOCAB_PATH = "./data/extra/pretrained_vocab.txt"
@@ -241,6 +229,7 @@ def train_and_tag(**kwargs):
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
+    wandb.init(project="pos-redo", entity="haukurp", config=kwargs)
     log.info(kwargs)
     set_seed()
     set_device(gpu_flag=kwargs["gpu"])
@@ -272,6 +261,7 @@ def train_and_tag(**kwargs):
         test_ds = unchunked_test_ds
     # Train a model
     print_model(model)
+    wandb.watch(model)
     model.to(core.device)
     if kwargs["lemmatizer_state_dict"]:
         model.load_state_dict(torch.load(kwargs["lemmatizer_state_dict"], map_location=core.device))

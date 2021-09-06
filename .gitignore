@@ -17,3 +17,4 @@ debug/
 .python-version
 old_experiments/
 roberta/
+wandb/

@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, Tuple
 
 import torch
+import wandb
 from torch import Tensor, log_softmax, no_grad, numel, stack, zeros_like
 from torch.nn import CrossEntropyLoss, Module
 from torch.nn.utils import clip_grad_norm_
@@ -203,10 +204,6 @@ def run_epochs(
     output_dir,
 ):
     """Run all the training epochs using the training data and evaluate on the test data."""
-    from torch.utils import tensorboard
-
-    writer = tensorboard.SummaryWriter(str(output_dir))
-
     for epoch in range(1, epochs + 1):
         # Time it
         start = datetime.now()
@@ -218,7 +215,7 @@ def run_epochs(
             data_loader=train_data_loader,
             log_prepend=f"Epoch={epoch}/{epochs}, ",
         )
-        write_losses(writer, "Train", train_losses, epoch)
+        write_losses("Train", train_losses, epoch)
         end = datetime.now()
         log.info(f"Training took={end-start} seconds")
         val_losses, val_preds = tag_data_loader(
@@ -226,10 +223,10 @@ def run_epochs(
             data_loader=test_data_loader,
             criterion=criterion,
         )
-        write_losses(writer, "Val", val_losses, epoch)
+        write_losses("Val", val_losses, epoch)
         for module_name, evaluator in evaluators.items():
             accuracies, _ = evaluator(val_preds[module_name])
-            write_accuracies(writer, module_name, accuracies, epoch)
+            write_accuracies(module_name, accuracies, epoch)
         if type(scheduler) == ReduceLROnPlateau:
             scheduler.step(sum((loss for loss in val_losses.values())))
         else:
@@ -240,17 +237,17 @@ def run_epochs(
     # model.load_state_dict(torch.load('model.pt'))
 
 
-def write_accuracies(writer, module_name, accuracies: Dict[str, float], epoch):
+def write_accuracies(module_name, accuracies: Dict[str, float], epoch):
     """Write accuracies to Tensorboard and log."""
     for accuracy_name, accuracy in accuracies.items():
-        writer.add_scalar(f"Accuracy/{module_name}/{accuracy_name}", accuracy, epoch)
+        wandb.log({f"Accuracy/{module_name}/{accuracy_name}": accuracy, "epoch": epoch}, step=epoch)
         log.info(f"Epoch: {epoch}, Accuracy/{module_name}/{accuracy_name}: {accuracy}")
 
 
-def write_losses(writer, train_val, losses, epoch):
+def write_losses(train_val, losses, epoch, step):
     """Write losses to Tensorboard and log."""
     for module_name, loss in losses.items():
-        writer.add_scalar(f"Loss/{train_val}/{module_name}", loss, epoch)
+        wandb.log({"Loss/{train_val}/{module_name}": loss, "epoch": epoch}, step=epoch)
         log.info(f"Epoch: {epoch}, Loss/{train_val}/{module_name}: {loss}")
 
 

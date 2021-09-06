@@ -56,6 +56,7 @@ class CharacterDecoder(interface.Decoder):
         characters_encoder: CharacterEmbedding,
         characters_to_tokens_encoder: CharacterAsWordEmbedding,
         tag_encoder: interface.Encoder,
+        context_encoder: Optional[interface.Encoder],
         num_layers=1,
         char_rnn_input_dim=0,
         attention_dim=0,
@@ -69,6 +70,8 @@ class CharacterDecoder(interface.Decoder):
         self.num_layers = num_layers
         self.tag_encoder_key = tag_encoder.key
         self.hidden_dim = hidden_dim  # The internal dimension of the GRU model
+        self.context_encoder_key = context_encoder.key if context_encoder else None
+        self.context_dim = context_encoder.output_dim if context_encoder else 256  # Set to 256 so we can add it later.
         self.attention_dim = attention_dim
         self._output_dim = len(vocab_map)  # The number of characters, these will be interpreted as logits.
         self._weight = weight
@@ -86,6 +89,7 @@ class CharacterDecoder(interface.Decoder):
         # last character + sentence context + character attention
         rnn_in_dim = (
             char_emb_dim
+            + self.context_dim
             + tag_encoder.output_dim
             + (self.attention_dim if self.char_attention else 0)
             + self.char_rnn_input_dim
@@ -200,6 +204,10 @@ class CharacterDecoder(interface.Decoder):
         tags = batch[self.tag_encoder_key]
         tag_embeddings = tags.clone().detach()
         b, s, f = tag_embeddings.shape
+        if self.context_encoder_key:
+            context = batch[self.context_encoder_key].reshape(b * s, f)
+        else:
+            context = torch.zeros(b * s, self.context_dim, device=tag_embeddings.device)
         # 1 for EOS
         c = (
             batch[BATCH_KEYS.LEMMA_CHAR_IDS].shape[1]
@@ -224,7 +232,7 @@ class CharacterDecoder(interface.Decoder):
         while next_char_input is not None:
             # (b*s, f)
             emb_chars = self.dropout(self.char_emb(next_char_input))
-            rnn_in = torch.cat((emb_chars, tag_embeddings), dim=1)
+            rnn_in = torch.cat((emb_chars, tag_embeddings, context), dim=1)
             if self.char_rnn_input_dim:
                 # (b*s, f)
                 rnn_in = torch.cat((rnn_in, batch[self.characters_to_tokens_encoder_key][1]), dim=1)
