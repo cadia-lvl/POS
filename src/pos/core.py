@@ -2,7 +2,8 @@
 import logging
 import random
 from enum import Enum
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Dict, Iterable, Iterator, List, Optional, Sequence,
+                    Set, Tuple, Union)
 
 import numpy as np
 import torch
@@ -232,12 +233,30 @@ class FieldedDataset(Dataset):
         else:
             return self._lengthen_field_length(field, lengths)
 
-    def adjust_lengths(self, lengths: Tuple[int, ...], shorten):
+    def adjust_lengths(self, lengths: Tuple[int, ...], shorten) -> "FieldedDataset":
         """Adjust the lengths of the dataset according to the given lengths."""
         adjusted_data = []
         for field in self.fields:
             adjusted_data.append(self._adjust_field_length(field, lengths, shorten))
         return FieldedDataset(tuple(adjusted_data), self.fields)
+
+    def adjust_to_maximum_length(self, maximum_length: int) -> "FieldedDataset":
+        """Adjust the dataset so that no sequence has longer length than maximum_length."""
+        def chunk_length(lenght: int) -> List[int]:
+            """Chunk (divide) the given length into a list of lengths, where no length is more than the maximum_length."""
+            whole_chunks = int(lenght / maximum_length)
+            remainder = lenght % maximum_length
+            return [maximum_length] * whole_chunks + [remainder]
+
+        adjusted_lengths = []
+        lengths = self.get_lengths()
+        for length in lengths:
+            if length <= maximum_length:
+                adjusted_lengths.append(length)
+            else:
+                adjusted_lengths.extend(chunk_length(length))
+
+        return self.adjust_lengths(tuple(adjusted_lengths), shorten=True)
 
     def get_field(self, field=Fields.Tokens) -> Sentences:
         """Get the field."""

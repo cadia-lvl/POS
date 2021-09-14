@@ -1,7 +1,7 @@
 #!/bin/bash
 OUT_DIR=$1
-TRAIN="/home/haukurpj/Datasets/bin_data_clean_split.tsv"
-TEST="/home/haukurpj/Datasets/MIM-GOLD-SETS.21.05/sets/10PM.tsv"
+TRAIN="/home/haukurpj/Datasets/MIM-Correct/10TM.tsv"
+TEST="/home/haukurpj/Datasets/MIM-Correct/10PM.tsv"
 
 mkdir -p $OUT_DIR
 echo $OUT_DIR
@@ -25,13 +25,15 @@ $TRAIN \
 --adjust_lengths 128 \
 --lemmatizer \
 --lemmatizer_hidden_dim 512 \
+--lemmatizer_state_dict out/lemmatizer_bin/model_12.pt \
+--bert_encoder /data2/scratch/haukurpj/Models/Models/LM/electra-small-pytorch \
 --tag_embedding_dim 128 \
 --char_lstm_layers 1 \
 --char_lstm_dim 256 \
 --char_emb_dim 128 \
---label_smoothing 0.0 \
+--label_smoothing 0.1 \
 --epochs 20 \
---batch_size 1024 \
+--batch_size 16 \
 --optimizer adam \
 --learning_rate 5e-4 \
 --scheduler none \

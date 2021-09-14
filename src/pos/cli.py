@@ -244,18 +244,16 @@ def train_and_tag(**kwargs):
 
     dicts = build_dictionaries(kwargs)
     model = build_model(kwargs=kwargs, dicts=dicts)
-    if kwargs["adjust_lengths"]:
-        log.info("Adjusting lengths")
-        lengths = tuple(1 for _ in range(sum(unchunked_train_ds.get_lengths())))
-        train_ds = unchunked_train_ds.adjust_lengths(lengths, shorten=True)
-        lengths = tuple(1 for _ in range(sum(unchunked_test_ds.get_lengths())))
-        test_ds = unchunked_test_ds.adjust_lengths(lengths, shorten=True)
-    elif Modules.BERT in model.encoders.keys():
+    if Modules.BERT in model.encoders.keys():
         # TODO: Load tokenizer independently and set it to the encoder.
         tok: PreTrainedTokenizerFast = model.encoders[Modules.BERT].tokenizer  # type: ignore
         max_length = model.encoders[Modules.BERT].max_length
         train_ds = chunk_dataset(unchunked_train_ds, tok, max_length)
         test_ds = chunk_dataset(unchunked_test_ds, tok, max_length)
+    elif kwargs["adjust_lengths"]:
+        log.info("Adjusting lengths")
+        train_ds = unchunked_train_ds.adjust_to_maximum_length(kwargs["adjust_lengths"])
+        test_ds = unchunked_test_ds.adjust_to_maximum_length(kwargs["adjust_lengths"])
     else:
         train_ds = unchunked_train_ds
         test_ds = unchunked_test_ds
@@ -264,7 +262,7 @@ def train_and_tag(**kwargs):
     wandb.watch(model)
     model.to(core.device)
     if kwargs["lemmatizer_state_dict"]:
-        model.load_state_dict(torch.load(kwargs["lemmatizer_state_dict"], map_location=core.device))
+        model.load_state_dict(torch.load(kwargs["lemmatizer_state_dict"], map_location=core.device), strict=False)
 
     train_dl = DataLoader(
         train_ds, collate_fn=train_ds.collate_fn, shuffle=True, batch_size=kwargs["batch_size"]  # type: ignore

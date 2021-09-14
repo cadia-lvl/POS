@@ -205,7 +205,7 @@ class CharacterDecoder(interface.Decoder):
         tag_embeddings = tags.clone().detach()
         b, s, f = tag_embeddings.shape
         if self.context_encoder_key:
-            context = batch[self.context_encoder_key].reshape(b * s, f)
+            context = batch[self.context_encoder_key].reshape(b * s, self.context_dim)
         else:
             context = torch.zeros(b * s, self.context_dim, device=tag_embeddings.device)
         # 1 for EOS
