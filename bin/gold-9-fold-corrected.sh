@@ -1,7 +1,7 @@
 #!/bin/bash
 FOLDS="01 02 03 04 05 06 07 08 09"
-FOLDS="08"
-DATA_DIR="~/Datasets/MIM-GOLD-SETS.21.05/sets"
+FOLDS="08 09"
+DATA_DIR="~/Datasets/MIM-Correct"
 
 MODEL=$1
 NAME="$2"

@@ -244,13 +244,13 @@ def train_and_tag(**kwargs):
 
     dicts = build_dictionaries(kwargs)
     model = build_model(kwargs=kwargs, dicts=dicts)
-    if Modules.BERT in model.encoders.keys():
+    if kwargs["adjust_lengths"]:
         # TODO: Load tokenizer independently and set it to the encoder.
         tok: PreTrainedTokenizerFast = model.encoders[Modules.BERT].tokenizer  # type: ignore
         max_length = model.encoders[Modules.BERT].max_length
         train_ds = chunk_dataset(unchunked_train_ds, tok, max_length)
         test_ds = chunk_dataset(unchunked_test_ds, tok, max_length)
-    elif kwargs["adjust_lengths"]:
+    elif Modules.BERT in model.encoders.keys():
         log.info("Adjusting lengths")
         train_ds = unchunked_train_ds.adjust_to_maximum_length(kwargs["adjust_lengths"])
         test_ds = unchunked_test_ds.adjust_to_maximum_length(kwargs["adjust_lengths"])
@@ -453,6 +453,33 @@ def run_model(model, data_in, output, batch_size, field):
     log.info("Writing results")
     ds.to_tsv_file(output)
     log.info("Done!")
+
+
+# fmt: off
+@cli.command()
+@click.argument("predictions")
+@click.argument("fields")
+@click.option("--train_tokens", help="The location of the training tokens used to train the model.", default=None)
+@click.option("--train_lemmas", help="The location of the training lemmas used to train the model.", default=None)
+@click.option("--feature", type=click.Choice(["tags", "lemmas"], case_sensitive=False), help="Which feature to evaluate.", default="tags")
+@click.option("--selection", type=click.Choice(["total", "unknown", "known"], case_sensitive=False), help="Filter on this set.", default="tags")
+# fmt: on
+def filter_incorrect(predictions, fields, train_tokens, train_lemmas, feature, selection):
+    ds = FieldedDataset.from_file(predictions, fields=tuple(fields.split(",")))
+    train_tokens = Vocab.from_file(train_tokens)
+    train_lemmas = Vocab.from_file(train_lemmas)
+    exclude_set = set()
+    if selection == "unknown":
+        exclude_set = set(train_lemmas)
+    if feature == "tags":
+        pass
+    elif feature == "lemmas":
+        for pred_sentence, gold_sentence in zip(ds.get_field(Fields.Lemmas), ds.get_field(Fields.GoldLemmas)):
+            for lemma, gold_lemma in zip(pred_sentence, gold_sentence):
+                if gold_lemma in exclude_set or lemma == gold_lemma:
+                    continue
+                else:
+                    click.echo(f"pred={lemma} correct={gold_lemma}")
 
 
 # fmt: off
