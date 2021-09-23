@@ -185,6 +185,7 @@ def build_dictionaries(kwargs):
 @click.argument("training_files", nargs=-1)
 @click.argument("test_file")
 @click.argument("output_dir")
+@click.option("--run_name", default=None, help="Name the run in weights and biases.")
 @click.option("--adjust_lengths", default=0, help="Should we adjust the lengths of sequences to something specific?")
 @click.option("--gpu/--no_gpu", default=False)
 @click.option("--known_chars_file", default="./data/extra/characters_training.txt", help="A file which contains the characters the model should know. File should be a single line, the line is split() to retrieve characters.",)
@@ -203,6 +204,7 @@ def build_dictionaries(kwargs):
 @click.option("--lemmatizer_char_attention/--no_lemmatizer_char_attention", default=True, help="Attend over characters?")
 @click.option("--lemmatizer_state_dict", default=None, help="The lemmatizer state_dict to continue training from.")
 @click.option("--tag_embedding_dim", default=0, help="The PoS tag embedding dim to feed to the lemmatizer. Set to 0 to disable.")
+@click.option("--tag_embedding_dropout", default=0.0, help="The dropout to use for TagEmbedding.")
 @click.option("--char_lstm_layers", default=0, help="The number of layers in character LSTM embedding. Set to 0 to disable.")
 @click.option("--char_lstm_dim", default=128, help="The size of the hidden dim in character RNN.")
 @click.option("--char_emb_dim", default=64, help="The embedding size for characters.")
@@ -229,7 +231,7 @@ def train_and_tag(**kwargs):
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
-    wandb.init(project="pos-redo", entity="haukurp", config=kwargs)
+    wandb.init(project="pos-redo", entity="haukurp", config=kwargs, name=kwargs.get("run_name", None))
     log.info(kwargs)
     set_seed()
     set_device(gpu_flag=kwargs["gpu"])

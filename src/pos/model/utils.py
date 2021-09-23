@@ -5,7 +5,8 @@ from pos.constants import PAD, Modules
 from pos.core import Dicts
 from pos.model.decoders import CharacterDecoder, Tagger
 from pos.model.embeddings import (CharacterAsWordEmbedding, CharacterEmbedding,
-                                  ClassicWordEmbedding, TransformerEmbedding)
+                                  ClassicWordEmbedding, TagEmbedding,
+                                  TransformerEmbedding)
 from pos.model.interface import Decoder, Encoder, EncodersDecoders
 from transformers.models.auto import AutoModel
 
@@ -69,12 +70,12 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
             dropout=kwargs["emb_dropouts"],
         )
         embs[Modules.CharactersToTokens] = char_as_word
-        tag_embedding = ClassicWordEmbedding(
+        tag_embedding = TagEmbedding(
             key=Modules.TagEmbedding,
             vocab_map=dicts[Dicts.FullTag],
             embedding_dim=kwargs["tag_embedding_dim"],
             padding_idx=dicts[Dicts.FullTag].w2i[PAD],
-            dropout=kwargs["emb_dropouts"],
+            dropout=kwargs["tag_embedding_dropout"],
         )
         embs[Modules.TagEmbedding] = tag_embedding
         char_decoder = CharacterDecoder(

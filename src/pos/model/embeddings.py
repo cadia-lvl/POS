@@ -96,6 +96,27 @@ class PretrainedEmbedding(ClassicWordEmbedding):
         batch[self.key] = self.dropout(self.embedding(batch[BATCH_KEYS.PRETRAINED_TOKEN_IDS]))
         return batch
 
+class TagEmbedding(ClassicWordEmbedding):
+    """Embeddings for tags."""
+
+    def preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Preprocess the sentence batch."""
+        batch[BATCH_KEYS.FULL_TAGS_IDS] = nn.utils.rnn.pad_sequence(
+            [map_to_index(x, w2i=self.vocab_map.w2i) for x in batch[BATCH_KEYS.FULL_TAGS]],
+            batch_first=True,
+        )
+        return batch
+
+    def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the embedding."""
+        batch[self.key] = self.dropout(self.embedding(batch[BATCH_KEYS.FULL_TAGS_IDS]))
+        return batch
+
+    @property
+    def output_dim(self):
+        """Return the output dimension."""
+        return self.embedding.weight.data.shape[1]
+
 
 class CharacterAsWordEmbedding(interface.Encoder):
     """A Character as Word Embedding."""
