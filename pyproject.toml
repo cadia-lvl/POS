@@ -41,9 +41,9 @@ torch = "^1.7.0"
 tqdm = "^4.48.2"
 click = "^7.1.2"
 transformers = "~4.1.1"
-wandb = "^0.12.1"
 
 [tool.poetry.dev-dependencies]
+wandb = "^0.12.1"
 pydocstyle = "^5.0.2"
 pytest = "^6.0.1"
 tensorboard = "^2.3.0"

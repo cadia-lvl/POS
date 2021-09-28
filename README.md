@@ -166,7 +166,54 @@ Laxness nken-s
 
 And then adding the lemmas:
 ```
-pos lemma example_tagged.txt
+pos lemma example_tagged.txt  # If you have previously been using and older version of the PoS tagger and this fails. Try adding the "--force_reload" flag to this command (once).
+...
+Þar	aa	þar
+sem	c	sem
+jökulinn	nkeog	jökull
+ber	sfg3en	bera
+við	af	við
+loft	nheo	loft
+hættir	sfg3en	hætta
+landið	nheng	land
+að	cn	að
+vera	sng	vera
+jarðneskt	lhensf	jarðneskur
+,	pk	,
+en	c	en
+jörðin	nveng	jörð
+fær	sfg3en	fá
+hlutdeild	nveo	ílutdeild
+í	af	í
+himninum	nkeþg	himinn
+,	pk	,
+þar	aa	þar
+búa	sfg3fn	búa
+ekki	aa	ekki
+framar	aam	framar
+neinar	fovfn	neinn
+sorgir	nvfn	sorg
+og	c	og
+þess	fphee	það
+vegna	af	vegna
+er	sfg3en	vera
+gleðin	nveng	gleði
+ekki	aa	ekki
+nauðsynleg	lvensf	nauðsynlegur
+,	pk	,
+þar	aa	þar
+ríkir	sfg3en	ríkja
+fegurðin	nveng	regurð
+ein	lvensf	einn
+,	pk	,
+ofar	afm	ofar
+hverri	foveþ	hver
+kröfu	nveþ	krafa
+.	pl	.
+
+Halldór	nken-s	Ialldór
+Laxness	nken-s	Laxness
+
 ```
 For additional flags and further details see `pos tag --help`
 
