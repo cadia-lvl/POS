@@ -1,17 +1,19 @@
 #!/bin/bash
 #SBATCH --job-name=pos_lemmatizer
 #SBATCH --gres=gpu:1
-OUT_DIR=$1
+NAME=$1
+# TRAIN=$2
+# TEST=$3
+# shift; 
+# shift;
+shift;
 TRAIN="/home/haukurpj/Datasets/MIM-Correct/10TM.tsv"
-TRAIN=$2
 TEST="/home/haukurpj/Datasets/MIM-Correct/10PM.tsv"
-TEST=$3
-
+OUT_DIR="out/$NAME"
 mkdir -p $OUT_DIR
 echo $OUT_DIR
 echo $TRAIN
 echo $TEST
-shift; shift; shift;
 echo $*
 #    --morphlex_embeddings_file data/extra/dmii.vectors_filtered \
 #    --morphlex_freeze \
@@ -26,16 +28,18 @@ train-and-tag \
 $TRAIN \
 "$TEST" \
 "$OUT_DIR" \
+--run_name $NAME \
 --lemmatizer \
 --lemmatizer_hidden_dim 512 \
---lemmatizer_state_dict ~/Models/Lemmatizer/lemmatizer_bin/model_12.pt \
+--lemmatizer_state_dict out/lemma-bin-no-clone-d32-drop08/model.pt \
 --bert_encoder ~/Models/LM/electra-small-pytorch \
---tag_embedding_dim 128 \
+--tag_embedding_dim 32 \
+--tag_embedding_dropout 0.0 \
 --char_lstm_layers 1 \
 --char_lstm_dim 256 \
 --char_emb_dim 128 \
 --label_smoothing 0.1 \
---epochs 40 \
+--epochs 20 \
 --batch_size 64 \
 --optimizer adam \
 --learning_rate 5e-5 \

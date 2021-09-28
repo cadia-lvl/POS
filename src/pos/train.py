@@ -247,7 +247,7 @@ def write_accuracies(module_name, accuracies: Dict[str, float], epoch):
 def write_losses(train_val, losses, epoch):
     """Write losses to Tensorboard and log."""
     for module_name, loss in losses.items():
-        wandb.log({"Loss/{train_val}/{module_name}": loss, "epoch": epoch}, step=epoch)
+        wandb.log({f"Loss/{train_val}/{module_name}": loss, "epoch": epoch}, step=epoch)
         log.info(f"Epoch: {epoch}, Loss/{train_val}/{module_name}: {loss}")
 
 

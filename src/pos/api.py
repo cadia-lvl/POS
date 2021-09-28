@@ -33,7 +33,7 @@ class Tagger:
         set_device(gpu_flag="cpu" != device)
         log.info("Reading model file...")
         model_path = Path(model_dir)
-        assert model_path.exists(), "Model dir not found"
+        assert model_path.exists(), f"Model dir:{model_path} not found"
         with open(model_path / "hyperparamters.json") as f:
             kwargs = json.load(f)
             kwargs["trained"] = model_dir

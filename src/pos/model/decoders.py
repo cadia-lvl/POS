@@ -202,7 +202,7 @@ class CharacterDecoder(interface.Decoder):
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Run the decoder on the batch."""
         tags = batch[self.tag_encoder_key]
-        tag_embeddings = tags.clone().detach()
+        tag_embeddings = tags
         b, s, f = tag_embeddings.shape
         if self.context_encoder_key:
             context = batch[self.context_encoder_key].reshape(b * s, self.context_dim)

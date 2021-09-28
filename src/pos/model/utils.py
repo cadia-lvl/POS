@@ -75,7 +75,7 @@ def build_model(kwargs, dicts) -> EncodersDecoders:
             vocab_map=dicts[Dicts.FullTag],
             embedding_dim=kwargs["tag_embedding_dim"],
             padding_idx=dicts[Dicts.FullTag].w2i[PAD],
-            dropout=kwargs["tag_embedding_dropout"],
+            dropout=kwargs.get("tag_embedding_dropout", 0.0),
         )
         embs[Modules.TagEmbedding] = tag_embedding
         char_decoder = CharacterDecoder(

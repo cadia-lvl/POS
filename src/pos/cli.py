@@ -247,15 +247,15 @@ def train_and_tag(**kwargs):
     dicts = build_dictionaries(kwargs)
     model = build_model(kwargs=kwargs, dicts=dicts)
     if kwargs["adjust_lengths"]:
+        log.info("Adjusting lengths")
+        train_ds = unchunked_train_ds.adjust_to_maximum_length(kwargs["adjust_lengths"])
+        test_ds = unchunked_test_ds.adjust_to_maximum_length(kwargs["adjust_lengths"])
+    elif Modules.BERT in model.encoders.keys():
         # TODO: Load tokenizer independently and set it to the encoder.
         tok: PreTrainedTokenizerFast = model.encoders[Modules.BERT].tokenizer  # type: ignore
         max_length = model.encoders[Modules.BERT].max_length
         train_ds = chunk_dataset(unchunked_train_ds, tok, max_length)
         test_ds = chunk_dataset(unchunked_test_ds, tok, max_length)
-    elif Modules.BERT in model.encoders.keys():
-        log.info("Adjusting lengths")
-        train_ds = unchunked_train_ds.adjust_to_maximum_length(kwargs["adjust_lengths"])
-        test_ds = unchunked_test_ds.adjust_to_maximum_length(kwargs["adjust_lengths"])
     else:
         train_ds = unchunked_train_ds
         test_ds = unchunked_test_ds
