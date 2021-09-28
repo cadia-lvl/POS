@@ -32,8 +32,8 @@ See [releases](https://github.com/cadia-lvl/POS/releases)
 To use a pretrained model follow the instructions below.
 
 ```
-# Using v3.0.0 - consider using the latest version: [releases](https://github.com/cadia-lvl/POS/releases)
-pip install git+https://github.com/cadia-lvl/POS.git@v3.0.0
+# Using v3.1.0 - consider using the latest version: [releases](https://github.com/cadia-lvl/POS/releases)
+pip install git+https://github.com/cadia-lvl/POS.git@v3.1.0
 ```
 The models will be downloaded automatically when needed. The models are stored in `~/.cache/torch/hub`, for more information see [Torch hub documentation](https://pytorch.org/docs/stable/hub.html)
 
@@ -42,9 +42,10 @@ Instructions for further development can be found in [Contributing](#Contributin
 # Running the models
 The models expect input to be tokenized and a tokenizer is not bundled with this package. We reccomend [tokenizer](https://github.com/mideind/Tokenizer) version 2.0+.
 
-There are two pretrained models available.
+There are three pretrained models available.
 - A small PoS tagger: `pos tag example.txt tagged.txt`
 - A large PoS tagger: `pos tag-large example.txt tagged.txt`
+- A small lemmatzier : `pos lemma example.txt tagged.txt`
 
 Below is a table with some rough numbers (they are dependant on hardware and text domain).
 
@@ -52,10 +53,12 @@ Below is a table with some rough numbers (they are dependant on hardware and tex
 |-----------|---------------------|------------|-----------|-----------|
 | PoS small | ~96.7%              | ~60MB      | 360       | 10000     |
 | PoS large | ~97.8%              | ~425MB     | 20        | 1100      |
+| Lemmatizer small | ~98.3%              | ~72MB      | 360       | 10000     |
 
 ## Note
 - The models are currently not trained on "noisy" text, thus they might not preform as well on text which is far from the data in MIM-Gold.
 - The `batch_size` parameter works best with GPUs.
+- The accuracy of the lemmatizer is acceptable on MIM-GOLD but it does not generalize well and errors returned by the model are sometimes hard to accept. We rather recommend using Nefnir as a main lemmatizer with a fallback to the neural Lemmatizer.
 
 ## Command line usage
 Note that the input and output should be paths (i.e. not stdin or stdout).
@@ -159,6 +162,11 @@ kröfu   nveþ
 
 Halldór nken-s
 Laxness nken-s
+```
+
+And then adding the lemmas:
+```
+pos lemma example_tagged.txt
 ```
 For additional flags and further details see `pos tag --help`
 

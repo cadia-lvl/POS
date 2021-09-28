@@ -439,7 +439,7 @@ def lemma(data_in, output, device, batch_size, force_reload, force_download):
         force_download=force_download,
     )
     log.info("Reading dataset")
-    ds = FieldedDataset.from_file(data_in, fields=(Fields.Tokens, Fields.Tags))
+    ds = FieldedDataset.from_file(data_in, fields=(Fields.Tokens, Fields.GoldTags))
     predicted_tags = model.lemma_bulk(dataset=ds, batch_size=batch_size)
     ds = ds.add_field(predicted_tags, Fields.Lemmas)
     log.info("Writing results")
