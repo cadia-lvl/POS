@@ -45,7 +45,7 @@ def _get_model_location(model_dir_or_url: str, model_name: str, force_download: 
     return model_dir
 
 
-def lemma(model_dir_or_url="http://localhost:8000/lemma.tar.gz", device="cpu", force_download=False, *args, **kwargs):
+def lemma(model_dir_or_url="https://repository.clarin.is/repository/xmlui/bitstream/handle/20.500.12537/134/lemmatizer.tar.gz", device="cpu", force_download=False, *args, **kwargs):
     """
     Lemmatizer for Icelandic.
 
