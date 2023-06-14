@@ -240,14 +240,16 @@ def run_epochs(
 def write_accuracies(module_name, accuracies: Dict[str, float], epoch):
     """Write accuracies to Tensorboard and log."""
     for accuracy_name, accuracy in accuracies.items():
-        wandb.log({f"Accuracy/{module_name}/{accuracy_name}": accuracy, "epoch": epoch}, step=epoch)
+        if wandb.run is not None:
+            wandb.log({f"Accuracy/{module_name}/{accuracy_name}": accuracy, "epoch": epoch}, step=epoch)
         log.info(f"Epoch: {epoch}, Accuracy/{module_name}/{accuracy_name}: {accuracy}")
 
 
 def write_losses(train_val, losses, epoch):
     """Write losses to Tensorboard and log."""
     for module_name, loss in losses.items():
-        wandb.log({f"Loss/{train_val}/{module_name}": loss, "epoch": epoch}, step=epoch)
+        if wandb.run is not None:
+            wandb.log({f"Loss/{train_val}/{module_name}": loss, "epoch": epoch}, step=epoch)
         log.info(f"Epoch: {epoch}, Loss/{train_val}/{module_name}: {loss}")
 
 

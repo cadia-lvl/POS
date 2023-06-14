@@ -13,6 +13,7 @@ def test_train_tagger(decoders, encoders, data_loader, kwargs, tagger_evaluator,
     evaluators = {Modules.Tagger: tagger_evaluator, Modules.Lemmatizer: lemma_evaluator}
 
     output_dir = pathlib.Path(kwargs["output_dir"])
+    output_dir.mkdir(exist_ok=True, parents=True)
 
     # Start the training
     run_epochs(

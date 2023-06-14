@@ -56,7 +56,7 @@ class CharacterDecoder(interface.Decoder):
         characters_encoder: CharacterEmbedding,
         characters_to_tokens_encoder: CharacterAsWordEmbedding,
         tag_encoder: interface.Encoder,
-        context_encoder: Optional[interface.Encoder],
+        context_encoder: Optional[interface.Encoder]=None,
         num_layers=1,
         char_rnn_input_dim=0,
         attention_dim=0,
