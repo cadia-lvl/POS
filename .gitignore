@@ -3,6 +3,7 @@
 __pycache__/
 .pytest_cache/
 .venv/
+venv/
 .ipynb_checkpoints/
 data/raw/*
 data/pred/*
