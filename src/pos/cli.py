@@ -11,7 +11,10 @@ from typing import Dict
 
 import click
 import torch
-import wandb
+try:
+    import wandb
+except ImportError:
+    wandb = None
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerFast
 
@@ -231,7 +234,8 @@ def train_and_tag(**kwargs):
     test_file: Same format as training_files. Used to evaluate the model.
     output_dir: The directory to write out model and results.
     """
-    wandb.init(project="pos-redo", entity="haukurp", config=kwargs, name=kwargs.get("run_name", None))
+    if wandb is not None:
+        wandb.init(project="pos-redo", entity="haukurp", config=kwargs, name=kwargs.get("run_name", None))
     log.info(kwargs)
     set_seed()
     set_device(gpu_flag=kwargs["gpu"])
@@ -261,7 +265,8 @@ def train_and_tag(**kwargs):
         test_ds = unchunked_test_ds
     # Train a model
     print_model(model)
-    wandb.watch(model)
+    if (wandb is not None) and (wandb.run is not None):
+        wandb.watch(model)
     model.to(core.device)
     if kwargs["lemmatizer_state_dict"]:
         model.load_state_dict(torch.load(kwargs["lemmatizer_state_dict"], map_location=core.device), strict=False)
