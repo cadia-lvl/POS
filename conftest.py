@@ -40,7 +40,7 @@ def pretrained_tagger(request):
         pytest.skip("No --tagger given")
     else:
         return pos.Tagger(
-            model_file=pretrained_tagger_path,
+            model_dir=pretrained_tagger_path,
             device="cpu",
         )
 

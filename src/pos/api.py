@@ -23,7 +23,7 @@ class Tagger:
     """A Tagger is the interface towards a POS tagger model.
 
     Args:
-        model_path: Path to the "tagger.pt".
+        model_dir: Path to the directory containing "tagger.pt".
         device: The (computational) device to use. Either "cpu" for CPU or "cuda:x" for GPU. X is an integer from 0 and up and refers to which GPU to use.
     """
 
