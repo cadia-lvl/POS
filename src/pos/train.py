@@ -11,7 +11,10 @@ from datetime import datetime
 from typing import Any, Callable, Dict, Tuple
 
 import torch
-import wandb
+try:
+    import wandb
+except ImportError:
+    wandb = None
 from torch import Tensor, log_softmax, no_grad, numel, stack, zeros_like
 from torch.nn import CrossEntropyLoss, Module
 from torch.nn.utils import clip_grad_norm_
@@ -240,7 +243,7 @@ def run_epochs(
 def write_accuracies(module_name, accuracies: Dict[str, float], epoch):
     """Write accuracies to Tensorboard and log."""
     for accuracy_name, accuracy in accuracies.items():
-        if wandb.run is not None:
+        if (wandb is not None) and (wandb.run is not None):
             wandb.log({f"Accuracy/{module_name}/{accuracy_name}": accuracy, "epoch": epoch}, step=epoch)
         log.info(f"Epoch: {epoch}, Accuracy/{module_name}/{accuracy_name}: {accuracy}")
 
@@ -248,7 +251,7 @@ def write_accuracies(module_name, accuracies: Dict[str, float], epoch):
 def write_losses(train_val, losses, epoch):
     """Write losses to Tensorboard and log."""
     for module_name, loss in losses.items():
-        if wandb.run is not None:
+        if (wandb is not None) and (wandb.run is not None):
             wandb.log({f"Loss/{train_val}/{module_name}": loss, "epoch": epoch}, step=epoch)
         log.info(f"Epoch: {epoch}, Loss/{train_val}/{module_name}: {loss}")
 
